@@ -181,17 +181,24 @@ const publicKey = (request: Request) => {
 
 /**
  * Drawing a dashboard is the most expensive thing this service does, so public pages come
- * from the edge cache. Only successful responses are cached, so publishing shows at once.
+ * from the edge cache. Only pages with data are cached, so publishing and a first upload
+ * show at once.
  * The limit applies to cache misses, by address and page: GitHub's image proxy fetches
  * everyone's dashboards from a few addresses, and must not be blocked for that.
  */
 async function cachedPublic(request: Request, deps: Deps, render: () => Promise<Response>): Promise<Response> {
   const key = publicKey(request);
   const hit = await deps.cache?.match(key);
-  if (hit) return hit;
+  if (hit) {
+    // Cloudflare raises the lifetime on what it stores to the zone's browser setting, which
+    // would keep a page in browsers for hours after it was made private.
+    const response = new Response(hit.body, hit);
+    response.headers.set('cache-control', PUBLIC_CACHE);
+    return response;
+  }
   if (deps.allow && !(await deps.allow('public', `${clientIp(request)}:${new URL(request.url).pathname.toLowerCase()}`))) return tooMany();
   const response = await render();
-  if (response.status === 200 && deps.cache) deps.waitUntil(deps.cache.put(key, response.clone()));
+  if (deps.cache && response.headers.get('cache-control') === PUBLIC_CACHE) deps.waitUntil(deps.cache.put(key, response.clone()));
   return response;
 }
 
@@ -221,7 +228,7 @@ async function serveDashboardSvg(login: string, deps: Deps): Promise<Response> {
   return new Response(renderDashboard(metrics), {
     headers: {
       'content-type': 'image/svg+xml; charset=utf-8',
-      'cache-control': PUBLIC_CACHE,
+      'cache-control': hasData(metrics) ? PUBLIC_CACHE : 'no-store',
       'content-security-policy': "default-src 'none'; style-src 'unsafe-inline'",
       'x-content-type-options': 'nosniff',
     },
@@ -236,27 +243,28 @@ async function serveCard(login: string, key: string, deps: Deps): Promise<Respon
   const card = buildCards(metrics).find((item: Card) => item.key === key);
   if (!card) return notFound();
   return new Response(cardContent(card, metrics.generatedDate), {
-    headers: { 'content-type': 'text/plain; charset=utf-8', 'cache-control': PUBLIC_CACHE, 'x-content-type-options': 'nosniff' },
+    headers: { 'content-type': 'text/plain; charset=utf-8', 'cache-control': hasData(metrics) ? PUBLIC_CACHE : 'no-store', 'x-content-type-options': 'nosniff' },
   });
 }
 
-async function renderProfile(login: string, request: Request, deps: Deps, viewer: UserRow | null, headers: Record<string, string>): Promise<Response> {
+async function renderProfile(login: string, request: Request, deps: Deps, viewer: UserRow | null): Promise<Response> {
   const user = await publicProfile(login, deps);
   if (!user) return html(errorPage(404, 'This profile is private or does not exist.', viewer), 404);
   const { metrics } = await buildMetrics(user, deps);
   const origin = new URL(request.url).origin;
-  return html(profilePage(user, renderDashboard(metrics), buildCards(metrics), origin, viewer), 200, headers);
+  // The page names whoever is signed in, so only signed-out visits share a cached copy.
+  const shared = !viewer && hasData(metrics);
+  return html(profilePage(user, renderDashboard(metrics), buildCards(metrics), origin, viewer), 200, shared ? { 'cache-control': PUBLIC_CACHE } : {});
 }
 
 async function serveProfile(login: string, request: Request, deps: Deps): Promise<Response> {
-  // The page names whoever is signed in, so only signed-out visits share a cached copy.
   // A cookie alone proves nothing, so it can't be used to skip the cache or the limit.
   if (readCookie(request, SESSION_COOKIE)) {
     if (deps.allow && !(await deps.allow('public', `session:${clientIp(request)}`))) return tooMany();
     const viewer = await viewerFromCookie(request, deps);
-    if (viewer) return renderProfile(login, request, deps, viewer, {});
+    if (viewer) return renderProfile(login, request, deps, viewer);
   }
-  return cachedPublic(request, deps, () => renderProfile(login, request, deps, null, { 'cache-control': PUBLIC_CACHE }));
+  return cachedPublic(request, deps, () => renderProfile(login, request, deps, null));
 }
 
 // Website sign-in.
