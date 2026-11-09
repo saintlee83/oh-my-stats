@@ -652,6 +652,40 @@ test('development shortcuts only apply on this computer', () => {
   for (const url of ['https://ohmystats.dev/v1/config', 'http://localhost.evil.example/']) assert.ok(!isLocalRequest(new Request(url)), url);
 });
 
+test('a profile with no data yet is not cached, so the first upload shows at once', async () => {
+  const cache = fakeCache();
+  const context = app({ cache });
+  const token = await signIn(context);
+  await context.call('/v1/me', api(token, 'PATCH', { public: true }));
+  for (const path of ['/u/octo/dashboard.svg', '/u/octo']) {
+    const empty = await context.call(path);
+    assert.equal(empty.status, 200, path);
+    assert.equal(empty.headers.get('cache-control'), 'no-store', path);
+  }
+  assert.equal(cache.store.size, 0);
+
+  await context.call('/v1/usage', api(token, 'PUT', upload(MACHINE_A)));
+  const full = await context.call('/u/octo/dashboard.svg');
+  assert.equal(full.headers.get('cache-control'), 'public, max-age=300');
+  assert.equal(cache.store.size, 1);
+});
+
+test('a cached page keeps its five minutes, whatever lifetime the edge stored it with', async () => {
+  const cache = fakeCache();
+  const { context } = await published({ cache });
+  const first = await (await context.call('/u/octo/dashboard.svg')).text();
+  const key = `${ORIGIN}/u/octo/dashboard.svg`;
+  const stored = cache.store.get(key) as Response;
+  const headers = new Headers(stored.headers);
+  headers.set('cache-control', 'public, max-age=14400');
+  cache.store.set(key, new Response(first, { headers }));
+
+  const hit = await context.call('/u/octo/dashboard.svg');
+  assert.equal(hit.headers.get('cache-control'), 'public, max-age=300');
+  assert.equal(hit.headers.get('content-type'), 'image/svg+xml; charset=utf-8');
+  assert.equal(await hit.text(), first);
+});
+
 test('plain http is sent to https, except on this computer', async () => {
   const { deps } = app();
   const redirected = await handle(new Request('http://ohmystats.dev/v1/usage?x=1', { method: 'PUT', body: '{}' }), deps);
