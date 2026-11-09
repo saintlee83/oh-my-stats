@@ -80,7 +80,7 @@ Run `oms preview` to see the exact usage data. GitHub stats are aggregated on yo
 
 **Co-authors:** AI assistants are named. Bots are too, except a custom bot in a private repo, because its name can include an organization's. People are named only if they have a GitHub account and co-authored in a public repo, counting those public commits only. Everyone else is an anonymous count. Emails are never uploaded.
 
-**Your data:** removing a machine deletes its data and signs it out. Deleting your account removes everything.
+**Your data:** removing a machine deletes its data and signs it out. Deleting your account removes everything on the server, after you confirm with your username. Each machine keeps its local history, so `oms login` and `oms sync` bring your usage back.
 
 ## How machines combine
 
