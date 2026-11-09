@@ -23,7 +23,12 @@ pub struct Config {
     pub max_commit_lines: Option<i64>,
     pub max_file_lines: Option<i64>,
     pub max_requests_per_run: Option<usize>,
+    /// How often to upload. Usage is recorded locally all the time regardless.
+    pub upload_interval_minutes: Option<i64>,
 }
+
+const DEFAULT_UPLOAD_MINUTES: i64 = 24 * 60;
+const MIN_UPLOAD_MINUTES: i64 = 5;
 
 pub fn home_dir() -> Result<PathBuf> {
     std::env::var_os("HOME").map(PathBuf::from).context("HOME is not set")
@@ -66,6 +71,10 @@ impl Config {
         restrict(&temp, 0o600);
         fs::rename(&temp, dir.join("config.json"))?;
         Ok(())
+    }
+
+    pub fn upload_interval_secs(&self) -> i64 {
+        self.upload_interval_minutes.unwrap_or(DEFAULT_UPLOAD_MINUTES).max(MIN_UPLOAD_MINUTES) * 60
     }
 
     pub fn timezone_name(&self) -> String {

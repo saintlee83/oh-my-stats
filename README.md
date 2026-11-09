@@ -2,7 +2,7 @@
 
 The ultimate developer stats platform, at [ohmystats.dev](https://ohmystats.dev). Sign in with GitHub, run a small agent on each computer, and see your AI tokens and contributions in one place, with private work included.
 
-- **Continuous:** a background agent reads new log lines as you work, and keeps its own record, so history survives when AI tools delete their logs.
+- **Continuous:** a background agent records usage as you work, and keeps its own record, so history survives when AI tools delete their logs. It uploads once a day, and `oms sync` uploads right away.
 - **Multi-machine:** every computer signs in to the same account, and their numbers are combined correctly.
 - **Real numbers:** GitHub's contribution API hides private work, so commits are counted by walking each repository instead.
 - **Private by default:** your profile stays hidden until you publish it, and only totals ever leave your machine.
@@ -35,6 +35,8 @@ oms publish           # optional: make your profile public
 
 Repeat `oms login`, `oms sync` and `oms service install` on each computer.
 
+The agent reads new log lines every 5 minutes and uploads once a day, so your numbers can be up to a day behind. A machine that was asleep or offline catches up when it comes back. Run `oms sync` to update right away, or change `uploadIntervalMinutes`.
+
 GitHub stats need read access to your repositories, and that access stays on your machine. The agent uses your [GitHub CLI](https://cli.github.com) login if you have one, after `gh auth refresh -s repo,read:org`. Otherwise, run `oms github-login`.
 
 Once published, add the dashboard to your GitHub profile README:
@@ -49,7 +51,7 @@ Once published, add the dashboard to your GitHub profile README:
 oms login                 Sign this machine in with GitHub
 oms logout                Sign this machine out, keeping its local history
 oms status                Show sign-in, totals and machines
-oms sync                  Read new logs and upload what changed, once
+oms sync                  Read new logs and upload what changed, right now
 oms sync --github         Also collect GitHub stats now
 oms daemon                Keep tracking in the foreground
 oms service install       Run in the background, starting at login (launchd or systemd)
@@ -74,7 +76,7 @@ Run `oms preview` to see the exact usage data. GitHub stats are aggregated on yo
 
 **Sign-in:** the server only ever receives a `read:user` token, which proves who you are. It uses that token once and doesn't store it, and it only accepts tokens issued to its own OAuth App. It stores a hash of its own session tokens.
 
-**Publishing:** a private profile looks the same as one that doesn't exist. Publishing shows your totals per model and per day. Machine names are never public.
+**Publishing:** a private profile looks the same as one that doesn't exist. Publishing shows your totals per model and per day. Machine names are never public. Public pages are cached for 5 minutes, so after you unpublish, a copy can stay visible for up to that long.
 
 **Co-authors:** AI assistants and bots are named. People are named only if they have a GitHub account and co-authored in a public repo, counting those public commits only. Everyone else is an anonymous count. Emails are never uploaded.
 
@@ -121,7 +123,8 @@ Then point agents at it with `oms login --server https://your-server`.
 - **Default branches only.** Commits still on other branches aren't walked, which matches how GitHub counts contributions. Your GitHub graph can show more than can be itemized, for example work in repositories that were later deleted.
 - **Churn reads the first 300 files of a commit**, and treats a commit over 20,000 lines as a bulk import. Change this with `maxCommitLines` in `~/.oh-my-stats/config.json`.
 - **Windows** isn't supported yet. The agent is tested on macOS and Linux.
-- **No rate limiting** of its own yet on the server, beyond requiring a valid sign-in to upload.
+- **Uploads are capped** at 20,000 changed rows per account per day. Anything over that goes through the next day.
+- **Rate limits are approximate.** They use Cloudflare's rate limiting, which counts per location and can briefly let requests through above the limit.
 
 ## Configuration
 
@@ -130,6 +133,7 @@ Then point agents at it with `oms login --server https://your-server`.
 | Key | Default | Meaning |
 |---|---|---|
 | `timezone` | System | IANA zone for days and the rhythm chart |
+| `uploadIntervalMinutes` | `1440` | How often to upload. Usage is recorded locally all the time. The minimum is 5 |
 | `machineName` | Hostname | The name reported for a new machine. Rename it on your dashboard afterwards |
 | `excludeLanguages` | `[]` | For example `["Jupyter Notebook"]` |
 | `namedCoauthors` | `[]` | Logins to name on the co-author card, including private commits. Use this for people who've agreed |

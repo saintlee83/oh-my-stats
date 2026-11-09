@@ -9,6 +9,11 @@ export default {
       allowAnyGitHubToken: env.ALLOW_ANY_GITHUB_TOKEN === 'true',
       fetch: (input, init) => fetch(input, init),
       waitUntil: (work) => ctx.waitUntil(work),
+      cache: caches.default,
+      allow: async (kind, key) => {
+        const limiter = kind === 'strict' ? env.RATE_LIMIT_STRICT : env.RATE_LIMIT_PUBLIC;
+        return (await limiter.limit({ key })).success;
+      },
       now: () => new Date(),
     });
   },

@@ -391,6 +391,204 @@ test('the install steps name the server, except on the hosted one the agent alre
   assert.ok(!text.includes('--server'));
 });
 
+function fakeCache() {
+  const store = new Map<string, Response>();
+  return {
+    store,
+    match: async (request: Request) => store.get(request.url)?.clone(),
+    put: async (request: Request, response: Response) => void store.set(request.url, response),
+    delete: async (request: Request) => store.delete(request.url),
+  };
+}
+
+function countingDb() {
+  const db = testDb();
+  const sql: string[] = [];
+  return {
+    sql,
+    raw: db.raw,
+    batch: db.batch,
+    prepare: (text: string) => {
+      sql.push(text);
+      return db.prepare(text);
+    },
+  };
+}
+
+async function published(overrides: Partial<Deps> = {}) {
+  const context = app(overrides);
+  const token = await signIn(context);
+  await context.call('/v1/usage', api(token, 'PUT', upload(MACHINE_A)));
+  await context.call('/v1/me', api(token, 'PATCH', { public: true }));
+  return { context, token };
+}
+
+test('public pages come from the cache, however the address is written', async () => {
+  const db = countingDb();
+  const { context } = await published({ db, cache: fakeCache() });
+  const first = await (await context.call('/u/octo/dashboard.svg')).text();
+  const reads = db.sql.length;
+  for (const path of ['/u/octo/dashboard.svg', '/u/OCTO/dashboard.svg', '/u/octo/dashboard.svg?v=1']) {
+    assert.equal(await (await context.call(path)).text(), first, path);
+  }
+  assert.equal(db.sql.length, reads, 'the database is not touched');
+});
+
+test('a missing or private profile is never cached, so publishing shows at once', async () => {
+  const cache = fakeCache();
+  const context = app({ cache });
+  const token = await signIn(context);
+  await context.call('/v1/usage', api(token, 'PUT', upload(MACHINE_A)));
+  assert.equal((await context.call('/u/octo/dashboard.svg')).status, 404);
+  assert.equal(cache.store.size, 0);
+  await context.call('/v1/me', api(token, 'PATCH', { public: true }));
+  assert.equal((await context.call('/u/octo/dashboard.svg')).status, 200);
+});
+
+test('making a profile private removes it from the cache', async () => {
+  const cache = fakeCache();
+  const { context, token } = await published({ cache });
+  for (const path of ['/u/octo', '/u/octo/dashboard.svg', '/u/octo/cards/tokens.txt']) {
+    assert.equal((await context.call(path)).status, 200, path);
+  }
+  assert.equal(cache.store.size, 3);
+  await context.call('/v1/me', api(token, 'PATCH', { public: false }));
+  assert.equal(cache.store.size, 0);
+  for (const path of ['/u/octo', '/u/octo/dashboard.svg', '/u/octo/cards/tokens.txt']) {
+    assert.equal((await context.call(path)).status, 404, path);
+  }
+});
+
+test('deleting an account removes its profile from the cache', async () => {
+  const cache = fakeCache();
+  const { context } = await published({ cache });
+  await context.call('/u/octo/dashboard.svg');
+  const session = await webLogin(context);
+  await context.call('/me/delete', webPost(session));
+  assert.equal(cache.store.size, 0);
+  assert.equal((await context.call('/u/octo/dashboard.svg')).status, 404);
+});
+
+test('a signed-in visitor never gets or leaves a shared copy of a page', async () => {
+  const cache = fakeCache();
+  const { context } = await published({ cache });
+  const session = await webLogin(context);
+  const page = await context.call('/u/octo', { headers: { cookie: session } });
+  assert.equal(page.status, 200);
+  assert.equal(page.headers.get('cache-control'), 'no-store');
+  assert.equal(cache.store.size, 0);
+  const anonymous = await context.call('/u/octo');
+  assert.equal(anonymous.headers.get('cache-control'), 'public, max-age=300');
+  assert.ok(!(await anonymous.text()).includes('href="/me"'), 'the shared copy names nobody');
+});
+
+test('limits apply to uncached pages, by address and page, and to sign-in and uploads', async () => {
+  const seen: [string, string][] = [];
+  let open = true;
+  const cache = fakeCache();
+  const { context, token } = await published({
+    cache,
+    allow: async (kind, key) => {
+      seen.push([kind, key]);
+      return open;
+    },
+  });
+  const from = (ip: string): RequestInit => ({ headers: { 'cf-connecting-ip': ip } });
+  await context.call('/u/octo/dashboard.svg', from('203.0.113.9'));
+  assert.deepEqual(seen.at(-1), ['public', '203.0.113.9:/u/octo/dashboard.svg']);
+
+  open = false;
+  assert.equal((await context.call('/u/octo/dashboard.svg', from('203.0.113.9'))).status, 200, 'a cached page stays available');
+  const blocked = await context.call('/u/octo/cards/tokens.txt', from('203.0.113.9'));
+  assert.equal(blocked.status, 429);
+  assert.equal(blocked.headers.get('retry-after'), '60');
+  assert.equal((await context.call('/login', from('203.0.113.9'))).status, 429);
+  assert.equal((await context.call('/v1/auth/token', api(null, 'POST', { githubToken: 'gh-token', machine: machine(MACHINE_B) }))).status, 429);
+  assert.equal((await context.call('/v1/usage', api(token, 'PUT', upload(MACHINE_A)))).status, 429);
+  assert.deepEqual(seen.at(-1), ['strict', 'agent:1'], 'uploads have the stricter limit');
+  assert.equal((await context.call('/healthz')).status, 200);
+});
+
+test('an upload writes only the rows that changed', async () => {
+  const db = countingDb();
+  const context = app({ db });
+  const token = await signIn(context);
+  const writes = () => db.sql.filter((text) => /^\s*(INSERT|DELETE|UPDATE)[^]*usage_daily/.test(text)).length;
+  const send = (days: unknown) => context.call('/v1/usage', api(token, 'PUT', { ...upload(MACHINE_A), days }));
+  const two = { 'claude/a': [1, 1, 1, 1, 1], 'codex/b': [2, 2, 2, 2, 2] };
+
+  await send({ '2026-11-07': two, '2026-11-08': two });
+  assert.equal(writes(), 4, 'first upload: every row');
+  await send({ '2026-11-07': two, '2026-11-08': two });
+  assert.equal(writes(), 4, 'same again: nothing');
+  await send({ '2026-11-08': { ...two, 'claude/a': [9, 1, 1, 1, 2] } });
+  assert.equal(writes(), 5, 'one changed row');
+  await send({ '2026-11-08': { 'claude/a': [9, 1, 1, 1, 2] } });
+  assert.equal(writes(), 6, 'a removed model is deleted');
+
+  const rows = db.raw.prepare('SELECT day, model, input FROM usage_daily ORDER BY day, model').all();
+  assert.deepEqual(rows.map((row) => `${row.day} ${row.model} ${row.input}`), ['2026-11-07 a 1', '2026-11-07 b 2', '2026-11-08 a 9']);
+});
+
+test('a made-up session cookie gets the shared copy, and still counts against the limit', async () => {
+  const keys: string[] = [];
+  let open = true;
+  const db = countingDb();
+  const { context } = await published({
+    db,
+    cache: fakeCache(),
+    allow: async (_kind, key) => {
+      keys.push(key);
+      return open;
+    },
+  });
+  assert.equal((await context.call('/u/octo')).status, 200);
+  const draws = () => db.sql.filter((text) => text.includes('FROM usage_daily')).length;
+  const before = draws();
+  const forged: RequestInit = { headers: { cookie: 'oms_session=made-up', 'cf-connecting-ip': '203.0.113.9' } };
+  const page = await context.call('/u/octo', forged);
+  assert.equal(page.headers.get('cache-control'), 'public, max-age=300');
+  assert.equal(draws(), before, 'the page is not drawn again');
+  assert.ok(keys.includes('session:203.0.113.9'));
+  open = false;
+  assert.equal((await context.call('/u/octo', forged)).status, 429);
+});
+
+test('uploads with impossible dates or too many rows are refused', async () => {
+  const context = app();
+  const token = await signIn(context);
+  const put = (body: object) => context.call('/v1/usage', api(token, 'PUT', { ...upload(MACHINE_A), ...body }));
+  for (const day of ['0001-01-01', '2019-12-31', '2026-00-10', '2026-13-01', '2026-02-32']) {
+    assert.equal((await put({ days: { [day]: { 'claude/a': [1, 1, 1, 1, 1] } } })).status, 400, day);
+  }
+  const models = (count: number) => Object.fromEntries(Array.from({ length: count }, (_, index) => [`claude/m${index}`, [1, 1, 1, 1, 1]]));
+  assert.equal((await put({ days: { '2026-11-08': models(201) } })).status, 400);
+  assert.equal((await put({ days: { '2026-11-08': models(200) } })).status, 200);
+  const tools = Object.fromEntries(Array.from({ length: 21 }, (_, index) => [`tool${index}`, { scope: 'machine', total: 1 }]));
+  assert.equal((await put({ totals: tools })).status, 400);
+});
+
+test('one account can write only so many rows a day, and what it stored stays intact', async () => {
+  const context = app();
+  const token = await signIn(context);
+  const day = (index: number) => new Date(Date.UTC(2026, 6, 1) + index * 86_400_000).toISOString().slice(0, 10);
+  const full = Object.fromEntries(
+    Array.from({ length: 100 }, (_, index) => [day(index), Object.fromEntries(Array.from({ length: 200 }, (_, model) => [`claude/m${model}`, [1, 1, 1, 1, 1]]))]),
+  );
+  const put = (days: object) => context.call('/v1/usage', api(token, 'PUT', { ...upload(MACHINE_A), days }));
+  const count = () => (context.deps.db as ReturnType<typeof testDb>).raw.prepare('SELECT COUNT(*) AS rows, MAX(input) AS most FROM usage_daily').get();
+
+  assert.equal((await put(full)).status, 200, 'exactly the budget');
+  assert.equal((await put(full)).status, 200, 'unchanged rows cost nothing');
+  const changed = { [day(0)]: { ...full[day(0)], 'claude/m0': [9, 1, 1, 1, 1] } };
+  assert.equal((await put(changed)).status, 429);
+  assert.deepEqual({ ...count() }, { rows: 20_000, most: 1 });
+
+  context.setTime('2026-11-10T05:00:00Z');
+  assert.equal((await put(changed)).status, 200, 'a new day, a new budget');
+  assert.deepEqual({ ...count() }, { rows: 20_000, most: 9 });
+});
+
 test('plain http is sent to https, except on this computer', async () => {
   const { deps } = app();
   const redirected = await handle(new Request('http://ohmystats.dev/v1/usage?x=1', { method: 'PUT', body: '{}' }), deps);

@@ -43,7 +43,7 @@ enum Commands {
     Logout,
     /// Show sign-in, totals and machines
     Status,
-    /// Read new logs and upload what changed, once
+    /// Read new logs and upload what changed, right now
     Sync {
         /// Collect GitHub stats now, even if they aren't due
         #[arg(long)]
@@ -51,8 +51,8 @@ enum Commands {
     },
     /// Keep tracking in the foreground. `oms service install` runs this for you
     Daemon {
-        /// Seconds between checks
-        #[arg(long, default_value_t = 60)]
+        /// Seconds between reading new log lines
+        #[arg(long, default_value_t = 300)]
         interval: u64,
     },
     /// Manage the background service

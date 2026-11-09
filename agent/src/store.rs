@@ -61,7 +61,7 @@ impl Store {
     }
 
     /// Saves a file's new position together with its events, so a crash can't skip or
-    /// half-apply a read.
+    /// half-apply a read. Returns how many events were new or more complete than before.
     pub fn save_read(
         &mut self,
         path_hash: &str,
@@ -71,8 +71,9 @@ impl Store {
         state: &CodexState,
         events: &[(UsageEvent, String)],
         first_model: Option<&str>,
-    ) -> Result<()> {
+    ) -> Result<usize> {
         let tx = self.conn.transaction()?;
+        let mut changed = 0;
         {
             let mut insert = tx.prepare_cached(
                 "INSERT INTO events (key, file, tool, model, day, input, output, cache_read, cache_write)
@@ -85,7 +86,7 @@ impl Store {
             for (event, day) in events {
                 // Keys come from response ids; hashing keeps the table small and opaque.
                 let key = &sha256_hex(&event.key)[..24];
-                insert.execute(params![
+                changed += insert.execute(params![
                     key,
                     path_hash,
                     event.tool,
@@ -108,7 +109,7 @@ impl Store {
             )?;
         }
         tx.commit()?;
-        Ok(())
+        Ok(changed)
     }
 
     pub fn rollup(&self) -> Result<Rollup> {

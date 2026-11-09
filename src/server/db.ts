@@ -143,22 +143,58 @@ export async function deleteMachine(db: Db, userId: string, machineId: string): 
   ]);
 }
 
+/** Far beyond any real history, and low enough that one account can't run up the bill. */
+const MAX_ROWS_PER_ACCOUNT_PER_DAY = 20_000;
+
+export class OverQuota extends Error {}
+
 /** Each uploaded day replaces that machine's rows for the day, so a retried upload changes nothing. */
 export async function saveUsage(db: Db, userId: string, upload: UsageUpload, now: string): Promise<void> {
   const machineId = upload.machine.id;
   const statements: Statement[] = [];
+
+  // Rows written are the main cost of this service, so only what changed is written.
+  const days = Object.keys(upload.days).sort();
+  const existing = new Map<string, UsageTuple>();
+  if (days.length) {
+    const { results } = await db
+      .prepare(
+        'SELECT day, tool, model, input, output, cache_read, cache_write, messages FROM usage_daily WHERE user_id = ? AND machine_id = ? AND day >= ? AND day <= ?',
+      )
+      .bind(userId, machineId, days[0], days[days.length - 1])
+      .all<{ day: string; tool: string; model: string; input: number; output: number; cache_read: number; cache_write: number; messages: number }>();
+    for (const row of results) {
+      if (row.day in upload.days) {
+        existing.set(`${row.day}|${row.tool}/${row.model}`, [row.input, row.output, row.cache_read, row.cache_write, row.messages]);
+      }
+    }
+  }
   for (const [day, rows] of Object.entries(upload.days)) {
-    statements.push(db.prepare('DELETE FROM usage_daily WHERE user_id = ? AND machine_id = ? AND day = ?').bind(userId, machineId, day));
     for (const [key, row] of Object.entries(rows)) {
+      const known = existing.get(`${day}|${key}`);
+      existing.delete(`${day}|${key}`);
+      if (known?.every((value, index) => value === row[index])) continue;
       const slash = key.indexOf('/');
       statements.push(
         db
           .prepare(
-            'INSERT INTO usage_daily (user_id, machine_id, day, tool, model, input, output, cache_read, cache_write, messages) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)',
+            `INSERT INTO usage_daily (user_id, machine_id, day, tool, model, input, output, cache_read, cache_write, messages) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+             ON CONFLICT (user_id, machine_id, day, tool, model) DO UPDATE SET input = excluded.input, output = excluded.output,
+               cache_read = excluded.cache_read, cache_write = excluded.cache_write, messages = excluded.messages`,
           )
           .bind(userId, machineId, day, key.slice(0, slash), key.slice(slash + 1), row[0], row[1], row[2], row[3], row[4]),
       );
     }
+  }
+  // Whatever is left in an uploaded day is gone from that machine's record.
+  for (const stale of existing.keys()) {
+    const [day, key] = stale.split('|');
+    const slash = key.indexOf('/');
+    statements.push(
+      db
+        .prepare('DELETE FROM usage_daily WHERE user_id = ? AND machine_id = ? AND day = ? AND tool = ? AND model = ?')
+        .bind(userId, machineId, day, key.slice(0, slash), key.slice(slash + 1)),
+    );
   }
   for (const [tool, figure] of Object.entries(upload.totals)) {
     statements.push(
@@ -170,8 +206,17 @@ export async function saveUsage(db: Db, userId: string, upload: UsageUpload, now
         .bind(userId, machineId, tool, JSON.stringify(figure), now),
     );
   }
+  const rows = statements.length;
+  if (rows) {
+    const today = now.slice(0, 10);
+    const used = await db.prepare('SELECT upload_rows FROM users WHERE id = ? AND upload_day = ?').bind(userId, today).first<{ upload_rows: number }>();
+    if ((used?.upload_rows ?? 0) + rows > MAX_ROWS_PER_ACCOUNT_PER_DAY) throw new OverQuota('Too much uploaded today. The rest will go through tomorrow.');
+    statements.push(
+      db.prepare('UPDATE users SET upload_rows = CASE WHEN upload_day = ? THEN upload_rows + ? ELSE ? END, upload_day = ? WHERE id = ?').bind(today, rows, rows, today, userId),
+    );
+  }
   if (upload.timezone) {
-    statements.push(db.prepare('UPDATE users SET timezone = ? WHERE id = ?').bind(upload.timezone, userId));
+    statements.push(db.prepare('UPDATE users SET timezone = ? WHERE id = ? AND timezone <> ?').bind(upload.timezone, userId, upload.timezone));
   }
   if (statements.length) await db.batch(statements);
 }

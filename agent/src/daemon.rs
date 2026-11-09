@@ -13,7 +13,7 @@ use crate::config::{Config, state_dir};
 use crate::github;
 use crate::scan::default_roots;
 use crate::store::Store;
-use crate::sync::{SyncError, now_secs, run_once, signed_in_api};
+use crate::sync::{SyncError, last_upload, now_secs, run_once, signed_in_api};
 use crate::api::ApiError;
 
 fn log(message: &str) {
@@ -64,7 +64,7 @@ pub fn run(interval_secs: u64) -> Result<()> {
     let mut store = Store::open(&dir.join("agent.db"))?;
     let github_running = Arc::new(AtomicBool::new(false));
     let mut failures = 0u32;
-    log(&format!("Watching for token usage every {interval_secs} seconds."));
+    log(&format!("Recording usage every {interval_secs} seconds; uploading every {} minutes.", Config::load()?.upload_interval_secs() / 60));
 
     loop {
         // Reloaded each time, so `oms login` and settings changes apply without a restart.
@@ -77,14 +77,11 @@ pub fn run(interval_secs: u64) -> Result<()> {
             Ok(api) => match run_once(&mut store, &config, &api, &roots, false) {
                 Ok((report, outcome)) => {
                     failures = 0;
-                    if report.new_events > 0 || outcome.uploads > 0 {
-                        log(&format!(
-                            "{} new responses from {} files; uploaded {} days{}.",
-                            report.new_events,
-                            report.read,
-                            outcome.days,
-                            if outcome.totals_sent { " and lifetime totals" } else { "" }
-                        ));
+                    if report.new_events > 0 {
+                        log(&format!("Recorded {} new responses.", report.new_events));
+                    }
+                    if outcome.uploads > 0 {
+                        log(&format!("Uploaded {} days{}.", outcome.days, if outcome.totals_sent { " and lifetime totals" } else { "" }));
                     }
                     if outcome.collect_github {
                         collect_github_in_background(&github_running);
@@ -113,7 +110,7 @@ pub fn run_once_verbose(force_github: bool) -> Result<()> {
     let started = now_secs();
     let (report, outcome) = run_once(&mut store, &config, &api, &default_roots()?, true)?;
     println!(
-        "Read {} of {} log files: {} responses{}.",
+        "Read {} of {} log files: {} new responses{}.",
         report.read,
         report.files,
         report.new_events,
@@ -142,6 +139,12 @@ pub fn print_status() -> Result<()> {
         return Ok(());
     };
     println!("Server        {}", config.server.as_deref().unwrap_or("?"));
+    let last = last_upload(&store)?;
+    if last > 0 {
+        let hours = (now_secs() - last) as f64 / 3600.0;
+        let next = ((last + config.upload_interval_secs() - now_secs()) as f64 / 3600.0).max(0.0);
+        println!("Uploads       last {hours:.1}h ago, next in {next:.1}h. Run `oms sync` to upload now.");
+    }
     let me = api.get("/v1/me")?;
     println!("Account       @{}", me.get("login").and_then(Value::as_str).unwrap_or("?"));
     let public = me.get("public").and_then(Value::as_bool).unwrap_or(false);

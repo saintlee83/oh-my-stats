@@ -4,7 +4,7 @@ use std::path::{Path, PathBuf};
 use std::time::UNIX_EPOCH;
 
 use anyhow::Result;
-use chrono::{DateTime, Utc};
+use chrono::{DateTime, Datelike, Utc};
 use chrono_tz::Tz;
 
 use crate::config::home_dir;
@@ -64,9 +64,13 @@ pub fn discover(roots: &LogRoots) -> Vec<LogFile> {
     out
 }
 
+/// The server refuses dates from before AI tools existed, so a corrupt timestamp is skipped
+/// here rather than holding up every upload after it.
+const EARLIEST_YEAR: i32 = 2020;
+
 fn day_of(at: &str, tz: Tz) -> Option<String> {
     let time: DateTime<Utc> = at.parse().ok()?;
-    Some(time.with_timezone(&tz).format("%Y-%m-%d").to_string())
+    (time.year() >= EARLIEST_YEAR).then(|| time.with_timezone(&tz).format("%Y-%m-%d").to_string())
 }
 
 /// Hands complete lines to `on_line` and returns how many bytes they took, so a line still
@@ -138,8 +142,7 @@ fn read_file(store: &mut Store, file: &LogFile, path_hash: &str, tz: Tz) -> Resu
             Some((event, day))
         })
         .collect();
-    store.save_read(path_hash, file.size, file.mtime, offset, &state, &with_days, first_model.as_deref())?;
-    Ok(with_days.len())
+    store.save_read(path_hash, file.size, file.mtime, offset, &state, &with_days, first_model.as_deref())
 }
 
 /// Reads only what's new: untouched files cost a `stat`, and a growing one is read from
@@ -207,6 +210,12 @@ mod tests {
     const SEOUL: Tz = chrono_tz::Asia::Seoul;
 
     #[test]
+    fn a_corrupt_old_timestamp_has_no_day() {
+        assert_eq!(day_of("1970-01-01T00:00:00Z", SEOUL), None);
+        assert_eq!(day_of("2026-11-08T23:30:00Z", SEOUL).as_deref(), Some("2026-11-09"));
+    }
+
+    #[test]
     fn days_use_the_local_timezone() {
         let dir = TempDir::new("tz");
         let mut store = temp_store();
@@ -244,6 +253,19 @@ mod tests {
         append(&path, rest);
         assert_eq!(scan(&mut store, &roots(&dir.0), SEOUL).unwrap().new_events, 1);
         assert_eq!(store.event_count().unwrap(), 1);
+    }
+
+    #[test]
+    fn repeated_rows_do_not_count_as_new_responses() {
+        let dir = TempDir::new("repeat");
+        let mut store = temp_store();
+        let path = dir.0.join("claude/p/a.jsonl");
+        append(&path, &row("m1", 5));
+        assert_eq!(scan(&mut store, &roots(&dir.0), SEOUL).unwrap().new_events, 1);
+        append(&path, &(row("m1", 5) + &row("m1", 5)));
+        assert_eq!(scan(&mut store, &roots(&dir.0), SEOUL).unwrap().new_events, 0);
+        append(&path, &row("m1", 9));
+        assert_eq!(scan(&mut store, &roots(&dir.0), SEOUL).unwrap().new_events, 1, "a more complete row does count");
     }
 
     #[test]
