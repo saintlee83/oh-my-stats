@@ -14,7 +14,7 @@
     "traces": { "enabled": true }
   },
   "vars": {
-    "GITHUB_CLIENT_ID": "Ov23li3spZcUMX0L0CiY"
+    "GITHUB_CLIENT_ID": "Iv23li0QBpHa6q9Tf3zI"
   },
   // Approximate, per location. The strict one is for sign-in, which calls GitHub, and uploads, which write.
   "ratelimits": [
