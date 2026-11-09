@@ -10,6 +10,9 @@ use crate::config::{Config, state_dir};
 use crate::machine::machine_info;
 use crate::store::Store;
 
+/// The hosted service. Pass `--server` to use your own.
+pub const DEFAULT_SERVER: &str = "https://ohmystats.dev";
+
 pub fn gh_cli_token() -> Option<String> {
     let output = Command::new("gh").args(["auth", "token"]).stderr(Stdio::null()).output().ok()?;
     let token = String::from_utf8_lossy(&output.stdout).trim().to_string();
@@ -61,7 +64,7 @@ pub fn login(server: Option<&str>, name: Option<&str>, use_gh: bool) -> Result<(
         .map(str::to_string)
         .or_else(|| std::env::var("OMS_SERVER").ok().filter(|value| !value.is_empty()))
         .or_else(|| config.server.clone())
-        .context("Which server? Pass it with `oms login --server https://your-server`.")?;
+        .unwrap_or_else(|| DEFAULT_SERVER.to_string());
     let server = check_server_url(&server).map_err(|message| anyhow!(message))?;
     if let Some(name) = name {
         config.machine_name = Some(name.to_string());

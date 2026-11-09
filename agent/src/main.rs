@@ -29,7 +29,7 @@ struct Cli {
 enum Commands {
     /// Sign this machine in with GitHub
     Login {
-        /// The oh-my-stats server to use
+        /// The server to use, if not the hosted one at ohmystats.dev
         #[arg(long)]
         server: Option<String>,
         /// How this machine appears on your dashboard

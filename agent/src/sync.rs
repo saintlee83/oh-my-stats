@@ -134,7 +134,7 @@ impl std::fmt::Display for SyncError {
 impl std::error::Error for SyncError {}
 
 pub fn signed_in_api(config: &Config) -> Result<Api> {
-    let server = config.server.as_deref().context("Not signed in. Run `oms login --server <url>`.")?;
+    let server = config.server.as_deref().context("Not signed in. Run `oms login`.")?;
     let token = config.token.clone().context("Not signed in. Run `oms login`.")?;
     Ok(Api::new(server, Some(token)))
 }

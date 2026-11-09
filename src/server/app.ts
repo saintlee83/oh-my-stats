@@ -364,8 +364,16 @@ async function route(request: Request, deps: Deps): Promise<Response> {
   return html(errorPage(404, 'Page not found.', await viewerFromCookie(request, deps)), 404);
 }
 
+const LOCAL_HOSTS = new Set(['localhost', '127.0.0.1', '[::1]']);
+
 export async function handle(request: Request, deps: Deps): Promise<Response> {
   try {
+    // Sign-in tokens must not cross the network in the clear. 308 keeps the method and body.
+    const url = new URL(request.url);
+    if (url.protocol === 'http:' && !LOCAL_HOSTS.has(url.hostname)) {
+      url.protocol = 'https:';
+      return new Response(null, { status: 308, headers: { location: url.toString(), 'cache-control': 'no-store' } });
+    }
     return await route(request, deps);
   } catch (error) {
     if (error instanceof BadRequest) return html(errorPage(400, error.message, null), 400);
