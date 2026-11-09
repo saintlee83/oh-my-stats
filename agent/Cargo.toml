@@ -1,0 +1,32 @@
+[package]
+name = "oh-my-stats"
+version = "0.1.0"
+edition = "2024"
+license = "MIT"
+description = "Tracks AI token usage and GitHub contributions continuously, on every machine."
+repository = "https://github.com/saintlee83/oh-my-stats"
+
+[[bin]]
+name = "oms"
+path = "src/main.rs"
+
+[dependencies]
+anyhow = "1"
+chrono = { version = "0.4", default-features = false, features = ["clock", "std"] }
+chrono-tz = "0.10"
+clap = { version = "4", features = ["derive"] }
+iana-time-zone = "0.1"
+regex = "1"
+rusqlite = { version = "0.41", features = ["bundled"] }
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+sha2 = "0.11"
+ureq = { version = "3", features = ["json"] }
+zstd = "0.14"
+
+[profile.release]
+codegen-units = 1
+lto = true
+opt-level = "s"
+panic = "abort"
+strip = true

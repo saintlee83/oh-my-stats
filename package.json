@@ -1,0 +1,29 @@
+{
+  "name": "oh-my-stats",
+  "version": "0.1.0",
+  "description": "The ultimate developer stats platform: sign in with GitHub and track AI tokens and contributions continuously, across every machine.",
+  "type": "module",
+  "private": true,
+  "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/saintlee83/oh-my-stats.git"
+  },
+  "homepage": "https://github.com/saintlee83/oh-my-stats#readme",
+  "bugs": "https://github.com/saintlee83/oh-my-stats/issues",
+  "engines": {
+    "node": ">=22.18"
+  },
+  "scripts": {
+    "dev": "wrangler dev",
+    "db:local": "wrangler d1 migrations apply DB --local",
+    "types": "wrangler types",
+    "test": "node --disable-warning=ExperimentalWarning --test test/*.test.ts",
+    "typecheck": "tsc --noEmit && tsc --noEmit -p tsconfig.worker.json"
+  },
+  "devDependencies": {
+    "@types/node": "^26.6.6",
+    "typescript": "^7.0.2",
+    "wrangler": "^4.158.0"
+  }
+}

@@ -1,0 +1,376 @@
+import type { GitHubMetrics, Metrics } from '../shared/metrics.ts';
+import { buildCards, cardContent, type Card } from '../shared/render/cards.ts';
+import { renderDashboard } from '../shared/render/svg.ts';
+import { zoned } from '../shared/time.ts';
+import { computeTokens } from '../shared/tokens.ts';
+import {
+  AuthError,
+  cookie,
+  hashToken,
+  identityFromAgentToken,
+  identityFromCode,
+  isSameOrigin,
+  randomToken,
+  readCookie,
+  safeEqual,
+  type GitHubAuthConfig,
+} from './auth.ts';
+import {
+  claimGitHubCollection,
+  createSession,
+  deleteMachine,
+  deleteSession,
+  deleteUser,
+  findSession,
+  listMachines,
+  loadGitHubStats,
+  loadUsage,
+  renameMachine,
+  saveGitHubStats,
+  saveUsage,
+  setPublic,
+  upsertMachine,
+  upsertUser,
+  userById,
+  userByLogin,
+  type Db,
+  type SessionRow,
+  type UserRow,
+} from './db.ts';
+import { dashboardPage, errorPage, landingPage, profilePage } from './pages.ts';
+import { loadPrices } from './prices.ts';
+import { BadRequest, cleanMachineName, parseGitHubMetrics, parseMachine, parseUsageUpload } from './wire.ts';
+
+export interface Deps {
+  db: Db;
+  githubClientId: string;
+  githubClientSecret: string;
+  allowAnyGitHubToken: boolean;
+  fetch: typeof fetch;
+  waitUntil(work: Promise<unknown>): void;
+  now(): Date;
+}
+
+const SESSION_COOKIE = 'oms_session';
+const STATE_COOKIE = 'oms_state';
+const WEB_SESSION_SECONDS = 30 * 86_400;
+const MAX_USAGE_BYTES = 2_000_000;
+const MAX_GITHUB_BYTES = 1_000_000;
+const PUBLIC_CACHE = 'public, max-age=300';
+
+const HTML_CSP =
+  "default-src 'none'; img-src 'self' data: https://avatars.githubusercontent.com; style-src 'unsafe-inline'; form-action 'self' https://github.com; base-uri 'none'; frame-ancestors 'none'";
+
+function html(body: string, status = 200, headers: Record<string, string> = {}): Response {
+  return new Response(body, {
+    status,
+    headers: {
+      'content-type': 'text/html; charset=utf-8',
+      'content-security-policy': HTML_CSP,
+      'x-content-type-options': 'nosniff',
+      'referrer-policy': 'same-origin',
+      'cache-control': 'no-store',
+      ...headers,
+    },
+  });
+}
+
+function json(body: unknown, status = 200): Response {
+  return new Response(JSON.stringify(body), {
+    status,
+    headers: { 'content-type': 'application/json; charset=utf-8', 'cache-control': 'no-store', 'x-content-type-options': 'nosniff' },
+  });
+}
+
+const redirect = (location: string, headers: Record<string, string> = {}) =>
+  new Response(null, { status: 303, headers: { location, 'cache-control': 'no-store', ...headers } });
+
+/** Reads a body up to a limit, so an oversized upload can't exhaust the Worker's memory. */
+async function readLimited(request: Request, limit: number): Promise<string> {
+  const declared = Number(request.headers.get('content-length') ?? 0);
+  if (declared > limit) throw new BadRequest('body is too large');
+  if (!request.body) return '';
+  const reader = request.body.getReader();
+  const decoder = new TextDecoder();
+  let size = 0;
+  let text = '';
+  for (;;) {
+    const { done, value } = await reader.read();
+    if (done) return text + decoder.decode();
+    size += value.byteLength;
+    if (size > limit) {
+      await reader.cancel();
+      throw new BadRequest('body is too large');
+    }
+    text += decoder.decode(value, { stream: true });
+  }
+}
+
+async function readJson(request: Request, limit: number): Promise<unknown> {
+  try {
+    return JSON.parse(await readLimited(request, limit));
+  } catch (error) {
+    if (error instanceof BadRequest) throw error;
+    throw new BadRequest('body must be JSON');
+  }
+}
+
+const authConfig = (deps: Deps): GitHubAuthConfig => ({
+  clientId: deps.githubClientId,
+  clientSecret: deps.githubClientSecret,
+  allowAnyToken: deps.allowAnyGitHubToken,
+  fetch: deps.fetch,
+});
+
+async function viewerFromCookie(request: Request, deps: Deps): Promise<UserRow | null> {
+  const token = readCookie(request, SESSION_COOKIE);
+  if (!token) return null;
+  const session = await findSession(deps.db, await hashToken(token), deps.now().toISOString());
+  return session?.kind === 'web' ? userById(deps.db, session.user_id) : null;
+}
+
+async function agentSession(request: Request, deps: Deps): Promise<SessionRow | null> {
+  const header = request.headers.get('authorization') ?? '';
+  if (!header.startsWith('Bearer ')) return null;
+  const session = await findSession(deps.db, await hashToken(header.slice(7)), deps.now().toISOString());
+  return session?.kind === 'agent' ? session : null;
+}
+
+async function buildMetrics(user: UserRow, deps: Deps): Promise<{ metrics: Metrics; github: GitHubMetrics | null }> {
+  const now = deps.now();
+  const [machines, stats, prices] = await Promise.all([
+    loadUsage(deps.db, user.id),
+    loadGitHubStats(deps.db, user.id),
+    loadPrices(deps.db, deps.fetch, deps.waitUntil, now),
+  ]);
+  const github = stats?.metrics ?? null;
+  const tokens = computeTokens(machines, prices, user.timezone, now, github?.commitsLast30 ?? null);
+  return { metrics: { generatedDate: zoned(now, user.timezone).date, timezone: user.timezone, github, tokens }, github };
+}
+
+const hasData = (metrics: Metrics) => Boolean(metrics.github || metrics.tokens);
+
+// Public pages. A private or missing profile answers the same way, so neither is revealed.
+
+async function publicProfile(login: string, deps: Deps): Promise<UserRow | null> {
+  const user = await userByLogin(deps.db, login);
+  return user?.is_public === 1 ? user : null;
+}
+
+async function serveDashboardSvg(login: string, deps: Deps): Promise<Response> {
+  const user = await publicProfile(login, deps);
+  if (!user) return new Response('Not found', { status: 404, headers: { 'cache-control': 'no-store' } });
+  const { metrics } = await buildMetrics(user, deps);
+  return new Response(renderDashboard(metrics), {
+    headers: {
+      'content-type': 'image/svg+xml; charset=utf-8',
+      'cache-control': PUBLIC_CACHE,
+      'content-security-policy': "default-src 'none'; style-src 'unsafe-inline'",
+      'x-content-type-options': 'nosniff',
+    },
+  });
+}
+
+async function serveCard(login: string, key: string, deps: Deps): Promise<Response> {
+  const notFound = () => new Response('Not found', { status: 404 });
+  const user = await publicProfile(login, deps);
+  if (!user) return notFound();
+  const { metrics } = await buildMetrics(user, deps);
+  const card = buildCards(metrics).find((item: Card) => item.key === key);
+  if (!card) return notFound();
+  return new Response(cardContent(card, metrics.generatedDate), {
+    headers: { 'content-type': 'text/plain; charset=utf-8', 'cache-control': PUBLIC_CACHE, 'x-content-type-options': 'nosniff' },
+  });
+}
+
+async function serveProfile(login: string, request: Request, deps: Deps): Promise<Response> {
+  const viewer = await viewerFromCookie(request, deps);
+  const user = await publicProfile(login, deps);
+  if (!user) return html(errorPage(404, 'This profile is private or does not exist.', viewer), 404);
+  const { metrics } = await buildMetrics(user, deps);
+  const origin = new URL(request.url).origin;
+  return html(profilePage(user, renderDashboard(metrics), buildCards(metrics), origin, viewer));
+}
+
+// Website sign-in.
+
+async function startLogin(request: Request, deps: Deps): Promise<Response> {
+  if (!deps.githubClientId) return html(errorPage(503, 'GitHub sign-in is not configured on this server.', null), 503);
+  const url = new URL(request.url);
+  const state = randomToken('');
+  const authorize = new URL('https://github.com/login/oauth/authorize');
+  authorize.searchParams.set('client_id', deps.githubClientId);
+  authorize.searchParams.set('redirect_uri', `${url.origin}/auth/callback`);
+  authorize.searchParams.set('scope', 'read:user');
+  authorize.searchParams.set('state', state);
+  return redirect(authorize.toString(), { 'set-cookie': cookie(request, STATE_COOKIE, state, 600) });
+}
+
+async function finishLogin(request: Request, deps: Deps): Promise<Response> {
+  const url = new URL(request.url);
+  const code = url.searchParams.get('code');
+  const state = url.searchParams.get('state');
+  const expected = readCookie(request, STATE_COOKIE);
+  if (!code || !state || !expected || !(await safeEqual(state, expected))) {
+    return html(errorPage(400, 'That sign-in link expired. Please try again.', null), 400);
+  }
+  const identity = await identityFromCode(authConfig(deps), code, `${url.origin}/auth/callback`);
+  const now = deps.now();
+  const user = await upsertUser(deps.db, identity, now.toISOString());
+  const token = randomToken('omsw_');
+  const expires = new Date(now.getTime() + WEB_SESSION_SECONDS * 1000).toISOString();
+  await createSession(deps.db, await hashToken(token), user.id, 'web', null, expires, now.toISOString());
+  const headers = new Headers({ location: '/me', 'cache-control': 'no-store' });
+  headers.append('set-cookie', cookie(request, SESSION_COOKIE, token, WEB_SESSION_SECONDS));
+  headers.append('set-cookie', cookie(request, STATE_COOKIE, '', 0));
+  return new Response(null, { status: 303, headers });
+}
+
+// The signed-in dashboard.
+
+async function serveMe(request: Request, deps: Deps): Promise<Response> {
+  const viewer = await viewerFromCookie(request, deps);
+  if (!viewer) return redirect('/login');
+  const [machines, { metrics }] = await Promise.all([listMachines(deps.db, viewer.id), buildMetrics(viewer, deps)]);
+  const tokensByMachine = new Map((metrics.tokens?.machines ?? []).map((row) => [row.id, row.total]));
+  const svg = hasData(metrics) ? renderDashboard(metrics) : null;
+  return html(dashboardPage(viewer, machines, tokensByMachine, svg, new URL(request.url).origin));
+}
+
+async function handleWebPost(request: Request, path: string, deps: Deps): Promise<Response> {
+  if (!isSameOrigin(request)) return html(errorPage(403, 'That request came from another site.', null), 403);
+  const viewer = await viewerFromCookie(request, deps);
+  if (!viewer) return redirect('/login');
+  const now = deps.now().toISOString();
+  const form = new URLSearchParams(await readLimited(request, 4096));
+
+  if (path === '/logout') {
+    const token = readCookie(request, SESSION_COOKIE);
+    if (token) await deleteSession(deps.db, await hashToken(token));
+    return redirect('/', { 'set-cookie': cookie(request, SESSION_COOKIE, '', 0) });
+  }
+  if (path === '/me/visibility') {
+    await setPublic(deps.db, viewer.id, form.get('public') === '1', now);
+    return redirect('/me');
+  }
+  if (path === '/me/delete') {
+    await deleteUser(deps.db, viewer.id);
+    return redirect('/', { 'set-cookie': cookie(request, SESSION_COOKIE, '', 0) });
+  }
+  const machineAction = /^\/me\/machines\/([a-f0-9]{16,64})\/(rename|delete)$/.exec(path);
+  if (machineAction) {
+    const [, machineId, action] = machineAction;
+    if (action === 'delete') await deleteMachine(deps.db, viewer.id, machineId);
+    else await renameMachine(deps.db, viewer.id, machineId, cleanMachineName(form.get('name')));
+    return redirect('/me');
+  }
+  return html(errorPage(404, 'Page not found.', viewer), 404);
+}
+
+// The API agents use.
+
+async function handleApi(request: Request, path: string, deps: Deps): Promise<Response> {
+  const now = deps.now();
+  if (path === '/v1/config' && request.method === 'GET') {
+    return json({ githubClientId: deps.githubClientId || null, allowAnyGitHubToken: deps.allowAnyGitHubToken });
+  }
+  if (path === '/v1/auth/token' && request.method === 'POST') {
+    const body = (await readJson(request, 8192)) as { githubToken?: unknown; machine?: unknown };
+    if (typeof body?.githubToken !== 'string' || !body.githubToken) throw new BadRequest('githubToken is required');
+    const machine = parseMachine(body.machine);
+    const identity = await identityFromAgentToken(authConfig(deps), body.githubToken);
+    const user = await upsertUser(deps.db, identity, now.toISOString());
+    await upsertMachine(deps.db, user.id, machine, now.toISOString());
+    const token = randomToken('omsa_');
+    await createSession(deps.db, await hashToken(token), user.id, 'agent', machine.id, null, now.toISOString());
+    return json({ token, user: { login: user.login, public: user.is_public === 1 } });
+  }
+
+  const session = await agentSession(request, deps);
+  if (!session) return json({ error: 'Sign in again with `oms login`.' }, 401);
+
+  if (path === '/v1/usage' && request.method === 'PUT') {
+    const upload = parseUsageUpload(await readJson(request, MAX_USAGE_BYTES), now);
+    if (upload.machine.id !== session.machine_id) return json({ error: 'This token belongs to another machine.' }, 403);
+    await upsertMachine(deps.db, session.user_id, upload.machine, now.toISOString());
+    await saveUsage(deps.db, session.user_id, upload, now.toISOString());
+    return json({ ok: true, collectGitHub: await claimGitHubCollection(deps.db, session.user_id, now) });
+  }
+  if (path === '/v1/github' && request.method === 'PUT') {
+    const metrics = parseGitHubMetrics(await readJson(request, MAX_GITHUB_BYTES));
+    const user = await userById(deps.db, session.user_id);
+    if (metrics.login.toLowerCase() !== user?.login.toLowerCase()) return json({ error: 'These stats belong to another GitHub account.' }, 403);
+    await saveGitHubStats(deps.db, session.user_id, metrics, now.toISOString());
+    return json({ ok: true });
+  }
+  if (path === '/v1/me' && request.method === 'GET') {
+    const user = await userById(deps.db, session.user_id);
+    if (!user) return json({ error: 'Account not found.' }, 401);
+    const [machines, { metrics }] = await Promise.all([listMachines(deps.db, user.id), buildMetrics(user, deps)]);
+    const totals = new Map((metrics.tokens?.machines ?? []).map((row) => [row.id, row.total]));
+    return json({
+      login: user.login,
+      public: user.is_public === 1,
+      profileUrl: `${new URL(request.url).origin}/u/${encodeURIComponent(user.login)}`,
+      machine: session.machine_id,
+      tokens: metrics.tokens ? { total: metrics.tokens.total, tools: metrics.tokens.tools.map(({ tool, total, scope, machines: count }) => ({ tool, total, scope, machines: count })) } : null,
+      github: metrics.github ? { commits: metrics.github.counts.commits, pulls: metrics.github.counts.pulls } : null,
+      machines: machines.map((machine) => ({ id: machine.id, name: machine.name, platform: machine.platform, lastSeenAt: machine.last_seen_at, tokens: totals.get(machine.id) ?? 0 })),
+    });
+  }
+  if (path === '/v1/me' && request.method === 'PATCH') {
+    const body = (await readJson(request, 1024)) as { public?: unknown };
+    if (typeof body?.public !== 'boolean') throw new BadRequest('public must be true or false');
+    await setPublic(deps.db, session.user_id, body.public, now.toISOString());
+    return json({ ok: true, public: body.public });
+  }
+  if (path === '/v1/auth/logout' && request.method === 'POST') {
+    const header = request.headers.get('authorization') as string;
+    await deleteSession(deps.db, await hashToken(header.slice(7)));
+    return json({ ok: true });
+  }
+  return json({ error: 'Not found.' }, 404);
+}
+
+async function route(request: Request, deps: Deps): Promise<Response> {
+  const url = new URL(request.url);
+  const path = url.pathname;
+
+  if (path.startsWith('/v1/')) {
+    try {
+      return await handleApi(request, path, deps);
+    } catch (error) {
+      if (error instanceof BadRequest) return json({ error: error.message }, 400);
+      if (error instanceof AuthError) return json({ error: error.message }, 401);
+      throw error;
+    }
+  }
+  if (request.method === 'POST') return handleWebPost(request, path, deps);
+  if (request.method !== 'GET' && request.method !== 'HEAD') return new Response('Method not allowed', { status: 405 });
+
+  if (path === '/healthz') return json({ ok: true });
+  if (path === '/') return html(landingPage(url.origin, await viewerFromCookie(request, deps)));
+  if (path === '/login') return startLogin(request, deps);
+  if (path === '/auth/callback') return finishLogin(request, deps);
+  if (path === '/me') return serveMe(request, deps);
+
+  const profile = /^\/u\/([A-Za-z0-9-]{1,39})(?:\/(dashboard\.svg|cards\/([a-z]+)\.txt))?$/.exec(path);
+  if (profile) {
+    const [, login, resource, cardKey] = profile;
+    if (resource === 'dashboard.svg') return serveDashboardSvg(login, deps);
+    if (cardKey) return serveCard(login, cardKey, deps);
+    return serveProfile(login, request, deps);
+  }
+  return html(errorPage(404, 'Page not found.', await viewerFromCookie(request, deps)), 404);
+}
+
+export async function handle(request: Request, deps: Deps): Promise<Response> {
+  try {
+    return await route(request, deps);
+  } catch (error) {
+    if (error instanceof BadRequest) return html(errorPage(400, error.message, null), 400);
+    if (error instanceof AuthError) return html(errorPage(401, error.message, null), 401);
+    console.error(JSON.stringify({ message: 'unhandled error', path: new URL(request.url).pathname, error: String(error) }));
+    return html(errorPage(500, 'Something went wrong on our side.', null), 500);
+  }
+}
