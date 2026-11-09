@@ -86,6 +86,7 @@ export function landingPage(origin: string, viewer: UserRow | null): string {
   <h2>Get started</h2>
   <pre><code>${esc(installSnippet(origin))}</code></pre>
   ${viewer ? '<a class="button primary" href="/me">Go to your dashboard</a>' : '<a class="button primary" href="/login">Sign in with GitHub</a>'}
+  <p class="muted" style="margin-top:12px">The agent records usage continuously and uploads once a day. Run <code>oms sync</code> to update right away.</p>
 </div>
 <div class="panel">
   <h2>What leaves your machine</h2>
@@ -159,7 +160,7 @@ ${
     ? `<div class="panel"><h2>Machines</h2><div class="table"><table>
 <thead><tr><th>Name</th><th>Platform</th><th class="num">Tokens</th><th>Last sync</th><th></th></tr></thead>
 <tbody>${machineRows(machines, tokensByMachine)}</tbody></table></div>
-<p class="muted">Codex's account total isn't split by machine, so per-machine tokens cover what each machine logged. Removing a machine deletes its data and signs it out.</p></div>`
+<p class="muted">Machines upload once a day, so numbers can be up to a day behind. Run <code>oms sync</code> on a machine to update it now. Codex's account total isn't split by machine, so per-machine tokens cover what each machine logged. Removing a machine deletes its data and signs it out.</p></div>`
     : ''
 }
 <div class="panel">

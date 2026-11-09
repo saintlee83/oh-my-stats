@@ -5,7 +5,11 @@ import type { TokenBreakdown, TokenTotals, ToolTotals, UsageTuple } from '../sha
 
 export class BadRequest extends Error {}
 
-const DATE = /^\d{4}-\d{2}-\d{2}$/;
+const DATE = /^\d{4}-(0[1-9]|1[0-2])-(0[1-9]|[12]\d|3[01])$/;
+/** No AI tool logged usage before this, so an earlier date can't be real. */
+const EARLIEST_DAY = '2020-01-01';
+const MAX_MODELS_PER_DAY = 200;
+const MAX_TOOLS_PER_UPLOAD = 20;
 const TOOL = /^[a-z][a-z0-9_-]{0,31}$/;
 const MODEL = /^[A-Za-z0-9][A-Za-z0-9._:@+\-/]{0,119}$/;
 const MACHINE_ID = /^[a-f0-9]{16,64}$/;
@@ -116,8 +120,9 @@ export function parseUsageUpload(value: unknown, now: Date): UsageUpload {
   const dayEntries = Object.entries((value.days as Record<string, unknown> | undefined) ?? {});
   assert(dayEntries.length <= 400, 'too many days in one upload');
   for (const [date, rows] of dayEntries) {
-    assert(DATE.test(date) && date <= latest, `bad date: ${date.slice(0, 12)}`);
+    assert(DATE.test(date) && date >= EARLIEST_DAY && date <= latest, `bad date: ${date.slice(0, 12)}`);
     assert(isObject(rows), 'a day must be an object');
+    assert(Object.keys(rows).length <= MAX_MODELS_PER_DAY, 'too many models in one day');
     const parsed: Record<string, UsageTuple> = {};
     for (const [key, tuple] of Object.entries(rows)) {
       parseKey(key);
@@ -129,7 +134,9 @@ export function parseUsageUpload(value: unknown, now: Date): UsageUpload {
 
   const totals: TokenTotals = {};
   assert(value.totals === undefined || isObject(value.totals), 'totals must be an object');
-  for (const [tool, figure] of Object.entries((value.totals as Record<string, unknown> | undefined) ?? {})) {
+  const toolEntries = Object.entries((value.totals as Record<string, unknown> | undefined) ?? {});
+  assert(toolEntries.length <= MAX_TOOLS_PER_UPLOAD, 'too many tools in one upload');
+  for (const [tool, figure] of toolEntries) {
     assert(TOOL.test(tool), 'bad tool name');
     totals[tool] = parseFigure(figure);
   }

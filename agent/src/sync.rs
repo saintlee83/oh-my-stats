@@ -11,10 +11,18 @@ use crate::totals::{self, Totals};
 
 const MAX_DAYS_PER_UPLOAD: usize = 90;
 const MAX_BYTES_PER_UPLOAD: usize = 1_500_000;
-/// How long a quiet machine goes without checking in.
-const HEARTBEAT_SECS: i64 = 300;
 const LAST_UPLOAD_KEY: &str = "sync:last";
 const TOTALS_HASH_KEY: &str = "sync:totals";
+
+/// Based on elapsed clock time, so a laptop that slept through its upload catches up on
+/// waking. A failed upload isn't recorded, so it's simply tried again.
+pub fn upload_due(last: i64, now: i64, interval: i64, force: bool) -> bool {
+    force || now < last || now - last >= interval
+}
+
+pub fn last_upload(store: &Store) -> Result<i64, SyncError> {
+    Ok(store.get(LAST_UPLOAD_KEY).map_err(SyncError::Local)?.and_then(|value| value.parse().ok()).unwrap_or(0))
+}
 
 pub fn now_secs() -> i64 {
     SystemTime::now().duration_since(UNIX_EPOCH).map_or(0, |time| time.as_secs() as i64)
@@ -72,7 +80,7 @@ pub struct SyncOutcome {
 
 /// Sends what changed. Each day replaces the server's copy for this machine, so a failed
 /// upload is simply tried again, and a day is only marked done once the server accepted it.
-pub fn sync(store: &mut Store, config: &Config, api: &Api, totals: &Totals, force: bool) -> Result<SyncOutcome, SyncError> {
+pub fn sync(store: &mut Store, config: &Config, api: &Api, totals: &Totals) -> Result<SyncOutcome, SyncError> {
     let machine = machine_info(config).map_err(SyncError::Local)?;
     let timezone = config.timezone_name();
     let rollup = store.rollup().map_err(SyncError::Local)?;
@@ -82,13 +90,8 @@ pub fn sync(store: &mut Store, config: &Config, api: &Api, totals: &Totals, forc
     let totals_text = serde_json::to_string(totals).unwrap_or_default();
     let totals_hash = sha256_hex(&totals_text);
     let totals_changed = store.get(TOTALS_HASH_KEY).map_err(SyncError::Local)?.as_deref() != Some(totals_hash.as_str());
-    let last: i64 = store.get(LAST_UPLOAD_KEY).map_err(SyncError::Local)?.and_then(|value| value.parse().ok()).unwrap_or(0);
     let now = now_secs();
-
     let mut outcome = SyncOutcome::default();
-    if batches.is_empty() && !totals_changed && !force && now - last < HEARTBEAT_SECS {
-        return Ok(outcome);
-    }
 
     let mut send = |days: &[(String, Value, String)], with_totals: bool| -> Result<(), SyncError> {
         let body = build_body(&machine, &timezone, days, with_totals.then_some(totals));
@@ -140,9 +143,13 @@ pub fn signed_in_api(config: &Config) -> Result<Api> {
 }
 
 pub fn run_once(store: &mut Store, config: &Config, api: &Api, roots: &crate::scan::LogRoots, force: bool) -> Result<(crate::scan::ScanReport, SyncOutcome), SyncError> {
+    // Recording is continuous. Uploading, and asking the tools for their totals, is not.
     let report = crate::scan::scan(store, roots, config.timezone()).map_err(SyncError::Local)?;
+    if !upload_due(last_upload(store)?, now_secs(), config.upload_interval_secs(), force) {
+        return Ok((report, SyncOutcome::default()));
+    }
     let totals = totals::collect(store, now_secs(), force).map_err(SyncError::Local)?;
-    let outcome = sync(store, config, api, &totals, force)?;
+    let outcome = sync(store, config, api, &totals)?;
     Ok((report, outcome))
 }
 
@@ -155,6 +162,26 @@ mod tests {
         (0..days)
             .map(|index| (format!("2026-{:02}-{:02}", index / 28 + 1, index % 28 + 1), BTreeMap::from([("claude/opus".to_string(), [1, 2, 3, 4, 5])])))
             .collect()
+    }
+
+    #[test]
+    fn uploads_follow_elapsed_time_and_can_be_forced() {
+        let day = 86_400;
+        assert!(upload_due(0, 1_800_000_000, day, false), "never uploaded");
+        assert!(!upload_due(1_000, 1_000 + day - 1, day, false));
+        assert!(upload_due(1_000, 1_000 + day, day, false));
+        assert!(upload_due(1_000, 1_000 + 3 * day, day, false), "a machine that slept catches up");
+        assert!(upload_due(1_000, 1_001, day, true), "oms sync goes right away");
+        assert!(upload_due(5_000, 1_000, day, false), "a clock moved backwards can't stall uploads");
+    }
+
+    #[test]
+    fn the_default_is_once_a_day_with_a_sensible_minimum() {
+        assert_eq!(Config::default().upload_interval_secs(), 86_400);
+        let hourly = Config { upload_interval_minutes: Some(60), ..Default::default() };
+        assert_eq!(hourly.upload_interval_secs(), 3_600);
+        let reckless = Config { upload_interval_minutes: Some(0), ..Default::default() };
+        assert_eq!(reckless.upload_interval_secs(), 300);
     }
 
     #[test]
