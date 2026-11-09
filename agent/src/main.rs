@@ -35,7 +35,7 @@ enum Commands {
         /// How this machine appears on your dashboard
         #[arg(long)]
         name: Option<String>,
-        /// Use your GitHub CLI login (development servers only)
+        /// Use your GitHub CLI login (development servers on this computer only)
         #[arg(long)]
         gh: bool,
     },
@@ -66,8 +66,6 @@ enum Commands {
     Unpublish,
     /// Print exactly what this machine would upload, without sending anything
     Preview,
-    /// Grant repository access for GitHub stats, if you don't use the GitHub CLI
-    GithubLogin,
 }
 
 #[derive(Subcommand)]
@@ -120,6 +118,5 @@ fn main() -> Result<()> {
         Commands::Publish => set_public(true),
         Commands::Unpublish => set_public(false),
         Commands::Preview => preview(),
-        Commands::GithubLogin => login::github_login(),
     }
 }

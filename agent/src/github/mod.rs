@@ -22,7 +22,7 @@ fn local_github_token(config: &Config) -> Option<String> {
 }
 
 pub fn collect_and_upload(store: &mut Store, config: &Config, log: Log<'_>) -> Result<()> {
-    let token = local_github_token(config).context("No GitHub access for stats. Run `gh auth login` or `oms github-login`.")?;
+    let token = local_github_token(config).context("No GitHub access for stats. Run `gh auth login`, or set OMS_GITHUB_TOKEN.")?;
     let api = signed_in_api(config)?;
     let gh = client::Gh::new(token);
     let settings = collect::Settings {

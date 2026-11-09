@@ -37,7 +37,7 @@ Repeat `oms login`, `oms sync` and `oms service install` on each computer.
 
 The agent reads new log lines every 5 minutes and uploads once a day, so your numbers can be up to a day behind. A machine that was asleep or offline catches up when it comes back. Run `oms sync` to update right away, or change `uploadIntervalMinutes`.
 
-GitHub stats need read access to your repositories, and that access stays on your machine. The agent uses your [GitHub CLI](https://cli.github.com) login if you have one, after `gh auth refresh -s repo,read:org`. Otherwise, run `oms github-login`.
+GitHub stats need read access to your repositories, and that access stays on your machine. The agent uses your [GitHub CLI](https://cli.github.com) login if you have one, after `gh auth refresh -s repo,read:org`. Otherwise, set `OMS_GITHUB_TOKEN` to a token with the `repo` and `read:org` scopes.
 
 Once published, add the dashboard to your GitHub profile README:
 
@@ -60,7 +60,6 @@ oms service status        Show whether the service is running
 oms publish               Show your profile to everyone
 oms unpublish             Make your profile private again
 oms preview               Print exactly what would be uploaded, without sending anything
-oms github-login          Grant repository access, if you don't use the GitHub CLI
 ```
 
 ## What leaves your machine
@@ -71,14 +70,15 @@ oms github-login          Grant repository access, if you don't use the GitHub C
 | Lifetime totals per tool and model | Commit messages and file paths |
 | Aggregated GitHub numbers, such as commits per month and lines per language | Private repository and organization names |
 | This machine's name and platform, shown only to you | The token that reads your repositories |
+| Your timezone, shown on your public dashboard | |
 
 Run `oms preview` to see the exact usage data. GitHub stats are aggregated on your machine first, so no commit-level data is sent.
 
-**Sign-in:** the server only ever receives a `read:user` token, which proves who you are. It uses that token once and doesn't store it, and it only accepts tokens issued to its own OAuth App. It stores a hash of its own session tokens.
+**Sign-in:** the server only ever receives a `read:user` token, which proves who you are. It uses that token once and doesn't store it, and it only accepts tokens issued to its own OAuth App. It stores a hash of its own session tokens. The agent refuses to send a GitHub token with more access than that. A machine's sign-in expires after 180 days without an upload, and signing in again replaces it.
 
 **Publishing:** a private profile looks the same as one that doesn't exist. Publishing shows your totals per model and per day. Machine names are never public. Public pages are cached for 5 minutes, so after you unpublish, a copy can stay visible for up to that long.
 
-**Co-authors:** AI assistants and bots are named. People are named only if they have a GitHub account and co-authored in a public repo, counting those public commits only. Everyone else is an anonymous count. Emails are never uploaded.
+**Co-authors:** AI assistants are named. Bots are too, except a custom bot in a private repo, because its name can include an organization's. People are named only if they have a GitHub account and co-authored in a public repo, counting those public commits only. Everyone else is an anonymous count. Emails are never uploaded.
 
 **Your data:** removing a machine deletes its data and signs it out. Deleting your account removes everything.
 
@@ -123,7 +123,7 @@ Then point agents at it with `oms login --server https://your-server`.
 - **Default branches only.** Commits still on other branches aren't walked, which matches how GitHub counts contributions. Your GitHub graph can show more than can be itemized, for example work in repositories that were later deleted.
 - **Churn reads the first 300 files of a commit**, and treats a commit over 20,000 lines as a bulk import. Change this with `maxCommitLines` in `~/.oh-my-stats/config.json`.
 - **Windows** isn't supported yet. The agent is tested on macOS and Linux.
-- **Uploads are capped** at 20,000 changed rows per account per day. Anything over that goes through the next day.
+- **Uploads are capped** at 20,000 changed rows per account per day. Anything over that goes through the next day. An account can have 50 machines.
 - **Rate limits are approximate.** They use Cloudflare's rate limiting, which counts per location and can briefly let requests through above the limit.
 
 ## Configuration
@@ -156,7 +156,7 @@ cd agent && cargo test
 cargo run -- login --server http://localhost:8787 --gh
 ```
 
-With `ALLOW_ANY_GITHUB_TOKEN=true` in `.dev.vars`, a local server accepts your GitHub CLI login, so you don't need an OAuth App to develop. Never set it in production.
+With `ALLOW_ANY_GITHUB_TOKEN=true` in `.dev.vars`, a local server accepts your GitHub CLI login, so you don't need an OAuth App to develop. The server ignores this setting anywhere but this computer, and the agent only uses `--gh` with a server on this computer.
 
 - **Adding an AI tool:** add a parser in `agent/src/parse.rs`, and its log folder in `agent/src/scan.rs`.
 - **The one rule that matters:** repository, organization and file names exist only inside `agent/src/github/collect.rs`. `Snapshot` has none, so nothing downstream can leak them.

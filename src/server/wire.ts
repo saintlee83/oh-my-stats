@@ -10,6 +10,10 @@ const DATE = /^\d{4}-(0[1-9]|1[0-2])-(0[1-9]|[12]\d|3[01])$/;
 const EARLIEST_DAY = '2020-01-01';
 const MAX_MODELS_PER_DAY = 200;
 const MAX_TOOLS_PER_UPLOAD = 20;
+/** Far beyond any real profile. Pages draw all of this, so it can't grow without limit. */
+const MAX_METRICS_ITEMS = 500;
+const MAX_METRICS_TEXT = 200;
+const MAX_METRICS_DEPTH = 8;
 const TOOL = /^[a-z][a-z0-9_-]{0,31}$/;
 const MODEL = /^[A-Za-z0-9][A-Za-z0-9._:@+\-/]{0,119}$/;
 const MACHINE_ID = /^[a-f0-9]{16,64}$/;
@@ -144,6 +148,17 @@ export function parseUsageUpload(value: unknown, now: Date): UsageUpload {
   return { machine, timezone: isValidTimezone(value.timezone) ? value.timezone : null, days, totals };
 }
 
+function assertBounded(value: unknown, depth = 0): void {
+  assert(depth <= MAX_METRICS_DEPTH, 'metrics are nested too deeply');
+  if (typeof value === 'string') {
+    assert(value.length <= MAX_METRICS_TEXT, 'a metrics label is too long');
+  } else if (typeof value === 'object' && value !== null) {
+    const items = Object.values(value);
+    assert(items.length <= MAX_METRICS_ITEMS, 'metrics hold too many items');
+    for (const item of items) assertBounded(item, depth + 1);
+  }
+}
+
 /**
  * GitHub metrics are the user's own aggregates, drawn into the user's own pages. The
  * renderers escape all text, so this checks shape: a malformed upload must fail here
@@ -151,6 +166,7 @@ export function parseUsageUpload(value: unknown, now: Date): UsageUpload {
  */
 export function parseGitHubMetrics(value: unknown): GitHubMetrics {
   assert(isObject(value), 'metrics must be an object');
+  assertBounded(value);
   assert(typeof value.login === 'string', 'metrics.login is missing');
   for (const key of ['counts', 'thisYear', 'monthly', 'scopes', 'rhythm', 'coauthors', 'languageTotals', 'churn', 'pulse', 'coverage']) {
     assert(isObject(value[key]), `metrics.${key} is missing`);

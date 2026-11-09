@@ -16,7 +16,6 @@ pub struct Config {
     pub timezone: Option<String>,
     /// Optional, for collecting GitHub stats without the GitHub CLI. It never leaves this machine.
     pub github_token: Option<String>,
-    pub github_client_id: Option<String>,
     pub named_coauthors: Vec<String>,
     pub agent_coauthors: Vec<String>,
     pub exclude_languages: Vec<String>,

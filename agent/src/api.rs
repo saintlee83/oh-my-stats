@@ -29,14 +29,31 @@ pub struct Api {
     agent: ureq::Agent,
 }
 
+const LOCAL_HOSTS: [&str; 3] = ["localhost", "127.0.0.1", "[::1]"];
+
+/// Reads an address the way the HTTP client will, so `http://localhost:1@evil.example` can't
+/// pass for this computer. An address with a username is never valid here.
+fn scheme_and_host(url: &str) -> Option<(String, String)> {
+    let uri: ureq::http::Uri = url.parse().ok()?;
+    let authority = uri.authority()?;
+    if authority.as_str().contains('@') {
+        return None;
+    }
+    Some((uri.scheme_str()?.to_ascii_lowercase(), authority.host().to_ascii_lowercase()))
+}
+
+pub fn is_local_server(url: &str) -> bool {
+    scheme_and_host(url).is_some_and(|(_, host)| LOCAL_HOSTS.contains(&host.as_str()))
+}
+
 /// A sign-in token must never cross the network unencrypted, except to this computer.
 pub fn check_server_url(url: &str) -> Result<String, String> {
     let url = url.trim_end_matches('/').to_string();
-    let local = ["http://localhost", "http://127.0.0.1", "http://[::1]"].iter().any(|prefix| url == *prefix || url.starts_with(&format!("{prefix}:")));
-    if url.starts_with("https://") || local {
+    let allowed = scheme_and_host(&url).is_some_and(|(scheme, host)| scheme == "https" || (scheme == "http" && LOCAL_HOSTS.contains(&host.as_str())));
+    if allowed {
         Ok(url)
     } else {
-        Err(format!("{url} must use https:// (plain http is only allowed for localhost)"))
+        Err(format!("{url} must be an https:// address (plain http is only allowed for localhost)"))
     }
 }
 
@@ -98,5 +115,27 @@ mod tests {
         assert!(check_server_url("http://127.0.0.1:8787").is_ok());
         assert!(check_server_url("http://stats.example").is_err());
         assert!(check_server_url("http://localhost.evil.example").is_err());
+        assert!(check_server_url("stats.example").is_err());
+    }
+
+    #[test]
+    fn an_address_cannot_pass_for_this_computer() {
+        for trick in [
+            "http://localhost:1@evil.example",
+            "http://localhost@evil.example",
+            "http://127.0.0.1:80@evil.example",
+            "http://[::1]:1@evil.example",
+            "https://localhost:1@evil.example",
+            "http://localhost:1\\@evil.example",
+        ] {
+            assert!(check_server_url(trick).is_err(), "{trick}");
+            assert!(!is_local_server(trick), "{trick}");
+        }
+        assert!(!is_local_server("https://stats.example"));
+        assert!(!is_local_server("http://localhost.evil.example"));
+        for local in ["http://localhost:8787", "http://127.0.0.1:8787", "http://[::1]:8787", "HTTP://LOCALHOST:8787", "https://localhost:8787"] {
+            assert!(is_local_server(local), "{local}");
+            assert!(check_server_url(local).is_ok(), "{local}");
+        }
     }
 }

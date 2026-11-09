@@ -7,6 +7,8 @@
   "routes": [{ "pattern": "ohmystats.dev", "custom_domain": true }],
   "workers_dev": false,
   "preview_urls": false,
+  // Without this, `wrangler dev` tells the Worker it's running at the address above.
+  "dev": { "port": 8787, "host": "localhost:8787" },
   "observability": {
     "enabled": true,
     "traces": { "enabled": true }

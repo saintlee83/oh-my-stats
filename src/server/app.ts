@@ -27,6 +27,7 @@ import {
   loadUsage,
   OverQuota,
   renameMachine,
+  renewSession,
   saveGitHubStats,
   saveUsage,
   setPublic,
@@ -65,8 +66,12 @@ export interface EdgeCache {
 const SESSION_COOKIE = 'oms_session';
 const STATE_COOKIE = 'oms_state';
 const WEB_SESSION_SECONDS = 30 * 86_400;
+const AGENT_SESSION_DAYS = 180;
+/** A machine's sign-in is extended about once a month, rather than written on every upload. */
+const AGENT_SESSION_RENEW_DAYS = 150;
+const MAX_MACHINES_PER_ACCOUNT = 50;
 const MAX_USAGE_BYTES = 2_000_000;
-const MAX_GITHUB_BYTES = 1_000_000;
+const MAX_GITHUB_BYTES = 256_000;
 const PUBLIC_CACHE = 'public, max-age=300';
 const CARD_KEYS = ['contributions', 'rhythm', 'languages', 'churn', 'tokens', 'coauthors', 'pulse'];
 
@@ -161,6 +166,8 @@ async function buildMetrics(user: UserRow, deps: Deps): Promise<{ metrics: Metri
 }
 
 const hasData = (metrics: Metrics) => Boolean(metrics.github || metrics.tokens);
+
+const daysFrom = (now: Date, days: number) => new Date(now.getTime() + days * 86_400_000).toISOString();
 
 const clientIp = (request: Request) => request.headers.get('cf-connecting-ip') ?? 'unknown';
 
@@ -345,9 +352,13 @@ async function handleApi(request: Request, path: string, deps: Deps): Promise<Re
     const machine = parseMachine(body.machine);
     const identity = await identityFromAgentToken(authConfig(deps), body.githubToken);
     const user = await upsertUser(deps.db, identity, now.toISOString());
+    const machines = await listMachines(deps.db, user.id);
+    if (machines.length >= MAX_MACHINES_PER_ACCOUNT && !machines.some((row) => row.id === machine.id)) {
+      return json({ error: 'This account has too many machines. Remove one on your dashboard.' }, 403);
+    }
     await upsertMachine(deps.db, user.id, machine, now.toISOString());
     const token = randomToken('omsa_');
-    await createSession(deps.db, await hashToken(token), user.id, 'agent', machine.id, null, now.toISOString());
+    await createSession(deps.db, await hashToken(token), user.id, 'agent', machine.id, daysFrom(now, AGENT_SESSION_DAYS), now.toISOString());
     return json({ token, user: { login: user.login, public: user.is_public === 1 } });
   }
 
@@ -362,6 +373,9 @@ async function handleApi(request: Request, path: string, deps: Deps): Promise<Re
     if (upload.machine.id !== session.machine_id) return json({ error: 'This token belongs to another machine.' }, 403);
     await upsertMachine(deps.db, session.user_id, upload.machine, now.toISOString());
     await saveUsage(deps.db, session.user_id, upload, now.toISOString());
+    if (!session.expires_at || session.expires_at < daysFrom(now, AGENT_SESSION_RENEW_DAYS)) {
+      await renewSession(deps.db, session.token_hash, daysFrom(now, AGENT_SESSION_DAYS));
+    }
     return json({ ok: true, collectGitHub: await claimGitHubCollection(deps.db, session.user_id, now) });
   }
   if (path === '/v1/github' && request.method === 'PUT') {
@@ -438,6 +452,9 @@ async function route(request: Request, deps: Deps): Promise<Response> {
 }
 
 const LOCAL_HOSTS = new Set(['localhost', '127.0.0.1', '[::1]']);
+
+/** Development shortcuts apply only on this computer, whatever the settings say. */
+export const isLocalRequest = (request: Request) => LOCAL_HOSTS.has(new URL(request.url).hostname);
 
 export async function handle(request: Request, deps: Deps): Promise<Response> {
   try {
