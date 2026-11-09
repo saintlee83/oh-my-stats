@@ -39,7 +39,7 @@ fn form_post(url: &str, fields: &[(&str, &str)]) -> Result<Value> {
 /// ships with this agent and no password is ever typed here.
 fn device_flow(client_id: &str) -> Result<String> {
     let start = form_post("https://github.com/login/device/code", &[("client_id", client_id), ("scope", SIGN_IN_SCOPE)])?;
-    let device_code = start.get("device_code").and_then(Value::as_str).context("GitHub did not start the sign-in. Is device flow enabled for this OAuth App?")?;
+    let device_code = start.get("device_code").and_then(Value::as_str).context("GitHub did not start the sign-in. Is device flow enabled for this app?")?;
     let user_code = start.get("user_code").and_then(Value::as_str).context("GitHub sent no code")?;
     let uri = start.get("verification_uri").and_then(Value::as_str).unwrap_or("https://github.com/login/device");
     let mut interval = start.get("interval").and_then(Value::as_u64).unwrap_or(5);

@@ -2,5 +2,5 @@
 GITHUB_CLIENT_ID=
 GITHUB_CLIENT_SECRET=
 # Local development only: accept any GitHub token as proof of identity, so you can
-# sign in with `gh auth token` before creating an OAuth App. Never set this in production.
+# sign in with `gh auth token` before creating a GitHub App. Never set this in production.
 ALLOW_ANY_GITHUB_TOKEN=true

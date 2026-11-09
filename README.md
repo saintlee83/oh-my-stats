@@ -74,7 +74,7 @@ oms preview               Print exactly what would be uploaded, without sending 
 
 Run `oms preview` to see the exact usage data. GitHub stats are aggregated on your machine first, so no commit-level data is sent.
 
-**Sign-in:** the server only ever receives a `read:user` token, which proves who you are. It uses that token once and doesn't store it, and it only accepts tokens issued to its own OAuth App. It stores a hash of its own session tokens. The agent refuses to send a GitHub token with more access than that. A machine's sign-in expires after 180 days without an upload, and signing in again replaces it.
+**Sign-in:** the server only ever receives a token that proves who you are. It comes from a GitHub App with no permissions, so it can't read your repositories. The server uses it once and doesn't store it, and only accepts tokens issued to its own app. It stores a hash of its own session tokens. The agent refuses to send a GitHub token with more access than that. A machine's sign-in expires after 180 days without an upload, and signing in again replaces it.
 
 **Publishing:** a private profile looks the same as one that doesn't exist. Publishing shows your totals per model and per day. Machine names are never public. Public pages are cached for 5 minutes, so after you unpublish, a copy can stay visible for up to that long.
 
@@ -100,7 +100,7 @@ A machine's id comes from its hardware, so reinstalling doesn't register it twic
 
 The server is a single Cloudflare Worker with a D1 database, and has no runtime dependencies.
 
-1. [Create a GitHub OAuth App](https://github.com/settings/applications/new). Set the callback URL to `https://your-server/auth/callback`, and **enable device flow**.
+1. [Create a GitHub App](https://github.com/settings/apps/new) with no permissions, so its tokens can only identify a user. Set the callback URL to `https://your-server/auth/callback`, **enable device flow**, turn off the webhook, and allow installation on any account.
 2. Create the database. In `wrangler.jsonc`, put in its id, your domain under `routes`, and your app's `GITHUB_CLIENT_ID` under `vars`.
    ```sh
    pnpm install
@@ -156,7 +156,7 @@ cd agent && cargo test
 cargo run -- login --server http://localhost:8787 --gh
 ```
 
-With `ALLOW_ANY_GITHUB_TOKEN=true` in `.dev.vars`, a local server accepts your GitHub CLI login, so you don't need an OAuth App to develop. The server ignores this setting anywhere but this computer, and the agent only uses `--gh` with a server on this computer.
+With `ALLOW_ANY_GITHUB_TOKEN=true` in `.dev.vars`, a local server accepts your GitHub CLI login, so you don't need a GitHub App to develop. The server ignores this setting anywhere but this computer, and the agent only uses `--gh` with a server on this computer.
 
 - **Adding an AI tool:** add a parser in `agent/src/parse.rs`, and its log folder in `agent/src/scan.rs`.
 - **The one rule that matters:** repository, organization and file names exist only inside `agent/src/github/collect.rs`. `Snapshot` has none, so nothing downstream can leak them.
