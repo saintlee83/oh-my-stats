@@ -1,0 +1,21 @@
+{
+  "$schema": "./node_modules/wrangler/config-schema.json",
+  "name": "oh-my-stats",
+  "main": "src/worker.ts",
+  "compatibility_date": "2026-11-09",
+  "observability": {
+    "enabled": true,
+    "traces": { "enabled": true }
+  },
+  "vars": {
+    "GITHUB_CLIENT_ID": ""
+  },
+  "d1_databases": [
+    {
+      "binding": "DB",
+      "database_name": "oh-my-stats",
+      "database_id": "7d1e9ed9-a97f-43ac-8d71-5bfe368f86b1",
+      "migrations_dir": "migrations"
+    }
+  ]
+}
