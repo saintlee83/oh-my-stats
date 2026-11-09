@@ -37,6 +37,9 @@ pub struct CoauthorSummary {
     pub by_person: i64,
 }
 
+/// Anyone can install these, so their names say nothing about where they were used.
+const WELL_KNOWN_BOTS: [&str; 4] = ["dependabot", "github-actions", "renovate", "pre-commit-ci"];
+
 fn is_bot(actor: &Actor) -> bool {
     format!("{} {} {}", actor.name, actor.login.as_deref().unwrap_or(""), actor.email).to_lowercase().contains("[bot]")
 }
@@ -48,7 +51,8 @@ fn bot_name(actor: &Actor) -> String {
 }
 
 /// Applies the publishing rule for co-authors:
-/// - AI assistants and bots are named, because they are not people.
+/// - AI assistants are named, because they are not people. So are bots, except a custom bot
+///   in a private repo, because its name can include an organization's.
 /// - A person is named only with a GitHub account and a co-authored commit in a public repo.
 ///   That link is already public, and only those commits count, so the number reveals
 ///   nothing about private work.
@@ -98,7 +102,10 @@ pub fn tally(events: &[CoauthorEvent], login: &str, total_commits: i64, allowed:
             } else if is_bot(actor) {
                 bot = true;
                 let name = bot_name(actor);
-                credit(format!("bot:{name}"), name, "bot");
+                let opted = account_lower.as_ref().is_some_and(|value| opted_in.contains(value));
+                if !event.is_private || opted || WELL_KNOWN_BOTS.contains(&name.to_lowercase().as_str()) {
+                    credit(format!("bot:{name}"), name, "bot");
+                }
             } else if let Some(account) = account.filter(|_| !event.is_private || account_lower.as_ref().is_some_and(|value| opted_in.contains(value))) {
                 person = true;
                 credit(format!("person:{account}"), format!("@{account}"), "person");
@@ -160,6 +167,21 @@ mod tests {
         assert_eq!(summary.named, vec![row("Claude Opus 5.5", "ai", 1), row("Claude Sonnet 5.5", "ai", 1), row("dependabot", "bot", 1)]);
         assert_eq!((summary.coauthored_commits, summary.solo_commits), (3, 1));
         assert_eq!((summary.by_ai, summary.by_bot, summary.by_person), (2, 1, 0));
+    }
+
+    #[test]
+    fn a_custom_bot_in_a_private_repo_is_only_counted() {
+        let custom = || actor("acme-deploy[bot]", "1+acme-deploy[bot]@users.noreply.github.com", Some("acme-deploy"));
+        let dependabot = actor("dependabot[bot]", "x@users.noreply.github.com", Some("dependabot"));
+        let events = vec![event("1", true, vec![custom()]), event("2", true, vec![dependabot])];
+        let summary = tally(&events, "octo", 2, &[], &[]);
+        assert_eq!(summary.named, vec![row("dependabot", "bot", 1)]);
+        assert_eq!(summary.by_bot, 2);
+        assert!(!format!("{summary:?}").contains("acme"));
+
+        let public = vec![event("1", false, vec![custom()]), event("2", true, vec![custom()])];
+        assert_eq!(tally(&public, "octo", 2, &[], &[]).named, vec![row("acme-deploy", "bot", 1)], "public commits only");
+        assert_eq!(tally(&events[..1], "octo", 1, &["acme-deploy".to_string()], &[]).named, vec![row("acme-deploy", "bot", 1)], "opted in");
     }
 
     #[test]

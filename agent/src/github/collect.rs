@@ -464,7 +464,7 @@ pub fn collect(gh: &Gh, store: &mut Store, settings: &Settings, log: Log<'_>, no
     let missing = gh.missing_scopes(&["repo", "read:org"]);
     if !missing.is_empty() {
         bail!(
-            "This GitHub token is missing {}. Without it, private work would silently drop out of your stats, so nothing was uploaded. Run `gh auth refresh -s repo,read:org` or `oms github-login`.",
+            "This GitHub token is missing {}. Without it, private work would silently drop out of your stats, so nothing was uploaded. Run `gh auth refresh -s repo,read:org`, or use a token with those scopes.",
             missing.join(", ")
         );
     }

@@ -79,6 +79,7 @@ export async function deleteUser(db: Db, userId: string): Promise<void> {
 }
 
 export interface SessionRow {
+  token_hash: string;
   user_id: string;
   kind: 'web' | 'agent';
   machine_id: string | null;
@@ -94,14 +95,21 @@ export async function createSession(
   expiresAt: string | null,
   now: string,
 ): Promise<void> {
-  await db
-    .prepare('INSERT INTO sessions (token_hash, user_id, kind, machine_id, created_at, expires_at) VALUES (?, ?, ?, ?, ?, ?)')
-    .bind(tokenHash, userId, kind, machineId, now, expiresAt)
-    .run();
+  await db.batch([
+    // Signing a machine in again replaces its old token, so that also revokes a leaked one.
+    db.prepare('DELETE FROM sessions WHERE user_id = ? AND machine_id = ?').bind(userId, machineId),
+    db
+      .prepare('INSERT INTO sessions (token_hash, user_id, kind, machine_id, created_at, expires_at) VALUES (?, ?, ?, ?, ?, ?)')
+      .bind(tokenHash, userId, kind, machineId, now, expiresAt),
+  ]);
+}
+
+export async function renewSession(db: Db, tokenHash: string, expiresAt: string): Promise<void> {
+  await db.prepare('UPDATE sessions SET expires_at = ? WHERE token_hash = ?').bind(expiresAt, tokenHash).run();
 }
 
 export async function findSession(db: Db, tokenHash: string, now: string): Promise<SessionRow | null> {
-  const row = await db.prepare('SELECT user_id, kind, machine_id, expires_at FROM sessions WHERE token_hash = ?').bind(tokenHash).first<SessionRow>();
+  const row = await db.prepare('SELECT token_hash, user_id, kind, machine_id, expires_at FROM sessions WHERE token_hash = ?').bind(tokenHash).first<SessionRow>();
   if (!row) return null;
   return row.expires_at && row.expires_at <= now ? null : row;
 }

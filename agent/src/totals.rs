@@ -113,12 +113,19 @@ fn parse_account_usage(result: &Value) -> Option<ToolTotals> {
     Some(ToolTotals { scope: "account".into(), total, as_of, models: None, daily: Some(daily) })
 }
 
+fn codex_command(program: &str, args: &[String]) -> Command {
+    let mut command = Command::new(program);
+    // Codex has no use for the token that reads this user's repositories.
+    command.args(args).env_remove("OMS_GITHUB_TOKEN").stdin(Stdio::piped()).stdout(Stdio::piped()).stderr(Stdio::null());
+    command
+}
+
 /// The figure behind Codex's `/usage`: the account's lifetime total, across every device.
 /// It comes from the user's own CLI over its documented app-server protocol, so this agent
 /// never touches Codex credentials. Accounts without usage analytics report nothing.
 pub fn read_codex_account(command: &[String], timeout: Duration) -> Option<ToolTotals> {
     let (program, args) = command.split_first()?;
-    let mut child = Command::new(program).args(args).stdin(Stdio::piped()).stdout(Stdio::piped()).stderr(Stdio::null()).spawn().ok()?;
+    let mut child = codex_command(program, args).spawn().ok()?;
     let mut stdin = child.stdin.take()?;
     let stdout = child.stdout.take()?;
 
@@ -265,6 +272,12 @@ mod tests {
 
     const GOOD: &str = r#"read line; echo 'not json'; echo '{"id":1,"result":{}}'; read line; read line;
 echo '{"id":2,"result":{"summary":{"lifetimeTokens":26308612616},"dailyUsageBuckets":[{"startDate":"2026-07-11","tokens":100},{"startDate":"2026-11-08","tokens":200},{"startDate":"x","tokens":5}]}}'"#;
+
+    #[test]
+    fn codex_does_not_inherit_the_github_token() {
+        let command = codex_command("codex", &[]);
+        assert!(command.get_envs().any(|(key, value)| key.to_str() == Some("OMS_GITHUB_TOKEN") && value.is_none()));
+    }
 
     #[test]
     fn codex_account_usage_comes_through_its_protocol() {

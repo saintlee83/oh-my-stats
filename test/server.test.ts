@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import { test } from 'node:test';
-import { handle, type Deps } from '../src/server/app.ts';
+import { handle, isLocalRequest, type Deps } from '../src/server/app.ts';
 import { testDb } from './sqlite-d1.ts';
 import { githubMetrics } from './fixtures.ts';
 
@@ -587,6 +587,69 @@ test('one account can write only so many rows a day, and what it stored stays in
   context.setTime('2026-11-10T05:00:00Z');
   assert.equal((await put(changed)).status, 200, 'a new day, a new budget');
   assert.deepEqual({ ...count() }, { rows: 20_000, most: 9 });
+});
+
+test('signing a machine in again revokes its old token, and leaves other machines alone', async () => {
+  const context = app();
+  const old = await signIn(context, MACHINE_A);
+  const other = await signIn(context, MACHINE_B, 'desktop');
+  const fresh = await signIn(context, MACHINE_A);
+  assert.equal((await context.call('/v1/me', api(old, 'GET'))).status, 401);
+  assert.equal((await context.call('/v1/me', api(fresh, 'GET'))).status, 200);
+  assert.equal((await context.call('/v1/me', api(other, 'GET'))).status, 200);
+});
+
+test('a machine stays signed in while it uploads, and expires after 180 quiet days', async () => {
+  const context = app();
+  const token = await signIn(context);
+  const expiry = () => (context.deps.db as ReturnType<typeof testDb>).raw.prepare('SELECT expires_at FROM sessions').get()?.expires_at;
+  assert.equal(expiry(), '2027-05-08T05:00:00.000Z');
+
+  context.setTime('2027-05-01T05:00:00Z');
+  assert.equal((await context.call('/v1/usage', api(token, 'PUT', upload(MACHINE_A)))).status, 200);
+  assert.equal(expiry(), '2027-10-28T05:00:00.000Z', 'renewed');
+
+  context.setTime('2027-05-02T05:00:00Z');
+  await context.call('/v1/usage', api(token, 'PUT', upload(MACHINE_A)));
+  assert.equal(expiry(), '2027-10-28T05:00:00.000Z', 'not written on every upload');
+
+  context.setTime('2027-10-29T05:00:00Z');
+  assert.equal((await context.call('/v1/me', api(token, 'GET'))).status, 401);
+});
+
+test('a token from before expiry existed gets an expiry on its next upload', async () => {
+  const context = app();
+  const token = await signIn(context);
+  const { raw } = context.deps.db as ReturnType<typeof testDb>;
+  raw.exec('UPDATE sessions SET expires_at = NULL');
+  await context.call('/v1/usage', api(token, 'PUT', upload(MACHINE_A)));
+  assert.equal(raw.prepare('SELECT expires_at FROM sessions').get()?.expires_at, '2027-05-08T05:00:00.000Z');
+});
+
+test('an account can only register so many machines', async () => {
+  const context = app();
+  const id = (index: number) => index.toString(16).padStart(32, '0');
+  for (let index = 0; index < 50; index++) await signIn(context, id(index), `machine ${index}`);
+  const again = (machineId: string) => context.call('/v1/auth/token', api(null, 'POST', { githubToken: 'gh-token', machine: machine(machineId) }));
+  assert.equal((await again(id(50))).status, 403);
+  assert.equal((await again(id(0))).status, 200, 'a machine it already has can sign in again');
+});
+
+test('GitHub stats of an impossible size are refused', async () => {
+  const context = app();
+  const token = await signIn(context);
+  const put = (overrides: object) => context.call('/v1/github', api(token, 'PUT', { ...githubMetrics(), ...overrides }));
+  assert.equal((await put({ languages: Array.from({ length: 501 }, () => ({ name: 'Rust' })) })).status, 400);
+  assert.equal((await put({ languages: [{ name: 'x'.repeat(201) }] })).status, 400);
+  let nested: unknown = 1;
+  for (let depth = 0; depth < 10; depth++) nested = [nested];
+  assert.equal((await put({ languages: nested })).status, 400);
+  assert.equal((await put({})).status, 200);
+});
+
+test('development shortcuts only apply on this computer', () => {
+  for (const url of ['http://localhost:8787/v1/config', 'http://127.0.0.1:8787/', 'http://[::1]:8787/']) assert.ok(isLocalRequest(new Request(url)), url);
+  for (const url of ['https://ohmystats.dev/v1/config', 'http://localhost.evil.example/']) assert.ok(!isLocalRequest(new Request(url)), url);
 });
 
 test('plain http is sent to https, except on this computer', async () => {
