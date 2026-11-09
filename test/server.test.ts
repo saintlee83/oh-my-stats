@@ -391,6 +391,15 @@ test('the install steps name the server, except on the hosted one the agent alre
   assert.ok(!text.includes('--server'));
 });
 
+test('plain http is sent to https, except on this computer', async () => {
+  const { deps } = app();
+  const redirected = await handle(new Request('http://ohmystats.dev/v1/usage?x=1', { method: 'PUT', body: '{}' }), deps);
+  assert.equal(redirected.status, 308, 'keeps the method, and the body is never processed');
+  assert.equal(redirected.headers.get('location'), 'https://ohmystats.dev/v1/usage?x=1');
+  assert.equal((await handle(new Request('http://localhost:8787/healthz'), deps)).status, 200);
+  assert.equal((await handle(new Request('http://127.0.0.1:8787/healthz'), deps)).status, 200);
+});
+
 test('unknown pages, methods and servers without sign-in configured fail cleanly', async () => {
   const context = app();
   assert.equal((await context.call('/nope')).status, 404);
