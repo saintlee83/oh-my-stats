@@ -67,12 +67,14 @@ function layout(title: string, body: string, viewer: UserRow | null): string {
 `;
 }
 
+const HOSTED_ORIGIN = 'https://ohmystats.dev';
+
 const installSnippet = (origin: string) => `# Build the agent (a prebuilt release is on the way)
 git clone https://github.com/saintlee83/oh-my-stats
 cargo install --path oh-my-stats/agent
 
 # Sign in on each machine, then let it run in the background
-oms login --server ${origin}
+oms login${origin === HOSTED_ORIGIN ? '' : ` --server ${origin}`}
 oms service install`;
 
 export function landingPage(origin: string, viewer: UserRow | null): string {

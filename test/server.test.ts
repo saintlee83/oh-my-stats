@@ -382,6 +382,15 @@ test('a renamed GitHub account keeps its data, and a reused login gets none of i
   assert.equal((await context.call('/u/octo')).status, 404, 'the newcomer starts private and empty');
 });
 
+test('the install steps name the server, except on the hosted one the agent already defaults to', async () => {
+  const context = app();
+  assert.match(await (await context.call('/')).text(), /oms login --server https:\/\/stats\.example/);
+  const hosted = await handle(new Request('https://ohmystats.dev/'), context.deps);
+  const text = await hosted.text();
+  assert.match(text, /oms login\n/);
+  assert.ok(!text.includes('--server'));
+});
+
 test('unknown pages, methods and servers without sign-in configured fail cleanly', async () => {
   const context = app();
   assert.equal((await context.call('/nope')).status, 404);

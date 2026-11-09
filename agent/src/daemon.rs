@@ -138,7 +138,7 @@ pub fn print_status() -> Result<()> {
     println!("Timezone      {}", config.timezone_name());
     println!("Local record  {} model responses", store.event_count()?);
     let Ok(api) = signed_in_api(&config) else {
-        println!("Sign-in       not signed in. Run `oms login --server <url>`.");
+        println!("Sign-in       not signed in. Run `oms login`.");
         return Ok(());
     };
     println!("Server        {}", config.server.as_deref().unwrap_or("?"));

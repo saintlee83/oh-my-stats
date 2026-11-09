@@ -1,6 +1,6 @@
 # oh-my-stats
 
-The ultimate developer stats platform. Sign in with GitHub, run a small agent on each computer, and see your AI tokens and contributions in one place, with private work included.
+The ultimate developer stats platform, at [ohmystats.dev](https://ohmystats.dev). Sign in with GitHub, run a small agent on each computer, and see your AI tokens and contributions in one place, with private work included.
 
 - **Continuous:** a background agent reads new log lines as you work, and keeps its own record, so history survives when AI tools delete their logs.
 - **Multi-machine:** every computer signs in to the same account, and their numbers are combined correctly.
@@ -27,10 +27,10 @@ The agent needs [Rust](https://rustup.rs) to build. Prebuilt binaries aren't pub
 git clone https://github.com/saintlee83/oh-my-stats
 cargo install --path oh-my-stats/agent
 
-oms login --server https://your-server   # approve a code in your browser
-oms sync                                 # send your usage now
-oms service install                      # keep tracking in the background
-oms publish                              # optional: make your profile public
+oms login             # approve a code in your browser
+oms sync              # send your usage now
+oms service install   # keep tracking in the background
+oms publish           # optional: make your profile public
 ```
 
 Repeat `oms login`, `oms sync` and `oms service install` on each computer.
@@ -40,7 +40,7 @@ GitHub stats need read access to your repositories, and that access stays on you
 Once published, add the dashboard to your GitHub profile README:
 
 ```markdown
-![Developer stats](https://your-server/u/<login>/dashboard.svg)
+![Developer stats](https://ohmystats.dev/u/<login>/dashboard.svg)
 ```
 
 ## Commands
@@ -99,7 +99,7 @@ A machine's id comes from its hardware, so reinstalling doesn't register it twic
 The server is a single Cloudflare Worker with a D1 database, and has no runtime dependencies.
 
 1. [Create a GitHub OAuth App](https://github.com/settings/applications/new). Set the callback URL to `https://your-server/auth/callback`, and **enable device flow**.
-2. Create the database, and put its id in `wrangler.jsonc`. Set `GITHUB_CLIENT_ID` under `vars`.
+2. Create the database. In `wrangler.jsonc`, put in its id, your domain under `routes`, and your app's `GITHUB_CLIENT_ID` under `vars`.
    ```sh
    pnpm install
    npx wrangler d1 create oh-my-stats
@@ -110,6 +110,8 @@ The server is a single Cloudflare Worker with a D1 database, and has no runtime 
    npx wrangler secret put GITHUB_CLIENT_SECRET
    npx wrangler deploy
    ```
+
+Then point agents at it with `oms login --server https://your-server`.
 
 ## Known limits
 
