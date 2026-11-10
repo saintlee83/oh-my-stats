@@ -701,6 +701,7 @@ dependencies = [
  "chrono",
  "chrono-tz",
  "clap",
+ "getrandom 0.4.3",
  "iana-time-zone",
  "regex",
  "rusqlite",

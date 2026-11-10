@@ -25,9 +25,25 @@ pub fn default_roots() -> Result<LogRoots> {
         None => vec![home.join(".claude/projects"), home.join(".config/claude/projects")],
     };
     // Claude Desktop keeps agent sessions of its own, in the same format.
-    claude.push(home.join("Library/Application Support/Claude/local-agent-mode-sessions"));
+    claude.extend(claude_desktop_dirs(&home).into_iter().map(|dir| dir.join("local-agent-mode-sessions")));
     let codex_base = std::env::var_os("CODEX_HOME").filter(|value| !value.is_empty()).map(PathBuf::from).unwrap_or_else(|| home.join(".codex"));
     Ok(LogRoots { claude, codex: vec![codex_base.join("sessions"), codex_base.join("archived_sessions")] })
+}
+
+/// Claude Desktop's own folder. On Windows, a packaged (MSIX) install keeps it inside its package.
+fn claude_desktop_dirs(home: &Path) -> Vec<PathBuf> {
+    if !cfg!(windows) {
+        return vec![home.join("Library/Application Support/Claude")];
+    }
+    let mut dirs: Vec<PathBuf> = std::env::var_os("APPDATA").map(|dir| PathBuf::from(dir).join("Claude")).into_iter().collect();
+    if let Some(local) = std::env::var_os("LOCALAPPDATA") {
+        for package in fs::read_dir(PathBuf::from(local).join("Packages")).into_iter().flatten().flatten() {
+            if package.file_name().to_string_lossy().starts_with("Claude_") {
+                dirs.push(package.path().join(r"LocalCache\Roaming\Claude"));
+            }
+        }
+    }
+    dirs
 }
 
 #[derive(Debug, Clone)]

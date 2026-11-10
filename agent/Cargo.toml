@@ -10,11 +10,17 @@ repository = "https://github.com/saintlee83/oh-my-stats"
 name = "oms"
 path = "src/main.rs"
 
+# Runs the agent in the background on Windows, with no console window. Elsewhere it only says so.
+[[bin]]
+name = "omsw"
+path = "src/bin/omsw.rs"
+
 [dependencies]
 anyhow = "1"
 chrono = { version = "0.4", default-features = false, features = ["clock", "std"] }
 chrono-tz = "0.10"
 clap = { version = "4", features = ["derive"] }
+getrandom = "0.4"
 iana-time-zone = "0.1"
 regex = "1"
 rusqlite = { version = "0.41", features = ["bundled"] }

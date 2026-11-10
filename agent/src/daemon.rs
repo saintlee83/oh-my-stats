@@ -21,14 +21,38 @@ fn log(message: &str) {
 }
 
 fn pid_alive(pid: &str) -> bool {
+    if pid.is_empty() || !pid.bytes().all(|byte| byte.is_ascii_digit()) {
+        return false;
+    }
+    if cfg!(windows) {
+        return windows_processes(&format!("PID eq {pid}")).iter().any(|(_, found)| found == pid);
+    }
     Command::new("kill").args(["-0", pid]).stderr(Stdio::null()).status().is_ok_and(|status| status.success())
+}
+
+/// The processes `tasklist` finds for a filter such as "PID eq 42", as (program, pid).
+pub fn windows_processes(filter: &str) -> Vec<(String, String)> {
+    let Ok(output) = Command::new("tasklist").args(["/FI", filter, "/FO", "CSV", "/NH"]).stderr(Stdio::null()).output() else { return Vec::new() };
+    tasklist_rows(&String::from_utf8_lossy(&output.stdout))
+}
+
+/// Rows look like "oms.exe","42","Console","1","10,240 K". Finding nothing prints a message
+/// in the system's language instead, so only rows count.
+fn tasklist_rows(output: &str) -> Vec<(String, String)> {
+    output
+        .lines()
+        .filter_map(|line| {
+            let mut fields = line.trim().strip_prefix('"')?.split("\",\"");
+            Some((fields.next()?.to_string(), fields.next()?.to_string()))
+        })
+        .collect()
 }
 
 /// Two agents reading the same logs would be harmless but wasteful, so only one runs.
 fn take_lock(path: &Path) -> Result<()> {
     if let Ok(pid) = fs::read_to_string(path) {
         let pid = pid.trim();
-        if !pid.is_empty() && pid != std::process::id().to_string() && pid_alive(pid) {
+        if pid != std::process::id().to_string() && pid_alive(pid) {
             bail!("The agent is already running (pid {pid}).");
         }
     }
@@ -175,4 +199,23 @@ pub fn print_status() -> Result<()> {
         );
     }
     Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn windows_processes_are_read_from_tasklist_rows() {
+        let found = "\"oms.exe\",\"4242\",\"Console\",\"1\",\"10,240 K\"\r\n";
+        assert_eq!(tasklist_rows(found), vec![("oms.exe".to_string(), "4242".to_string())]);
+        assert!(tasklist_rows("INFO: No tasks are running which match the specified criteria.\r\n").is_empty());
+    }
+
+    #[test]
+    fn a_lock_without_a_process_number_is_stale() {
+        for pid in ["", "abc", "1 2", "-1"] {
+            assert!(!pid_alive(pid), "{pid:?}");
+        }
+    }
 }

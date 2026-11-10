@@ -1,13 +1,21 @@
 use std::fs;
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 use std::process::{Command, Stdio};
 
 use anyhow::{Context, Result, bail};
 
 use crate::config::{home_dir, state_dir};
+use crate::daemon::windows_processes;
 
 const LABEL: &str = "dev.oh-my-stats.agent";
 const SYSTEMD_UNIT: &str = "oh-my-stats.service";
+
+/// Windows starts what's listed here when you log in, and shows it under Startup apps.
+/// Unlike a scheduled task or a service, it needs no administrator rights.
+const RUN_KEY: &str = r"HKCU\Software\Microsoft\Windows\CurrentVersion\Run";
+const RUN_VALUE: &str = "oh-my-stats";
+/// Installed next to oms.exe. It runs the agent with no console window: see src/bin/omsw.rs.
+const LAUNCHER: &str = "omsw.exe";
 
 /// Services start with a minimal PATH, which usually lacks `gh` and `codex`.
 fn service_path() -> String {
@@ -55,6 +63,11 @@ pub fn systemd_unit(binary: &str, path: &str) -> String {
     )
 }
 
+/// What Windows runs at login: the launcher, and the log file it writes to.
+pub fn run_entry(launcher: &str, log_file: &str) -> String {
+    format!("\"{launcher}\" \"{log_file}\"")
+}
+
 fn plist_path() -> Result<PathBuf> {
     Ok(home_dir()?.join("Library/LaunchAgents").join(format!("{LABEL}.plist")))
 }
@@ -70,6 +83,26 @@ fn uid() -> Result<String> {
 
 fn run_quietly(program: &str, args: &[&str]) -> bool {
     Command::new(program).args(args).stdout(Stdio::null()).stderr(Stdio::null()).status().is_ok_and(|status| status.success())
+}
+
+/// Starts the launcher outside this terminal's job where Windows allows it, so closing the
+/// terminal doesn't stop the agent. At the next login, Windows starts it anyway.
+fn start_launcher(launcher: &Path, log_file: &Path) -> std::io::Result<()> {
+    const CREATE_BREAKAWAY_FROM_JOB: u32 = 0x0100_0000;
+    let start = |flags: u32| {
+        let mut command = Command::new(launcher);
+        command.arg(log_file).stdin(Stdio::null()).stdout(Stdio::null()).stderr(Stdio::null());
+        #[cfg(windows)]
+        std::os::windows::process::CommandExt::creation_flags(&mut command, flags);
+        let _ = flags;
+        command.spawn().map(drop)
+    };
+    start(CREATE_BREAKAWAY_FROM_JOB).or_else(|_| start(0))
+}
+
+/// Ends the launcher and the agent it started, with anything the agent was running.
+fn stop_launcher() {
+    run_quietly("taskkill", &["/IM", LAUNCHER, "/T", "/F"]);
 }
 
 pub fn install() -> Result<()> {
@@ -96,6 +129,19 @@ pub fn install() -> Result<()> {
             bail!("systemctl could not start the agent. See {}", unit.display());
         }
         println!("The agent now runs in the background.\nLogs: journalctl --user -u {SYSTEMD_UNIT}");
+    } else if cfg!(windows) {
+        let launcher = std::env::current_exe()?.with_file_name(LAUNCHER);
+        if !launcher.exists() {
+            bail!("{LAUNCHER} should be next to oms.exe, where `cargo install` puts it. Install the agent again.");
+        }
+        let log_file = state_dir()?.join("agent.log");
+        let entry = run_entry(&launcher.to_string_lossy(), &log_file.to_string_lossy());
+        if !run_quietly("reg", &["add", RUN_KEY, "/v", RUN_VALUE, "/t", "REG_SZ", "/d", &entry, "/f"]) {
+            bail!("Windows didn't accept the startup entry under {RUN_KEY}.");
+        }
+        stop_launcher();
+        start_launcher(&launcher, &log_file).with_context(|| format!("could not start {}", launcher.display()))?;
+        println!("The agent now runs in the background and starts when you log in.\nLogs: {}", log_file.display());
     } else {
         bail!("Background service isn't supported on this platform yet. Run `oms daemon` yourself.");
     }
@@ -115,6 +161,9 @@ pub fn uninstall() -> Result<()> {
         if unit.exists() {
             fs::remove_file(&unit)?;
         }
+    } else if cfg!(windows) {
+        run_quietly("reg", &["delete", RUN_KEY, "/v", RUN_VALUE, "/f"]);
+        stop_launcher();
     }
     println!("Removed the background service. Your local history is kept.");
     Ok(())
@@ -123,6 +172,8 @@ pub fn uninstall() -> Result<()> {
 pub fn status() -> Result<()> {
     let running = if cfg!(target_os = "macos") {
         run_quietly("launchctl", &["print", &format!("gui/{}/{LABEL}", uid()?)])
+    } else if cfg!(windows) {
+        windows_processes(&format!("IMAGENAME eq {LAUNCHER}")).iter().any(|(program, _)| program.eq_ignore_ascii_case(LAUNCHER))
     } else {
         run_quietly("systemctl", &["--user", "is-active", "--quiet", SYSTEMD_UNIT])
     };
@@ -152,6 +203,12 @@ mod tests {
         let status = Command::new("plutil").arg("-lint").arg(&path).stdout(Stdio::null()).status().unwrap();
         let _ = fs::remove_file(&path);
         assert!(status.success());
+    }
+
+    #[test]
+    fn windows_starts_the_launcher_with_quoted_paths() {
+        let entry = run_entry(r"C:\Users\Jane Doe\.cargo\bin\omsw.exe", r"C:\Users\Jane Doe\.oh-my-stats\agent.log");
+        assert_eq!(entry, r#""C:\Users\Jane Doe\.cargo\bin\omsw.exe" "C:\Users\Jane Doe\.oh-my-stats\agent.log""#);
     }
 
     #[test]
