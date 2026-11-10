@@ -2,21 +2,68 @@ import type { GitHubMetrics, Metrics, TokenMetrics } from '../metrics.ts';
 import { commas, compact, hours, money, percent } from '../format.ts';
 import { WEEKDAYS } from '../time.ts';
 
+type Palette = Record<
+  'surface' | 'ink' | 'ink2' | 'muted' | 'grid' | 'axis' | 'ramp-low' | 'c1' | 'c2' | 'c3' | 'c4' | 'add' | 'del' | 'h0' | 'h1' | 'h2' | 'h3' | 'h4' | 'h5',
+  string
+>;
+
 /**
- * Colors come from a palette checked for color-vision safety: categorical slots
- * keep a fixed order, magnitude uses one hue, and added/removed use a blue-red
- * diverging pair. Inside an <img> an SVG follows the OS color scheme and has no
- * hover, so every value is also in the text cards, which act as the table view.
+ * Every palette is checked for color-vision safety against its own surface:
+ * categorical slots keep a fixed order, magnitude uses one hue whose quietest step
+ * still shows on the surface, and added/removed use a blue-red diverging pair of
+ * equal lightness. Text clears 4.5:1. Inside an <img> an SVG follows the OS color
+ * scheme and has no hover, so every value is also in the text cards, which act as
+ * the table view.
  */
-const STYLE = `
-  svg { --surface:#fcfcfb; --ink:#0b0b0b; --ink2:#52514e; --muted:#6f6d68; --grid:#e1e0d9; --axis:#c3c2b7; --ramp-low:#c3c2b7;
-    --c1:#2a78d6; --c2:#eb6834; --c3:#1baf7a; --c4:#eda100; --add:#2a78d6; --del:#e34948;
-    --h0:#f0efec; --h1:#b7d3f6; --h2:#86b6ef; --h3:#5598e7; --h4:#256abf; --h5:#104281; }
-  @media (prefers-color-scheme: dark) {
-    svg { --surface:#1a1a19; --ink:#f0efec; --ink2:#c3c2b7; --muted:#a3a198; --grid:#2c2c2a; --axis:#383835; --ramp-low:#5c5b55;
-      --c1:#3987e5; --c2:#d95926; --c3:#199e70; --c4:#c98500; --add:#3987e5; --del:#e66767;
-      --h0:#2c2c2a; --h1:#104281; --h2:#1c5cab; --h3:#2a78d6; --h4:#5598e7; --h5:#9ec5f4; }
-  }
+export const THEMES = {
+  /** GitHub's own backgrounds and grays, so on a GitHub page the image reads as one of its bordered boxes. */
+  github: {
+    light: {
+      surface: '#ffffff', ink: '#1f2328', ink2: '#424a53', muted: '#656d76', grid: '#d0d7de', axis: '#afb8c1', 'ramp-low': '#afb8c1',
+      c1: '#2a78d6', c2: '#eb6834', c3: '#1baf7a', c4: '#eda100', add: '#2a78d6', del: '#e34948',
+      h0: '#eaeef2', h1: '#7eb5fe', h2: '#4996f6', h3: '#2a78d6', h4: '#015bb5', h5: '#014286',
+    },
+    dark: {
+      surface: '#0d1117', ink: '#e6edf3', ink2: '#c9d1d9', muted: '#8b949e', grid: '#30363d', axis: '#3d444d', 'ramp-low': '#4d5560',
+      c1: '#3987e5', c2: '#d95926', c3: '#199e70', c4: '#c98500', add: '#3987e5', del: '#e66767',
+      h0: '#21262d', h1: '#004791', h2: '#0e63bf', h3: '#3683e2', h4: '#5ca3ff', h5: '#99c5fe',
+    },
+  },
+  /**
+   * Tokyo Night in dark mode and its Day variant in light mode. Its blue, orange, cyan and
+   * yellow are kept, at the lightness a chart needs; its green is left out, because next
+   * to yellow and orange it can't be told apart with red-green color blindness.
+   */
+  'tokyo-night': {
+    light: {
+      surface: '#e1e2e7', ink: '#3760bf', ink2: '#475692', muted: '#596089', grid: '#c4c8da', axis: '#a8aecb', 'ramp-low': '#a1a6c5',
+      c1: '#2e7de9', c2: '#b15c00', c3: '#007197', c4: '#a0731c', add: '#2e7de9', del: '#e8155b',
+      h0: '#c4c8da', h1: '#5a9efe', h2: '#3483f0', h3: '#176ad4', h4: '#0053b2', h5: '#013e89',
+    },
+    dark: {
+      surface: '#1a1b26', ink: '#c0caf5', ink2: '#a9b1d6', muted: '#7f86ad', grid: '#292e42', axis: '#3b4261', 'ramp-low': '#4a5175',
+      c1: '#698fe3', c2: '#d3763b', c3: '#0aa4bc', c4: '#b88841', add: '#698fe3', del: '#e1627b',
+      h0: '#292e42', h1: '#2a4b98', h2: '#4468b8', h3: '#6086d9', h4: '#7da6fb', h5: '#acc7ff',
+    },
+  },
+} satisfies Record<string, { light: Palette; dark: Palette }>;
+
+export type Theme = keyof typeof THEMES;
+export const DEFAULT_THEME: Theme = 'github';
+export const THEME_NAMES = Object.keys(THEMES) as Theme[];
+
+/** Reads a theme name loosely, so "tokyonight" and "Tokyo-Night" work too. Anything else is the default. */
+export function themeNamed(value: string | null): Theme {
+  const wanted = (value ?? '').toLowerCase().replace(/[^a-z]/g, '');
+  return THEME_NAMES.find((name) => name.replace(/-/g, '') === wanted) ?? DEFAULT_THEME;
+}
+
+const variables = (palette: Palette) =>
+  Object.entries(palette)
+    .map(([name, value]) => `--${name}:${value};`)
+    .join(' ');
+
+const RULES = `
   text { font-family: system-ui, -apple-system, "Segoe UI", Helvetica, Arial, sans-serif; fill: var(--ink); }
   .surface { fill: var(--surface); stroke: var(--grid); }
   .h1 { font-size: 15px; font-weight: 600; }
@@ -29,6 +76,12 @@ const STYLE = `
   .grid { stroke: var(--grid); stroke-width: 1; }
   .baseline { stroke: var(--axis); stroke-width: 1; }
 `;
+
+const style = (theme: Theme) => `
+  svg { ${variables(THEMES[theme].light)} }
+  @media (prefers-color-scheme: dark) {
+    svg { ${variables(THEMES[theme].dark)} }
+  }${RULES}`;
 
 const WIDTH = 1000;
 const MARGIN = 32;
@@ -397,7 +450,115 @@ function historySection(github: GitHubMetrics): Section {
   return { height: Math.max(gridBottom, 144), body };
 }
 
-export function renderDashboard(metrics: Metrics): string {
+/** Stacks sections on one surface, with a rule between each. */
+function frame(theme: Theme, heading: string, summary: string, sections: Section[], footer: string | null): string {
+  const spacing = 36;
+  let y = MARGIN;
+  let content = '';
+  sections.forEach((section, index) => {
+    if (index > 0) {
+      content += `<line x1="${MARGIN}" x2="${WIDTH - MARGIN}" y1="${y - spacing / 2}" y2="${y - spacing / 2}" class="grid"/>`;
+    }
+    content += `<g transform="translate(${MARGIN} ${y})">${section.body}</g>`;
+    y += section.height + spacing;
+  });
+  let height = y - spacing + MARGIN;
+  if (footer !== null) {
+    height += 18;
+    content += text(MARGIN, height - 20, footer, 'axis');
+  }
+
+  return `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 ${WIDTH} ${n(height)}" width="${WIDTH}" height="${n(height)}" role="img" aria-labelledby="omg-title omg-desc">
+<title id="omg-title">${esc(heading)}</title>
+<desc id="omg-desc">${esc(summary)}</desc>
+<style>${style(theme)}</style>
+<rect x="0.5" y="0.5" width="${WIDTH - 1}" height="${n(height - 1)}" rx="12" class="surface"/>
+${content}
+</svg>
+`;
+}
+
+const contributionsSummary = (github: GitHubMetrics) =>
+  `${github.login}: ${commas(github.counts.commits)} commits, ${commas(github.counts.pulls)} pull requests, ${commas(github.counts.reviews)} reviews, ${commas(github.counts.issues)} issues.`;
+
+const tokensSummary = (tokens: TokenMetrics) => `AI token usage: ${compact(tokens.total)} tokens.`;
+
+const listed = (items: string[], empty: string) => (items.length ? `${items.join(', ')}.` : empty);
+
+/**
+ * Each part of the dashboard can also be embedded on its own, so a profile README can
+ * show only some of them, in its own order. Parts are drawn at the dashboard's width,
+ * so stacked parts line up and their text stays the same size.
+ */
+type Component =
+  | { label: string; source: 'github'; draw(github: GitHubMetrics, timezone: string): Section; summary(github: GitHubMetrics): string }
+  | { label: string; source: 'tokens'; draw(tokens: TokenMetrics): Section; summary(tokens: TokenMetrics): string };
+
+export const COMPONENT_KEYS = ['contributions', 'rhythm', 'languages', 'coauthors', 'churn', 'tokens', 'history'] as const;
+export type ComponentKey = (typeof COMPONENT_KEYS)[number];
+
+const COMPONENTS: Record<ComponentKey, Component> = {
+  contributions: { label: 'Contributions', source: 'github', draw: headerSection, summary: contributionsSummary },
+  rhythm: {
+    label: 'Coding rhythm',
+    source: 'github',
+    draw: rhythmSection,
+    summary: ({ rhythm }) => `${commas(rhythm.total)} timestamped events by weekday and hour: ${rhythm.persona}.`,
+  },
+  languages: {
+    label: 'Top languages',
+    source: 'github',
+    draw: (github) => languagesPanel(github, INNER),
+    summary: (github) =>
+      `Top languages by lines added: ${listed(
+        github.languages.filter((row) => row.lines > 0).slice(0, 5).map((row) => `${row.name} ${percent(row.share, 0)}`),
+        'none yet.',
+      )}`,
+  },
+  coauthors: {
+    label: 'Co-authors',
+    source: 'github',
+    draw: (github) => coauthorsPanel(github, INNER),
+    summary: ({ coauthors }) =>
+      `Top coauthored with: ${listed(coauthors.rows.slice(0, 5).map((row) => `${row.label} (${commas(row.commits)} commits)`), 'nobody yet.')}`,
+  },
+  churn: {
+    label: 'Language churn',
+    source: 'github',
+    draw: churnSection,
+    summary: ({ churn }) => `Lines of code added and removed, by language: +${compact(churn.add)} / -${compact(churn.del)}.`,
+  },
+  tokens: { label: 'AI token trace', source: 'tokens', draw: tokensSection, summary: tokensSummary },
+  history: {
+    label: 'Contribution history',
+    source: 'github',
+    draw: historySection,
+    summary: ({ pulse }) => `Contributions by month, every year. Current streak ${pulse.streak} days, best ${pulse.bestStreak} days.`,
+  },
+};
+
+export const isComponentKey = (key: string): key is ComponentKey => Object.hasOwn(COMPONENTS, key);
+
+/** The parts that have data to draw, in dashboard order. */
+export function availableComponents(metrics: Metrics): { key: ComponentKey; label: string }[] {
+  return COMPONENT_KEYS.filter((key) => metrics[COMPONENTS[key].source]).map((key) => ({ key, label: COMPONENTS[key].label }));
+}
+
+/** One part of the dashboard. Without its data, it says so rather than leaving a broken image. */
+export function renderComponent(metrics: Metrics, key: ComponentKey, theme: Theme = DEFAULT_THEME): string {
+  const component = COMPONENTS[key];
+  const heading = `oh-my-stats: ${component.label}`;
+  if (component.source === 'tokens' && metrics.tokens) {
+    return frame(theme, heading, component.summary(metrics.tokens), [component.draw(metrics.tokens)], null);
+  }
+  if (component.source === 'github' && metrics.github) {
+    return frame(theme, heading, component.summary(metrics.github), [component.draw(metrics.github, metrics.timezone)], null);
+  }
+  const message = component.source === 'tokens' ? 'No AI token usage yet.' : 'No GitHub stats yet.';
+  return frame(theme, heading, message, [{ height: 36, body: text(0, 14, component.label, 'h1') + text(0, 32, message, 'note') }], null);
+}
+
+export function renderDashboard(metrics: Metrics, theme: Theme = DEFAULT_THEME): string {
   const sections: Section[] = [];
   const { github, tokens } = metrics;
 
@@ -416,31 +577,6 @@ export function renderDashboard(metrics: Metrics): string {
   if (tokens) sections.push(tokensSection(tokens));
   if (github) sections.push(historySection(github));
 
-  const spacing = 36;
-  let y = MARGIN;
-  let content = '';
-  sections.forEach((section, index) => {
-    if (index > 0) {
-      content += `<line x1="${MARGIN}" x2="${WIDTH - MARGIN}" y1="${y - spacing / 2}" y2="${y - spacing / 2}" class="grid"/>`;
-    }
-    content += `<g transform="translate(${MARGIN} ${y})">${section.body}</g>`;
-    y += section.height + spacing;
-  });
-  const height = y - spacing + MARGIN + 18;
-  content += text(MARGIN, height - 20, `oh-my-stats · updated ${metrics.generatedDate} · ${metrics.timezone}`, 'axis');
-
-  const summary = github
-    ? `${github.login}: ${commas(github.counts.commits)} commits, ${commas(github.counts.pulls)} pull requests, ${commas(github.counts.reviews)} reviews, ${commas(github.counts.issues)} issues.`
-    : tokens
-      ? `AI token usage: ${compact(tokens.total)} tokens.`
-      : 'No data yet.';
-
-  return `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 ${WIDTH} ${n(height)}" width="${WIDTH}" height="${n(height)}" role="img" aria-labelledby="omg-title omg-desc">
-<title id="omg-title">oh-my-stats developer dashboard</title>
-<desc id="omg-desc">${esc(summary)}</desc>
-<style>${STYLE}</style>
-<rect x="0.5" y="0.5" width="${WIDTH - 1}" height="${n(height - 1)}" rx="12" class="surface"/>
-${content}
-</svg>
-`;
+  const summary = github ? contributionsSummary(github) : tokens ? tokensSummary(tokens) : 'No data yet.';
+  return frame(theme, 'oh-my-stats developer dashboard', summary, sections, `oh-my-stats · updated ${metrics.generatedDate} · ${metrics.timezone}`);
 }

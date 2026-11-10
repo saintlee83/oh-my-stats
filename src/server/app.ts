@@ -1,6 +1,16 @@
 import type { GitHubMetrics, Metrics } from '../shared/metrics.ts';
 import { buildCards, cardContent, type Card } from '../shared/render/cards.ts';
-import { renderDashboard } from '../shared/render/svg.ts';
+import {
+  availableComponents,
+  COMPONENT_KEYS,
+  DEFAULT_THEME,
+  isComponentKey,
+  renderComponent,
+  renderDashboard,
+  THEME_NAMES,
+  themeNamed,
+  type Theme,
+} from '../shared/render/svg.ts';
 import { zoned } from '../shared/time.ts';
 import { computeTokens } from '../shared/tokens.ts';
 import {
@@ -173,10 +183,18 @@ const clientIp = (request: Request) => request.headers.get('cf-connecting-ip') ?
 
 const tooMany = () => new Response('Too many requests', { status: 429, headers: { 'retry-after': '60', 'cache-control': 'no-store' } });
 
-/** Query strings and letter case can't be used to get around the cache. */
+/** An image's address with its theme. The default theme has none, so older links share its copy. */
+const themed = (url: string, theme: Theme) => (theme === DEFAULT_THEME ? url : `${url}?theme=${theme}`);
+
+/**
+ * Query strings and letter case can't be used to get around the cache. An image keeps
+ * its theme, written one way, so there is one copy per theme.
+ */
 const publicKey = (request: Request) => {
   const url = new URL(request.url);
-  return new Request(`${url.origin}${url.pathname.toLowerCase()}`);
+  const path = url.pathname.toLowerCase();
+  const key = `${url.origin}${path}`;
+  return new Request(path.endsWith('.svg') ? themed(key, themeNamed(url.searchParams.get('theme'))) : key);
 };
 
 /**
@@ -210,7 +228,12 @@ async function purgeProfile(request: Request, deps: Deps, login: string): Promis
   const { cache } = deps;
   if (!cache) return;
   const base = `${new URL(request.url).origin}/u/${login.toLowerCase()}`;
-  const urls = [base, `${base}/dashboard.svg`, ...CARD_KEYS.map((key) => `${base}/cards/${key}.txt`)];
+  const images = [`${base}/dashboard.svg`, ...COMPONENT_KEYS.map((key) => `${base}/components/${key}.svg`)];
+  const urls = [
+    base,
+    ...CARD_KEYS.map((key) => `${base}/cards/${key}.txt`),
+    ...images.flatMap((image) => THEME_NAMES.map((theme) => themed(image, theme))),
+  ];
   await Promise.all(urls.map((url) => cache.delete(new Request(url))));
 }
 
@@ -221,18 +244,32 @@ async function publicProfile(login: string, deps: Deps): Promise<UserRow | null>
   return user?.is_public === 1 ? user : null;
 }
 
-async function serveDashboardSvg(login: string, deps: Deps): Promise<Response> {
-  const user = await publicProfile(login, deps);
-  if (!user) return new Response('Not found', { status: 404, headers: { 'cache-control': 'no-store' } });
-  const { metrics } = await buildMetrics(user, deps);
-  return new Response(renderDashboard(metrics), {
+const svgNotFound = () => new Response('Not found', { status: 404, headers: { 'cache-control': 'no-store' } });
+
+/** Only an image with data is cached, so the first upload shows at once. */
+const svg = (body: string, cacheable: boolean) =>
+  new Response(body, {
     headers: {
       'content-type': 'image/svg+xml; charset=utf-8',
-      'cache-control': hasData(metrics) ? PUBLIC_CACHE : 'no-store',
+      'cache-control': cacheable ? PUBLIC_CACHE : 'no-store',
       'content-security-policy': "default-src 'none'; style-src 'unsafe-inline'",
       'x-content-type-options': 'nosniff',
     },
   });
+
+async function serveDashboardSvg(login: string, theme: Theme, deps: Deps): Promise<Response> {
+  const user = await publicProfile(login, deps);
+  if (!user) return svgNotFound();
+  const { metrics } = await buildMetrics(user, deps);
+  return svg(renderDashboard(metrics, theme), hasData(metrics));
+}
+
+async function serveComponentSvg(login: string, key: string, theme: Theme, deps: Deps): Promise<Response> {
+  if (!isComponentKey(key)) return svgNotFound();
+  const user = await publicProfile(login, deps);
+  if (!user) return svgNotFound();
+  const { metrics } = await buildMetrics(user, deps);
+  return svg(renderComponent(metrics, key, theme), availableComponents(metrics).some((item) => item.key === key));
 }
 
 async function serveCard(login: string, key: string, deps: Deps): Promise<Response> {
@@ -254,7 +291,8 @@ async function renderProfile(login: string, request: Request, deps: Deps, viewer
   const origin = new URL(request.url).origin;
   // The page names whoever is signed in, so only signed-out visits share a cached copy.
   const shared = !viewer && hasData(metrics);
-  return html(profilePage(user, renderDashboard(metrics), buildCards(metrics), origin, viewer), 200, shared ? { 'cache-control': PUBLIC_CACHE } : {});
+  const page = profilePage(user, renderDashboard(metrics), buildCards(metrics), availableComponents(metrics), origin, viewer);
+  return html(page, 200, shared ? { 'cache-control': PUBLIC_CACHE } : {});
 }
 
 async function serveProfile(login: string, request: Request, deps: Deps): Promise<Response> {
@@ -309,8 +347,8 @@ async function serveMe(request: Request, deps: Deps): Promise<Response> {
   if (!viewer) return redirect('/login');
   const [machines, { metrics }] = await Promise.all([listMachines(deps.db, viewer.id), buildMetrics(viewer, deps)]);
   const tokensByMachine = new Map((metrics.tokens?.machines ?? []).map((row) => [row.id, row.total]));
-  const svg = hasData(metrics) ? renderDashboard(metrics) : null;
-  return html(dashboardPage(viewer, machines, tokensByMachine, svg, new URL(request.url).origin));
+  const dashboard = hasData(metrics) ? renderDashboard(metrics) : null;
+  return html(dashboardPage(viewer, machines, tokensByMachine, dashboard, availableComponents(metrics), new URL(request.url).origin));
 }
 
 async function handleWebPost(request: Request, path: string, deps: Deps): Promise<Response> {
@@ -449,11 +487,13 @@ async function route(request: Request, deps: Deps): Promise<Response> {
   if (path === '/auth/callback') return finishLogin(request, deps);
   if (path === '/me') return serveMe(request, deps);
 
-  const profile = /^\/u\/([A-Za-z0-9-]{1,39})(?:\/(dashboard\.svg|cards\/([a-z]+)\.txt))?$/.exec(path);
+  const profile = /^\/u\/([A-Za-z0-9-]{1,39})(?:\/(dashboard\.svg|cards\/([a-z]+)\.txt|components\/([a-z]+)\.svg))?$/.exec(path);
   if (profile) {
-    const [, login, resource, cardKey] = profile;
-    if (resource === 'dashboard.svg') return cachedPublic(request, deps, () => serveDashboardSvg(login, deps));
+    const [, login, resource, cardKey, componentKey] = profile;
+    const theme = themeNamed(url.searchParams.get('theme'));
+    if (resource === 'dashboard.svg') return cachedPublic(request, deps, () => serveDashboardSvg(login, theme, deps));
     if (cardKey) return cachedPublic(request, deps, () => serveCard(login, cardKey, deps));
+    if (componentKey) return cachedPublic(request, deps, () => serveComponentSvg(login, componentKey, theme, deps));
     return serveProfile(login, request, deps);
   }
   return html(errorPage(404, 'Page not found.', await viewerFromCookie(request, deps)), 404);

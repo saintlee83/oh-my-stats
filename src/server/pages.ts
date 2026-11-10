@@ -1,4 +1,5 @@
 import type { Card } from '../shared/render/cards.ts';
+import type { ComponentKey } from '../shared/render/svg.ts';
 import { compact } from '../shared/format.ts';
 import type { MachineRow, UserRow } from './db.ts';
 
@@ -8,12 +9,15 @@ export function esc(value: unknown): string {
   return String(value).replace(/[&<>"']/g, (char) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' })[char] as string);
 }
 
+/** GitHub's light and dark colors, following the system setting, to match the dashboard's default theme. */
 const STYLE = `
-  :root { color-scheme: light dark; --bg:#f9f9f7; --surface:#fcfcfb; --ink:#0b0b0b; --ink2:#52514e; --muted:#6f6d68; --line:#e1e0d9; --accent:#2a78d6; --accent-ink:#fff; --danger:#d03b3b; --code:#f0efec; }
-  @media (prefers-color-scheme: dark) { :root { --bg:#0d0d0d; --surface:#1a1a19; --ink:#f0efec; --ink2:#c3c2b7; --muted:#a3a198; --line:#2c2c2a; --accent:#3987e5; --code:#262624; } }
+  :root { color-scheme: light dark; --bg:#ffffff; --surface:#ffffff; --ink:#1f2328; --ink2:#424a53; --muted:#656d76; --line:#d0d7de; --link:#0969da;
+    --button:#f6f8fa; --primary:#1f883d; --primary-ink:#ffffff; --danger:#d1242f; --code:#f6f8fa; --code-inline:rgba(175,184,193,0.2); }
+  @media (prefers-color-scheme: dark) { :root { --bg:#0d1117; --surface:#0d1117; --ink:#e6edf3; --ink2:#c9d1d9; --muted:#8b949e; --line:#30363d; --link:#4493f8;
+    --button:#21262d; --primary:#238636; --danger:#f85149; --code:#161b22; --code-inline:rgba(110,118,129,0.4); } }
   * { box-sizing: border-box; }
-  body { margin: 0; background: var(--bg); color: var(--ink); font: 15px/1.55 system-ui, -apple-system, "Segoe UI", Helvetica, Arial, sans-serif; }
-  a { color: var(--accent); }
+  body { margin: 0; background: var(--bg); color: var(--ink); font: 15px/1.55 -apple-system, BlinkMacSystemFont, "Segoe UI", "Noto Sans", Helvetica, Arial, sans-serif; }
+  a { color: var(--link); }
   header.top { display: flex; align-items: center; justify-content: space-between; gap: 16px; max-width: 1032px; margin: 0 auto; padding: 16px; }
   .brand { font-weight: 650; color: var(--ink); text-decoration: none; }
   main { max-width: 1032px; margin: 0 auto; padding: 8px 16px 64px; }
@@ -24,13 +28,13 @@ const STYLE = `
   .dash { overflow-x: auto; margin: 16px 0; }
   .dash svg { display: block; max-width: 100%; height: auto; }
   pre, code { font: 13px/1.5 ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; }
-  pre { background: var(--code); border-radius: 8px; padding: 12px 14px; overflow-x: auto; margin: 8px 0 12px; }
-  code { background: var(--code); border-radius: 4px; padding: 1px 5px; }
+  pre { background: var(--code); border-radius: 6px; padding: 12px 14px; overflow-x: auto; margin: 8px 0 12px; }
+  code { background: var(--code-inline); border-radius: 6px; padding: 1px 5px; }
   pre code { background: none; padding: 0; }
-  button, .button { font: inherit; font-weight: 600; cursor: pointer; border: 1px solid var(--line); background: var(--surface); color: var(--ink); border-radius: 8px; padding: 7px 12px; text-decoration: none; display: inline-block; min-height: 36px; }
-  .primary { background: var(--accent); border-color: var(--accent); color: var(--accent-ink); }
+  button, .button { font: inherit; font-weight: 600; cursor: pointer; border: 1px solid var(--line); background: var(--button); color: var(--ink); border-radius: 6px; padding: 7px 12px; text-decoration: none; display: inline-block; min-height: 36px; }
+  .primary { background: var(--primary); border-color: var(--primary); color: var(--primary-ink); }
   .danger { color: var(--danger); }
-  input[type=text] { font: inherit; color: inherit; background: var(--bg); border: 1px solid var(--line); border-radius: 8px; padding: 6px 10px; min-height: 36px; width: 100%; max-width: 240px; }
+  input[type=text] { font: inherit; color: inherit; background: var(--bg); border: 1px solid var(--line); border-radius: 6px; padding: 6px 10px; min-height: 36px; width: 100%; max-width: 240px; }
   form.inline { display: inline-flex; gap: 8px; align-items: center; flex-wrap: wrap; margin: 0; }
   .table { width: 100%; overflow-x: auto; }
   table { width: 100%; border-collapse: collapse; font-variant-numeric: tabular-nums; }
@@ -97,7 +101,21 @@ export function landingPage(origin: string, viewer: UserRow | null): string {
   );
 }
 
-export function profilePage(user: UserRow, svg: string, cards: Card[], origin: string, viewer: UserRow | null): string {
+type Part = { key: ComponentKey; label: string };
+
+/** The whole dashboard as one image, then each part on its own for a README that wants only some. */
+function embedCode(url: string, parts: Part[]): string {
+  const dashboard = `<pre><code>${esc(`![Developer stats](${url}/dashboard.svg)`)}</code></pre>`;
+  if (parts.length === 0) return dashboard;
+  // A blank line puts each image in its own paragraph, so GitHub spaces them evenly.
+  const lines = parts.map((part) => `![${part.label}](${url}/components/${part.key}.svg)`).join('\n\n');
+  return `${dashboard}
+  <p>Or pick the parts you want, in any order:</p>
+  <pre><code>${esc(lines)}</code></pre>
+  <p class="muted">For Tokyo Night colors, add <code>?theme=tokyo-night</code> to any image address.</p>`;
+}
+
+export function profilePage(user: UserRow, svg: string, cards: Card[], parts: Part[], origin: string, viewer: UserRow | null): string {
   const url = `${origin}/u/${encodeURIComponent(user.login)}`;
   const avatar = user.avatar_url ? `<img src="${esc(user.avatar_url)}" alt="">` : '';
   const cardLinks = cards
@@ -109,7 +127,7 @@ export function profilePage(user: UserRow, svg: string, cards: Card[], origin: s
 <div class="dash">${svg}</div>
 <div class="panel">
   <h2>Add this to your GitHub profile</h2>
-  <pre><code>${esc(`![Developer stats](${url}/dashboard.svg)`)}</code></pre>
+  ${embedCode(url, parts)}
   ${cards.length ? `<h2>Text cards</h2><ul>${cardLinks}</ul>` : ''}
 </div>`,
     viewer,
@@ -136,6 +154,7 @@ export function dashboardPage(
   machines: MachineRow[],
   tokensByMachine: Map<string, number>,
   svg: string | null,
+  parts: Part[],
   origin: string,
 ): string {
   const url = `${origin}/u/${encodeURIComponent(user.login)}`;
@@ -150,7 +169,7 @@ ${svg ? `<div class="dash">${svg}</div>` : ''}
   <h2>Profile <span class="badge">${isPublic ? 'Public' : 'Private'}</span></h2>
   ${
     isPublic
-      ? `<p>Anyone can see your profile at <a href="${esc(url)}">${esc(url)}</a>.</p><pre><code>${esc(`![Developer stats](${url}/dashboard.svg)`)}</code></pre>`
+      ? `<p>Anyone can see your profile at <a href="${esc(url)}">${esc(url)}</a>.</p>${embedCode(url, parts)}`
       : '<p>Only you can see your stats. Publishing shows your totals, by model and by day. Machine names stay private.</p>'
   }
   <form method="post" action="/me/visibility"><input type="hidden" name="public" value="${isPublic ? '0' : '1'}"><button class="${isPublic ? '' : 'primary'}">${isPublic ? 'Make private' : 'Publish profile'}</button></form>
