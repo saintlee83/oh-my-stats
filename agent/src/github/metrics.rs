@@ -330,6 +330,11 @@ pub fn compute(snapshot: &Snapshot, tz: Tz, now: DateTime<Utc>, max_commit_lines
     json!({
         "login": snapshot.login,
         "memberSince": snapshot.member_since,
+        "profile": {
+            "name": snapshot.profile.name, "bio": snapshot.profile.bio, "company": snapshot.profile.company,
+            "location": snapshot.profile.location, "hireable": snapshot.profile.hireable,
+            "status": snapshot.profile.status.as_ref().map(|status| json!({ "emoji": status.emoji, "message": status.message, "busy": status.busy })),
+        },
         "counts": {
             "commits": commits, "pulls": pulls, "merged": merged.len(), "issues": issues, "reviews": reviews,
             "comments": snapshot.issue_comments, "calendar": calendar_total, "attributed": commits + pulls + issues + reviews,
@@ -407,12 +412,13 @@ mod tests {
     use super::*;
     use crate::github::churn::CommitChurn;
     use crate::github::coauthors::CoauthorSummary;
-    use crate::github::collect::{CommitRow, Coverage, IssueRow, LanguageBytes, PullRow, ReviewRow};
+    use crate::github::collect::{CommitRow, Coverage, IssueRow, LanguageBytes, Profile, ProfileStatus, PullRow, ReviewRow};
 
     fn empty() -> Snapshot {
         Snapshot {
             login: "octo".into(),
             member_since: "2020-01-01T00:00:00Z".into(),
+            profile: Profile::default(),
             calendar: vec![],
             years: vec![],
             commits: vec![],
@@ -552,5 +558,22 @@ mod tests {
         snapshot.commits = vec![commit("deadbeefcafe", "2026-05-05T00:00:00Z", Scope::Org)];
         let text = compute(&snapshot, SEOUL, now(), DEFAULT_MAX_COMMIT_LINES, &[]).to_string();
         assert!(!text.contains("deadbeefcafe"));
+    }
+
+    #[test]
+    fn the_public_profile_is_uploaded_in_the_servers_shape() {
+        let mut snapshot = empty();
+        snapshot.profile = Profile {
+            name: Some("Octo Cat".into()),
+            hireable: true,
+            status: Some(ProfileStatus { emoji: None, message: Some("Focusing".into()), busy: true }),
+            ..Profile::default()
+        };
+        let metrics = compute(&snapshot, SEOUL, now(), DEFAULT_MAX_COMMIT_LINES, &[]);
+        assert_eq!(metrics["profile"]["name"], "Octo Cat");
+        assert!(metrics["profile"]["bio"].is_null());
+        assert_eq!(metrics["profile"]["hireable"], true);
+        assert_eq!(metrics["profile"]["status"], json!({ "emoji": null, "message": "Focusing", "busy": true }));
+        assert!(compute(&empty(), SEOUL, now(), DEFAULT_MAX_COMMIT_LINES, &[])["profile"]["status"].is_null());
     }
 }

@@ -23,6 +23,8 @@ export interface UserRow {
   is_public: number;
   timezone: string;
   created_at: string;
+  /** What the owner wrote for their profile header, as JSON. */
+  profile: string | null;
 }
 
 export interface MachineRow {
@@ -64,6 +66,10 @@ export const userByLogin = (db: Db, login: string) =>
 
 export async function setPublic(db: Db, userId: string, isPublic: boolean, now: string): Promise<void> {
   await db.prepare('UPDATE users SET is_public = ?, updated_at = ? WHERE id = ?').bind(isPublic ? 1 : 0, now, userId).run();
+}
+
+export async function saveProfile(db: Db, userId: string, profile: string | null, now: string): Promise<void> {
+  await db.prepare('UPDATE users SET profile = ?, updated_at = ? WHERE id = ?').bind(profile, now, userId).run();
 }
 
 export async function deleteUser(db: Db, userId: string): Promise<void> {

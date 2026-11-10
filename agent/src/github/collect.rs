@@ -78,10 +78,30 @@ pub struct Coverage {
     pub gists: usize,
 }
 
+/// The public GitHub profile, for the profile header. Unlike the rest of the snapshot it's
+/// free text, which can name an organization, but it's what anyone already sees on GitHub.
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub struct Profile {
+    pub name: Option<String>,
+    pub bio: Option<String>,
+    pub company: Option<String>,
+    pub location: Option<String>,
+    pub hireable: bool,
+    pub status: Option<ProfileStatus>,
+}
+
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub struct ProfileStatus {
+    pub emoji: Option<String>,
+    pub message: Option<String>,
+    pub busy: bool,
+}
+
 #[derive(Debug, Clone)]
 pub struct Snapshot {
     pub login: String,
     pub member_since: String,
+    pub profile: Profile,
     pub calendar: Vec<(String, i64)>,
     /// (year, calendar total, hidden from the API breakdown)
     pub years: Vec<(i32, i64, i64)>,
@@ -128,6 +148,59 @@ fn text(value: &Value, path: &str) -> String {
 
 fn int(value: &Value, path: &str) -> i64 {
     value.pointer(path).and_then(Value::as_i64).unwrap_or(0)
+}
+
+/// The server keeps 160 characters of each, as many as GitHub allows in a bio.
+const PROFILE_TEXT: usize = 160;
+
+/// One line, without control characters, clipped to what the server keeps. Counted in UTF-16
+/// units, as the server counts, so an upload is never refused for a long name.
+fn profile_text(value: &Value, path: &str) -> Option<String> {
+    let line = value.pointer(path)?.as_str()?.split_whitespace().collect::<Vec<_>>().join(" ");
+    let mut clipped = String::new();
+    let mut units = 0;
+    for char in line.chars().filter(|char| !char.is_control()) {
+        units += char.len_utf16();
+        if units > PROFILE_TEXT {
+            break;
+        }
+        clipped.push(char);
+    }
+    let clipped = clipped.trim();
+    (!clipped.is_empty()).then(|| clipped.to_string())
+}
+
+/// GitHub gives a status emoji as HTML around the emoji itself. A custom emoji is an image,
+/// with no text, so it's left out.
+fn emoji_text(html: &str) -> Option<String> {
+    let mut text = String::new();
+    let mut in_tag = false;
+    for char in html.chars() {
+        match char {
+            '<' => in_tag = true,
+            '>' => in_tag = false,
+            _ if !in_tag => text.push(char),
+            _ => {}
+        }
+    }
+    let text = text.trim();
+    (!text.is_empty() && text.chars().count() <= 8).then(|| text.to_string())
+}
+
+pub fn profile_from(viewer: &Value) -> Profile {
+    let status = viewer.get("status").filter(|status| status.is_object()).map(|status| ProfileStatus {
+        emoji: status.get("emojiHTML").and_then(Value::as_str).and_then(emoji_text),
+        message: profile_text(status, "/message"),
+        busy: status.get("indicatesLimitedAvailability").and_then(Value::as_bool).unwrap_or(false),
+    });
+    Profile {
+        name: profile_text(viewer, "/name"),
+        bio: profile_text(viewer, "/bio"),
+        company: profile_text(viewer, "/company"),
+        location: profile_text(viewer, "/location"),
+        hireable: viewer.get("isHireable").and_then(Value::as_bool).unwrap_or(false),
+        status: status.filter(|status| status.emoji.is_some() || status.message.is_some() || status.busy),
+    }
 }
 
 fn parse_repo(value: &Value) -> Option<Repo> {
@@ -453,6 +526,7 @@ pub fn collect(gh: &Gh, store: &mut Store, settings: &Settings, log: Log<'_>, no
     let viewer = gh
         .graphql(
             "query { viewer { id login createdAt followers { totalCount } issueComments { totalCount }
+               name bio company location isHireable status { emojiHTML message indicatesLimitedAvailability }
                organizations(first: 100) { totalCount nodes { login } } contributionsCollection { contributionYears } } }",
             json!({}),
         )
@@ -594,6 +668,7 @@ pub fn collect(gh: &Gh, store: &mut Store, settings: &Settings, log: Log<'_>, no
     Ok(Snapshot {
         login,
         member_since,
+        profile: profile_from(&viewer),
         calendar: calendar.days,
         years: calendar.years,
         commits: walk.commits,
@@ -614,6 +689,35 @@ pub fn collect(gh: &Gh, store: &mut Store, settings: &Settings, log: Log<'_>, no
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn the_public_profile_is_read_as_one_clipped_line_each() {
+        let viewer = json!({
+            "name": "  Octo\nCat ", "bio": "a".repeat(200), "company": null, "location": "",
+            "isHireable": true,
+            "status": { "emojiHTML": "<div><g-emoji class=\"g-emoji\" alias=\"dart\">\u{1F3AF}</g-emoji></div>", "message": "Focusing", "indicatesLimitedAvailability": true },
+        });
+        let profile = profile_from(&viewer);
+        assert_eq!(profile.name.as_deref(), Some("Octo Cat"));
+        assert_eq!(profile.bio.as_deref().map(str::len), Some(PROFILE_TEXT));
+        assert_eq!(profile.company, None);
+        assert_eq!(profile.location, None);
+        assert!(profile.hireable);
+        assert_eq!(profile.status, Some(ProfileStatus { emoji: Some("\u{1F3AF}".into()), message: Some("Focusing".into()), busy: true }));
+    }
+
+    #[test]
+    fn a_long_name_is_clipped_where_the_server_counts() {
+        let profile = profile_from(&json!({ "name": "\u{1F600}".repeat(100) }));
+        assert_eq!(profile.name.unwrap().chars().count(), PROFILE_TEXT / 2, "each emoji is two UTF-16 units");
+    }
+
+    #[test]
+    fn an_empty_status_or_a_custom_emoji_is_left_out() {
+        assert_eq!(profile_from(&json!({ "status": { "emojiHTML": "", "message": null, "indicatesLimitedAvailability": false } })).status, None);
+        assert_eq!(profile_from(&json!({ "status": null })).status, None);
+        assert_eq!(emoji_text("<img src=\"https://github.githubassets.com/x.png\">"), None);
+    }
 
     fn scoper() -> Scoper {
         Scoper { login: "octo".into(), orgs: HashSet::from(["corp".to_string()]) }

@@ -1,6 +1,8 @@
 import type { Card } from '../shared/render/cards.ts';
 import type { ComponentKey } from '../shared/render/svg.ts';
 import { compact } from '../shared/format.ts';
+import type { GitHubProfile } from '../shared/metrics.ts';
+import { PROFILE_LIMITS, STATUS_CHOICES, type ManualProfile } from '../shared/profile.ts';
 import type { MachineRow, UserRow } from './db.ts';
 
 /** Server-rendered pages. Every value from a user or machine goes through `esc`. */
@@ -36,6 +38,11 @@ const STYLE = `
   .danger { color: var(--danger); }
   input[type=text] { font: inherit; color: inherit; background: var(--bg); border: 1px solid var(--line); border-radius: 6px; padding: 6px 10px; min-height: 36px; width: 100%; max-width: 240px; }
   form.inline { display: inline-flex; gap: 8px; align-items: center; flex-wrap: wrap; margin: 0; }
+  .fields { display: grid; grid-template-columns: repeat(auto-fit, minmax(220px, 1fr)); gap: 12px 16px; margin: 16px 0; }
+  .fields label { display: grid; gap: 6px; font-size: 13px; font-weight: 600; color: var(--ink2); }
+  .fields .wide { grid-column: 1 / -1; }
+  .fields input[type=text], .fields textarea, .fields select { max-width: none; width: 100%; font: inherit; font-weight: 400; color: var(--ink); background: var(--bg); border: 1px solid var(--line); border-radius: 6px; padding: 6px 10px; min-height: 36px; }
+  .fields textarea { resize: vertical; }
   details.confirm summary { cursor: pointer; font-weight: 600; width: fit-content; padding: 6px 0; }
   details.confirm form { margin-top: 8px; }
   .table { width: 100%; overflow-x: auto; }
@@ -97,7 +104,7 @@ export function landingPage(origin: string, viewer: UserRow | null): string {
 </div>
 <div class="panel">
   <h2>What leaves your machine</h2>
-  <p>Only totals: tokens per day and model, and aggregated GitHub numbers. Prompts, code, commit messages, file paths and private repository names stay on your computer.</p>
+  <p>Only totals: tokens per day and model, and aggregated GitHub numbers, plus your public GitHub profile. Prompts, code, commit messages, file paths and private repository names stay on your computer.</p>
   <p>Your profile is private until you choose to publish it. Machine names are never public.</p>
 </div>`,
     viewer,
@@ -152,6 +159,40 @@ function machineRows(machines: MachineRow[], tokensByMachine: Map<string, number
     .join('');
 }
 
+function githubStatus(github: GitHubProfile | null): string {
+  if (!github) return 'none read yet';
+  if (github.status) return [github.status.emoji, github.status.message ?? (github.status.busy ? 'Busy' : '')].filter(Boolean).join(' ') || 'set';
+  return github.hireable ? 'Available for hire' : 'none set';
+}
+
+/** Each field shows the GitHub value it falls back to as its placeholder. */
+function profileForm(manual: ManualProfile, github: GitHubProfile | null): string {
+  const field = (name: keyof typeof PROFILE_LIMITS, label: string, fallback: string | null | undefined, hint: string) => {
+    const attrs = `name="${name}" maxlength="${PROFILE_LIMITS[name]}" placeholder="${esc(fallback ?? hint)}" autocomplete="off"`;
+    return name === 'bio'
+      ? `<label class="wide">${label}<textarea ${attrs} rows="2">${esc(manual[name] ?? '')}</textarea></label>`
+      : `<label>${label}<input type="text" ${attrs} value="${esc(manual[name] ?? '')}"></label>`;
+  };
+  const choice = (value: string, label: string) => `<option value="${esc(value)}"${(manual.status ?? '') === value ? ' selected' : ''}>${esc(label)}</option>`;
+  return `<div class="panel" id="profile-header">
+  <h2>Profile header</h2>
+  <p>Shown at the top of your dashboard, and as its own <code>profile</code> part. Leave a field empty to use your GitHub profile, which your agent reads once a day.</p>
+  <form method="post" action="/me/profile">
+    <div class="fields">
+      ${field('name', 'Name', github?.name, 'Your name')}
+      ${field('title', 'Title', null, 'e.g. Backend engineer')}
+      ${field('company', 'Company', github?.company, 'e.g. Acme')}
+      ${field('location', 'Location', github?.location, 'e.g. Seoul')}
+      <label>Status<select name="status">${choice('', `From GitHub (${githubStatus(github)})`)}${Object.entries(STATUS_CHOICES)
+        .map(([value, label]) => choice(value, label))
+        .join('')}</select></label>
+      ${field('bio', 'Bio', github?.bio, 'One line about you')}
+    </div>
+    <button class="primary">Save profile</button>
+  </form>
+</div>`;
+}
+
 export function dashboardPage(
   user: UserRow,
   machines: MachineRow[],
@@ -159,6 +200,7 @@ export function dashboardPage(
   svg: string | null,
   parts: Part[],
   origin: string,
+  profile: { manual: ManualProfile; github: GitHubProfile | null },
 ): string {
   const url = `${origin}/u/${encodeURIComponent(user.login)}`;
   const isPublic = user.is_public === 1;
@@ -177,6 +219,7 @@ ${svg ? `<div class="dash">${svg}</div>` : ''}
   }
   <form method="post" action="/me/visibility"><input type="hidden" name="public" value="${isPublic ? '0' : '1'}"><button class="${isPublic ? '' : 'primary'}">${isPublic ? 'Make private' : 'Publish profile'}</button></form>
 </div>
+${profileForm(profile.manual, profile.github)}
 ${
   machines.length
     ? `<div class="panel"><h2>Machines</h2><div class="table"><table>
