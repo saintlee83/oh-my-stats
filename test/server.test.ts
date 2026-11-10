@@ -856,3 +856,88 @@ test('every page shows the logo as its icon, the same one the README shows', asy
   assert.equal(legacy.status, 301);
   assert.equal(legacy.headers.get('location'), '/favicon.svg');
 });
+
+test('the profile header uses what the owner wrote on the website, and their GitHub profile for the rest', async () => {
+  const { context, token } = await published();
+  const profile = { name: 'Octo Cat', bio: 'Builds things', company: '@corp', location: 'Seoul', hireable: true, status: null };
+  await context.call('/v1/github', api(token, 'PUT', githubMetrics({ profile })));
+  const part = async () => (await context.call('/u/octo/components/profile.svg')).text();
+
+  let svg = await part();
+  assert.ok(svg.includes('>@corp · Seoul</text>'));
+  assert.ok(svg.includes('>Builds things</text>'));
+  assert.ok(svg.includes('>Available for hire</text>'), 'from GitHub');
+
+  const session = await webLogin(context);
+  const form = new URLSearchParams({ name: '', title: 'Staff engineer', company: 'Acme', location: '', bio: '', status: 'hiring' });
+  assert.equal((await context.call('/me/profile', webPost(session, form.toString()))).status, 303);
+  svg = await part();
+  assert.ok(svg.includes('>Staff engineer at Acme · Seoul</text>'));
+  assert.ok(svg.includes('>Hiring</text>') && !svg.includes('Available for hire'));
+  assert.ok(svg.includes('Octo Cat') && svg.includes('>Builds things</text>'), 'empty fields still come from GitHub');
+
+  const page = await (await context.call('/me', { headers: { cookie: session } })).text();
+  assert.ok(page.includes('value="Staff engineer"'));
+  assert.ok(page.includes('placeholder="Builds things"'), 'each field shows what it falls back to');
+  assert.ok(page.includes('<option value="hiring" selected>'));
+  assert.ok(page.includes('/components/profile.svg'), 'the part is offered for embedding');
+
+  await context.call('/me/profile', webPost(session, 'status=none'));
+  svg = await part();
+  assert.ok(!svg.includes('Hiring') && !svg.includes('Available for hire'), 'a status can be hidden');
+  assert.ok(!svg.includes('Staff engineer'), 'saving an empty field clears it');
+});
+
+test('profile text is cleaned and escaped, from the website and from an upload', async () => {
+  const { context, token } = await published();
+  const profile = { name: 'Mallory‮evil', bio: 'line one\nline two', company: null, location: null, hireable: false, status: { emoji: '🎯', message: 'Focusing', busy: true } };
+  await context.call('/v1/github', api(token, 'PUT', githubMetrics({ profile })));
+  const session = await webLogin(context);
+  await context.call('/me/profile', webPost(session, new URLSearchParams({ title: '<script>alert(1)</script>', status: 'bogus' }).toString()));
+  const svg = await (await context.call('/u/octo/components/profile.svg')).text();
+  assert.ok(!svg.includes('<script>') && svg.includes('&lt;script&gt;alert(1)&lt;/script&gt;'));
+  assert.ok(svg.includes('Malloryevil'), 'characters that reorder text are removed');
+  assert.ok(svg.includes('>line one line two</text>'));
+  assert.ok(svg.includes('>🎯</text>') && svg.includes('>Focusing</text>'), 'an unknown choice falls back to the GitHub status');
+  assert.ok(!(await (await context.call('/me', { headers: { cookie: session } })).text()).includes('<script>alert'));
+});
+
+test('a profile header saved from another site is refused', async () => {
+  const { context } = await published();
+  const session = await webLogin(context);
+  const forged = await context.call('/me/profile', webPost(session, 'title=Hacked', 'https://evil.example'));
+  assert.equal(forged.status, 403);
+  assert.ok(!(await (await context.call('/u/octo/components/profile.svg')).text()).includes('Hacked'));
+});
+
+test('the avatar is drawn into the image, and an initial stands in without it', async () => {
+  const png = Uint8Array.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]);
+  const github = fakeGitHub({ 'gh-token': octo, 'web-token': octo });
+  const avatars: string[] = [];
+  const fetch = (async (input: string | URL | Request, init?: RequestInit) => {
+    const url = String(input);
+    if (!url.startsWith('https://avatars.githubusercontent.com/')) return github.impl(input, init);
+    avatars.push(url);
+    return new Response(png, { headers: { 'content-type': 'image/png' } });
+  }) as typeof globalThis.fetch;
+  const { context } = await published({ fetch, cache: fakeCache() });
+  const svg = await (await context.call('/u/octo/components/profile.svg')).text();
+  assert.ok(svg.includes(`<image href="data:image/png;base64,${Buffer.from(png).toString('base64')}"`));
+  assert.deepEqual(avatars, ['https://avatars.githubusercontent.com/u/1?s=144']);
+  await context.call('/u/octo/dashboard.svg');
+  assert.equal(avatars.length, 1, 'kept for the next drawing');
+
+  const offline = await published();
+  const plain = await (await offline.context.call('/u/octo/components/profile.svg')).text();
+  assert.ok(plain.includes('class="initial"') && !plain.includes('<image'));
+});
+
+test('only GitHub\'s avatar server is asked for an avatar', async () => {
+  const eve: GitHubUser = { id: 3, login: 'eve', avatar_url: 'https://internal.example/secret.png' };
+  const context = app({}, { 'gh-token': eve, 'web-token': eve });
+  const token = await signIn(context);
+  await context.call('/v1/usage', api(token, 'PUT', upload(MACHINE_A)));
+  await context.call('/v1/me', api(token, 'PATCH', { public: true }));
+  assert.equal((await context.call('/u/eve/components/profile.svg')).status, 200);
+  assert.ok(!context.github.calls.some((url) => url.includes('internal.example')));
+});

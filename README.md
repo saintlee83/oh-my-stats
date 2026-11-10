@@ -35,7 +35,7 @@ Sign in with GitHub, run a small agent on each computer, and see the result on y
 - **Continuous:** a background agent records usage as you work, and keeps its own record, so history survives when AI tools delete their logs. It uploads once a day, and `oms sync` uploads right away.
 - **Multi-machine:** every computer signs in to the same account, and their numbers are combined correctly.
 - **Real numbers:** GitHub's contribution API hides private work, so commits are counted by walking each repository instead.
-- **Private by default:** your profile stays hidden until you publish it, and only totals ever leave your machine.
+- **Private by default:** your profile stays hidden until you publish it, and only totals and your public GitHub profile leave your machine.
 
 ## How it works
 
@@ -87,6 +87,7 @@ Or show only the parts you want, in any order. Each part is its own image, as wi
 
 | Part | Shows |
 |---|---|
+| `profile` | Your name, role, company, location, status and bio, with when you started contributing, lifetime contributions, top languages and AI tokens |
 | `contributions` | Contributions this year and lifetime, and commits, PRs, reviews and issues by month |
 | `rhythm` | When you contribute, by weekday and hour, and by time of day |
 | `languages` | Top languages by lines added, split by personal, organization, gist and other repos |
@@ -96,6 +97,8 @@ Or show only the parts you want, in any order. Each part is its own image, as wi
 | `history` | Every year by month, streaks, and time to merge and review |
 
 Your profile page lists the embed code for every part that has data. A part without data yet shows a short note instead of a broken image.
+
+The `profile` part, which also opens the dashboard, comes from your GitHub profile. To change what it says, fill in **Profile header** on your dashboard at [ohmystats.dev/me](https://ohmystats.dev/me): a job title, a company, a status such as *Open to work* or *Hiring*, and more. Any field you leave empty keeps using your GitHub profile, which the agent reads once a day.
 
 Images follow the viewer's light or dark mode. By default they use GitHub's colors, so they blend into a GitHub page. For [Tokyo Night](https://github.com/tokyo-night/tokyo-night-vscode-theme) colors, add `?theme=tokyo-night` to any image address. Dark mode uses Tokyo Night, and light mode uses its Day variant:
 
@@ -128,6 +131,7 @@ oms preview               Print exactly what would be uploaded, without sending 
 | Lifetime totals per tool and model | Commit messages and file paths |
 | Aggregated GitHub numbers, such as commits per month and lines per language | Private repository and organization names |
 | This machine's name and platform, shown only to you | The token that reads your repositories |
+| Your public GitHub profile: name, bio, company, location and status | |
 | Your timezone, shown on your public dashboard | |
 
 Run `oms preview` to see the exact usage data. GitHub stats are aggregated on your machine first, so no commit-level data is sent.
@@ -217,7 +221,7 @@ cargo run -- login --server http://localhost:8787 --gh
 With `ALLOW_ANY_GITHUB_TOKEN=true` in `.dev.vars`, a local server accepts your GitHub CLI login, so you don't need a GitHub App to develop. The server ignores this setting anywhere but this computer, and the agent only uses `--gh` with a server on this computer.
 
 - **Adding an AI tool:** add a parser in `agent/src/parse.rs`, and its log folder in `agent/src/scan.rs`.
-- **The one rule that matters:** repository, organization and file names exist only inside `agent/src/github/collect.rs`. `Snapshot` has none, so nothing downstream can leak them.
+- **The one rule that matters:** repository, organization and file names exist only inside `agent/src/github/collect.rs`. `Snapshot` has none, so nothing downstream can leak them. Its one piece of free text is your public GitHub profile, which anyone can already see.
 
 ## License
 

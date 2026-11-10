@@ -91,9 +91,42 @@ export interface TokenMetrics {
   cacheShare: number;
 }
 
+/**
+ * The public GitHub profile, as the agent read it. Unlike the rest of the metrics it's free
+ * text, but it's what anyone can already see on GitHub. Agents before it don't send it.
+ */
+export interface GitHubProfile {
+  name: string | null;
+  bio: string | null;
+  company: string | null;
+  location: string | null;
+  hireable: boolean;
+  status: { emoji: string | null; message: string | null; busy: boolean } | null;
+}
+
+export interface ProfileStatus {
+  label: string;
+  emoji: string | null;
+  tone: 'open' | 'hiring' | 'freelance' | 'busy' | 'neutral';
+}
+
+/** The profile header: what the owner wrote on the website, and their GitHub profile for the rest. */
+export interface ProfileMetrics {
+  login: string;
+  name: string | null;
+  title: string | null;
+  company: string | null;
+  location: string | null;
+  bio: string | null;
+  status: ProfileStatus | null;
+  /** A data: URL, because an SVG inside an <img> can't load images from elsewhere. Only set for drawing. */
+  avatar: string | null;
+}
+
 export interface GitHubMetrics {
   login: string;
   memberSince: string;
+  profile?: GitHubProfile;
   counts: {
     commits: number;
     pulls: number;
@@ -164,6 +197,7 @@ export interface GitHubMetrics {
 export interface Metrics {
   generatedDate: string;
   timezone: string;
+  profile: ProfileMetrics;
   github: GitHubMetrics | null;
   tokens: TokenMetrics | null;
 }

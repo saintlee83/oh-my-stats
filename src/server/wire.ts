@@ -1,4 +1,5 @@
 import type { GitHubMetrics } from '../shared/metrics.ts';
+import { cleanGitHubProfile } from '../shared/profile.ts';
 import type { TokenBreakdown, TokenTotals, ToolTotals, UsageTuple } from '../shared/types.ts';
 
 /** Validates everything agents send. Model names end up on public pages, so they stay strict. */
@@ -179,5 +180,6 @@ export function parseGitHubMetrics(value: unknown): GitHubMetrics {
   const rhythm = value.rhythm as Record<string, unknown>;
   assert(Array.isArray(rhythm.punch) && rhythm.punch.length === 7, 'metrics.rhythm.punch is invalid');
   assert(Array.isArray(rhythm.buckets) && rhythm.buckets.length === 4, 'metrics.rhythm.buckets is invalid');
-  return value as unknown as GitHubMetrics;
+  // Free text that's drawn on public pages, so it's cleaned rather than taken as sent.
+  return { ...value, profile: cleanGitHubProfile(value.profile) } as unknown as GitHubMetrics;
 }

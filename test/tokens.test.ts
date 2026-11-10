@@ -126,6 +126,7 @@ test('uncached tokens per commit use the last 30 days of logs', () => {
 const metricsFor = (machines: MachineUsage[], github = githubMetrics()) => ({
   generatedDate: '2026-11-09',
   timezone: TZ,
+  profile: { login: 'octo', name: null, title: null, company: null, location: null, bio: null, status: null, avatar: null },
   github,
   tokens: computeTokens(machines, PRICES, TZ, NOW, github.commitsLast30),
 });

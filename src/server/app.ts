@@ -1,4 +1,5 @@
 import type { GitHubMetrics, Metrics } from '../shared/metrics.ts';
+import { manualProfileFromForm, manualProfileFromJson, manualProfileJson, profileOf } from '../shared/profile.ts';
 import { buildCards, cardContent, type Card } from '../shared/render/cards.ts';
 import {
   availableComponents,
@@ -39,6 +40,7 @@ import {
   renameMachine,
   renewSession,
   saveGitHubStats,
+  saveProfile,
   saveUsage,
   setPublic,
   upsertMachine,
@@ -173,7 +175,50 @@ async function buildMetrics(user: UserRow, deps: Deps): Promise<{ metrics: Metri
   ]);
   const github = stats?.metrics ?? null;
   const tokens = computeTokens(machines, prices, user.timezone, now, github?.commitsLast30 ?? null);
-  return { metrics: { generatedDate: zoned(now, user.timezone).date, timezone: user.timezone, github, tokens }, github };
+  const profile = profileOf(user, manualProfileFromJson(user.profile), github?.profile);
+  return { metrics: { generatedDate: zoned(now, user.timezone).date, timezone: user.timezone, profile, github, tokens }, github };
+}
+
+const AVATAR_HOST = 'avatars.githubusercontent.com';
+/** Twice the size it's drawn at, for sharp screens. */
+const AVATAR_PIXELS = 144;
+const AVATAR_MAX_BYTES = 200_000;
+
+function base64(bytes: Uint8Array): string {
+  let binary = '';
+  for (let index = 0; index < bytes.length; index += 0x8000) binary += String.fromCharCode(...bytes.subarray(index, index + 0x8000));
+  return btoa(binary);
+}
+
+/**
+ * The avatar as a data: URL, because an SVG inside an <img> can't load other images. Only
+ * GitHub's avatar server is asked, and its answer is kept at this location for a day.
+ * Without it, the header shows an initial instead.
+ */
+async function avatarData(avatarUrl: string | null, origin: string, deps: Deps): Promise<string | null> {
+  if (!avatarUrl) return null;
+  try {
+    const url = new URL(avatarUrl);
+    if (url.protocol !== 'https:' || url.hostname !== AVATAR_HOST) return null;
+    url.searchParams.set('s', String(AVATAR_PIXELS));
+    const key = new Request(`${origin}/avatars${url.pathname}${url.search}`);
+    let image = await deps.cache?.match(key);
+    if (!image) {
+      const fetched = await deps.fetch(url.toString());
+      const type = fetched.headers.get('content-type') ?? '';
+      const bytes = fetched.ok && /^image\/(png|jpeg|gif|webp)$/.test(type) ? await fetched.arrayBuffer() : null;
+      if (!bytes || bytes.byteLength > AVATAR_MAX_BYTES) return null;
+      image = new Response(bytes, { headers: { 'content-type': type, 'cache-control': 'public, max-age=86400' } });
+      if (deps.cache) deps.waitUntil(deps.cache.put(key, image.clone()));
+    }
+    return `data:${image.headers.get('content-type')};base64,${base64(new Uint8Array(await image.arrayBuffer()))}`;
+  } catch {
+    return null;
+  }
+}
+
+async function withAvatar(metrics: Metrics, user: UserRow, origin: string, deps: Deps): Promise<Metrics> {
+  return { ...metrics, profile: { ...metrics.profile, avatar: await avatarData(user.avatar_url, origin, deps) } };
 }
 
 const hasData = (metrics: Metrics) => Boolean(metrics.github || metrics.tokens);
@@ -263,24 +308,25 @@ const svg = (body: string, cacheable: boolean) =>
     headers: {
       'content-type': 'image/svg+xml; charset=utf-8',
       'cache-control': cacheable ? PUBLIC_CACHE : 'no-store',
-      'content-security-policy': "default-src 'none'; style-src 'unsafe-inline'",
+      'content-security-policy': "default-src 'none'; style-src 'unsafe-inline'; img-src data:",
       'x-content-type-options': 'nosniff',
     },
   });
 
-async function serveDashboardSvg(login: string, theme: Theme, deps: Deps): Promise<Response> {
+async function serveDashboardSvg(login: string, theme: Theme, origin: string, deps: Deps): Promise<Response> {
   const user = await publicProfile(login, deps);
   if (!user) return svgNotFound();
   const { metrics } = await buildMetrics(user, deps);
-  return svg(renderDashboard(metrics, theme), hasData(metrics));
+  return svg(renderDashboard(await withAvatar(metrics, user, origin, deps), theme), hasData(metrics));
 }
 
-async function serveComponentSvg(login: string, key: string, theme: Theme, deps: Deps): Promise<Response> {
+async function serveComponentSvg(login: string, key: string, theme: Theme, origin: string, deps: Deps): Promise<Response> {
   if (!isComponentKey(key)) return svgNotFound();
   const user = await publicProfile(login, deps);
   if (!user) return svgNotFound();
   const { metrics } = await buildMetrics(user, deps);
-  return svg(renderComponent(metrics, key, theme), availableComponents(metrics).some((item) => item.key === key));
+  const drawn = key === 'profile' ? await withAvatar(metrics, user, origin, deps) : metrics;
+  return svg(renderComponent(drawn, key, theme), availableComponents(metrics).some((item) => item.key === key));
 }
 
 async function serveCard(login: string, key: string, deps: Deps): Promise<Response> {
@@ -303,7 +349,7 @@ async function renderProfile(login: string, request: Request, deps: Deps, viewer
   const origin = new URL(request.url).origin;
   // The page names whoever is signed in, so only signed-out visits share a cached copy.
   const shared = !viewer && hasData(metrics);
-  const page = profilePage(user, renderDashboard(metrics), buildCards(metrics), availableComponents(metrics), origin, viewer);
+  const page = profilePage(user, renderDashboard(await withAvatar(metrics, user, origin, deps)), buildCards(metrics), availableComponents(metrics), origin, viewer);
   return html(page, 200, shared ? { 'cache-control': PUBLIC_CACHE } : {});
 }
 
@@ -357,10 +403,12 @@ async function finishLogin(request: Request, deps: Deps): Promise<Response> {
 async function serveMe(request: Request, deps: Deps): Promise<Response> {
   const viewer = await viewerFromCookie(request, deps);
   if (!viewer) return redirect('/login');
-  const [machines, { metrics }] = await Promise.all([listMachines(deps.db, viewer.id), buildMetrics(viewer, deps)]);
+  const [machines, { metrics, github }] = await Promise.all([listMachines(deps.db, viewer.id), buildMetrics(viewer, deps)]);
+  const origin = new URL(request.url).origin;
   const tokensByMachine = new Map((metrics.tokens?.machines ?? []).map((row) => [row.id, row.total]));
-  const dashboard = hasData(metrics) ? renderDashboard(metrics) : null;
-  return html(dashboardPage(viewer, machines, tokensByMachine, dashboard, availableComponents(metrics), new URL(request.url).origin));
+  const dashboard = hasData(metrics) ? renderDashboard(await withAvatar(metrics, viewer, origin, deps)) : null;
+  const profile = { manual: manualProfileFromJson(viewer.profile), github: github?.profile ?? null };
+  return html(dashboardPage(viewer, machines, tokensByMachine, dashboard, availableComponents(metrics), origin, profile));
 }
 
 async function handleWebPost(request: Request, path: string, deps: Deps): Promise<Response> {
@@ -368,7 +416,8 @@ async function handleWebPost(request: Request, path: string, deps: Deps): Promis
   const viewer = await viewerFromCookie(request, deps);
   if (!viewer) return redirect('/login');
   const now = deps.now().toISOString();
-  const form = new URLSearchParams(await readLimited(request, 4096));
+  // Room for the profile form, whose fields can be written in any script.
+  const form = new URLSearchParams(await readLimited(request, 8192));
 
   if (path === '/logout') {
     const token = readCookie(request, SESSION_COOKIE);
@@ -379,6 +428,11 @@ async function handleWebPost(request: Request, path: string, deps: Deps): Promis
     const isPublic = form.get('public') === '1';
     await setPublic(deps.db, viewer.id, isPublic, now);
     if (!isPublic) await purgeProfile(request, deps, viewer.login);
+    return redirect('/me');
+  }
+  if (path === '/me/profile') {
+    await saveProfile(deps.db, viewer.id, manualProfileJson(manualProfileFromForm(form)), now);
+    await purgeProfile(request, deps, viewer.login);
     return redirect('/me');
   }
   if (path === '/me/delete') {
@@ -511,9 +565,9 @@ async function route(request: Request, deps: Deps): Promise<Response> {
   if (profile) {
     const [, login, resource, cardKey, componentKey] = profile;
     const theme = themeNamed(url.searchParams.get('theme'));
-    if (resource === 'dashboard.svg') return cachedPublic(request, deps, () => serveDashboardSvg(login, theme, deps));
+    if (resource === 'dashboard.svg') return cachedPublic(request, deps, () => serveDashboardSvg(login, theme, url.origin, deps));
     if (cardKey) return cachedPublic(request, deps, () => serveCard(login, cardKey, deps));
-    if (componentKey) return cachedPublic(request, deps, () => serveComponentSvg(login, componentKey, theme, deps));
+    if (componentKey) return cachedPublic(request, deps, () => serveComponentSvg(login, componentKey, theme, url.origin, deps));
     return serveProfile(login, request, deps);
   }
   return html(errorPage(404, 'Page not found.', await viewerFromCookie(request, deps)), 404);

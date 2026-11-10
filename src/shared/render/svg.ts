@@ -1,4 +1,4 @@
-import type { GitHubMetrics, Metrics, TokenMetrics } from '../metrics.ts';
+import type { GitHubMetrics, Metrics, ProfileMetrics, ProfileStatus, TokenMetrics } from '../metrics.ts';
 import { commas, compact, hours, money, percent } from '../format.ts';
 import { WEEKDAYS } from '../time.ts';
 
@@ -73,6 +73,14 @@ const RULES = `
   .axis { font-size: 11px; fill: var(--muted); font-variant-numeric: tabular-nums; }
   .hero { font-size: 56px; font-weight: 600; }
   .tile-value { font-size: 26px; font-weight: 600; }
+  .name { font-size: 24px; font-weight: 600; }
+  .handle { font-size: 15px; font-weight: 400; fill: var(--muted); }
+  .lead { font-size: 15px; fill: var(--ink2); }
+  .bio { font-size: 13px; fill: var(--muted); }
+  .chip { font-size: 12px; font-weight: 600; fill: var(--ink2); }
+  .initial { font-size: 30px; font-weight: 600; fill: var(--ink2); }
+  .tile-text { font-size: 17px; font-weight: 600; }
+  .outline { fill: none; stroke: var(--grid); stroke-width: 1; }
   .grid { stroke: var(--grid); stroke-width: 1; }
   .baseline { stroke: var(--axis); stroke-width: 1; }
 `;
@@ -103,6 +111,27 @@ function n(value: number): string {
 function text(x: number, y: number, content: string, cls: string, anchor: 'start' | 'end' | 'middle' = 'start'): string {
   const attr = anchor === 'start' ? '' : ` text-anchor="${anchor}"`;
   return `<text x="${n(x)}" y="${n(y)}" class="${cls}"${attr}>${esc(content)}</text>`;
+}
+
+/** Hangul, CJK, full-width forms and emoji take about an em. */
+const WIDE = /[\u1100-\u115F\u2E80-\uA4CF\uAC00-\uD7A3\uF900-\uFAFF\uFE30-\uFE4F\uFF00-\uFF60\uFFE0-\uFFE6]|\p{Extended_Pictographic}/u;
+
+/** Roughly how wide a line is drawn, since an SVG can't wrap or measure text itself. Errs wide. */
+function textWidth(content: string, size: number): number {
+  let width = 0;
+  for (const char of content) {
+    if (/[\u200D\uFE0F]/u.test(char)) continue;
+    width += WIDE.test(char) ? size : /[A-Z0-9@#%&mw]/.test(char) ? size * 0.66 : /[\s.,:;'!|·ijlrtf()]/.test(char) ? size * 0.32 : size * 0.56;
+  }
+  return width;
+}
+
+/** Shortens a line to fit a width, ending it with an ellipsis. */
+function fit(content: string, maxWidth: number, size: number): string {
+  if (textWidth(content, size) <= maxWidth) return content;
+  const chars = Array.from(content);
+  while (chars.length && textWidth(`${chars.join('')}…`, size) > maxWidth) chars.pop();
+  return `${chars.join('').trimEnd()}…`;
 }
 
 function title(content: string): string {
@@ -172,7 +201,8 @@ function miniBars(x: number, y: number, values: number[], width: number, height:
     .join('');
 }
 
-function headerSection(github: GitHubMetrics): Section {
+/** In the dashboard the profile above already names the person, so this heading says what it shows. */
+function headerSection(github: GitHubMetrics, heading = `@${github.login}`): Section {
   const { counts, monthly, thisYear } = github;
   const tiles: [string, number, number, number[]][] = [
     ['Commits', thisYear.commits, counts.commits, monthly.commits],
@@ -182,7 +212,7 @@ function headerSection(github: GitHubMetrics): Section {
   ];
   const tileWidth = 150;
   const startX = INNER - tileWidth * tiles.length - 18 * (tiles.length - 1);
-  let body = text(0, 22, `@${github.login}`, 'h1');
+  let body = text(0, 22, heading, 'h1');
   body += text(0, 92, commas(thisYear.calendar), 'hero');
   body += text(0, 118, `contributions in ${thisYear.year}`, 'note');
   body += text(0, 136, `${commas(counts.calendar)} lifetime contributions`, 'note');
@@ -195,6 +225,105 @@ function headerSection(github: GitHubMetrics): Section {
     body += text(x, 122, `${commas(lifetime)} lifetime · 12 months`, 'axis');
   });
   return { height: 160, body };
+}
+
+const AVATAR = 72;
+const BOLD = 1.12;
+
+const TONES: Record<ProfileStatus['tone'], string> = { open: 'c3', hiring: 'c1', freelance: 'c4', busy: 'c2', neutral: 'muted' };
+
+function avatar(profile: ProfileMetrics): string {
+  const r = AVATAR / 2;
+  if (profile.avatar) {
+    return `<clipPath id="omg-avatar"><circle cx="${r}" cy="${r}" r="${r}"/></clipPath><image href="${esc(profile.avatar)}" width="${AVATAR}" height="${AVATAR}" clip-path="url(#omg-avatar)" preserveAspectRatio="xMidYMid slice"/><circle cx="${r}" cy="${r}" r="${r - 0.5}" class="outline"/>`;
+  }
+  const initial = Array.from(profile.name ?? profile.login)[0]?.toUpperCase() ?? '?';
+  return `<circle cx="${r}" cy="${r}" r="${r}" fill="var(--h0)"/>${text(r, r + 11, initial, 'initial', 'middle')}`;
+}
+
+/** A rounded label in the top right corner. Returns its width, so the name can stay clear of it. */
+function statusPill(status: ProfileStatus): { width: number; body: string } {
+  // Semibold text runs wider than the estimate.
+  const label = fit(status.label, 260, 12 * BOLD);
+  const marker = status.emoji ? textWidth(status.emoji, 13) + 6 : 14;
+  const width = 24 + marker + (label ? textWidth(label, 12 * BOLD) : -6);
+  const x = INNER - width;
+  let body = `<rect x="${n(x)}" y="2" width="${n(width)}" height="26" rx="13" class="outline"/>`;
+  body += status.emoji ? text(x + 12, 20, status.emoji, 'chip') : `<circle cx="${n(x + 16)}" cy="15" r="4" fill="var(--${TONES[status.tone]})"/>`;
+  if (label) body += text(x + 12 + marker, 19, label, 'chip');
+  return { width, body };
+}
+
+function careerTiles({ github, tokens }: Metrics): { label: string; value: string; note: string; wordy?: boolean }[] {
+  const tiles: { label: string; value: string; note: string; wordy?: boolean }[] = [];
+  if (github) {
+    const active = github.years.filter((year) => year.calendar > 0);
+    const joined = Number(github.memberSince.slice(0, 4));
+    const since = active.length ? Math.min(...active.map((year) => year.year)) : joined;
+    if (Number.isFinite(since) && since > 0) {
+      tiles.push({ label: 'Contributing since', value: String(since), note: `${active.length} active ${active.length === 1 ? 'year' : 'years'}` });
+    }
+    tiles.push({ label: 'Lifetime contributions', value: commas(github.counts.calendar), note: `${commas(github.thisYear.calendar)} in ${github.thisYear.year}` });
+    const top = github.languages.filter((row) => row.lines > 0).slice(0, 3);
+    if (top.length) tiles.push({ label: 'Top languages', value: top.map((row) => row.name).join(' · '), note: 'by lines added', wordy: true });
+  }
+  if (tokens) {
+    tiles.push({ label: 'AI tokens', value: compact(tokens.total), note: github ? `${percent(github.pulse.aiShare, 0)} of commits AI-assisted` : `${commas(tokens.activeDays)} active days` });
+  } else if (github) {
+    tiles.push({ label: 'Current streak', value: `${commas(github.pulse.streak)} days`, note: `best ${commas(github.pulse.bestStreak)} days` });
+  }
+  return tiles;
+}
+
+/** As many items of a ` · ` list as fit, rather than cutting one in half. */
+function fewest(list: string, maxWidth: number, size: number): string {
+  const items = list.split(' · ');
+  for (let count = items.length; count > 1; count--) {
+    const shown = items.slice(0, count).join(' · ');
+    if (textWidth(shown, size) <= maxWidth) return shown;
+  }
+  return fit(items[0], maxWidth, size);
+}
+
+/** Who this is: name, role and status, with a line of career figures beneath. */
+function profileSection(metrics: Metrics): Section {
+  const { profile } = metrics;
+  const textX = AVATAR + 20;
+  let body = avatar(profile);
+  const pill = profile.status ? statusPill(profile.status) : null;
+  if (pill) body += pill.body;
+
+  const room = INNER - textX - (pill ? pill.width + 16 : 0);
+  const handle = `@${profile.login}`;
+  if (profile.name) {
+    const name = fit(profile.name, Math.max(120, room - textWidth(handle, 15) - 10), 24);
+    body += `<text x="${textX}" y="28" class="name">${esc(name)}<tspan class="handle" dx="10">${esc(handle)}</tspan></text>`;
+  } else {
+    body += text(textX, 28, fit(handle, room, 24), 'name');
+  }
+
+  const role = profile.title && profile.company ? `${profile.title} at ${profile.company}` : (profile.title ?? profile.company);
+  const lines: [string, string][] = [];
+  const lead = [role, profile.location].filter(Boolean).join(' · ');
+  if (lead) lines.push([fit(lead, INNER - textX, 15), 'lead']);
+  if (profile.bio) lines.push([fit(profile.bio, INNER - textX, 13), 'bio']);
+  let y = 28;
+  for (const [line, cls] of lines) {
+    y += cls === 'lead' ? 26 : 22;
+    body += text(textX, y, line, cls);
+  }
+
+  const tiles = careerTiles(metrics);
+  if (!tiles.length) return { height: Math.max(AVATAR, y + 6), body };
+  const top = Math.max(AVATAR, y + 6) + 28;
+  const slot = INNER / 4;
+  tiles.forEach((tile, index) => {
+    const x = index * slot;
+    body += text(x, top + 14, tile.label, 'label');
+    body += tile.wordy ? text(x, top + 44, fewest(tile.value, slot - 12, 17 * BOLD), 'tile-text') : text(x, top + 48, tile.value, 'tile-value');
+    body += text(x, top + 68, tile.note, 'axis');
+  });
+  return { height: top + 74, body };
 }
 
 function rhythmSection(github: GitHubMetrics, timezone: string): Section {
@@ -485,20 +614,31 @@ const tokensSummary = (tokens: TokenMetrics) => `AI token usage: ${compact(token
 
 const listed = (items: string[], empty: string) => (items.length ? `${items.join(', ')}.` : empty);
 
+function profileSummary({ profile }: Metrics): string {
+  const role = profile.title && profile.company ? `${profile.title} at ${profile.company}` : (profile.title ?? profile.company);
+  const status = profile.status ? [profile.status.emoji, profile.status.label].filter(Boolean).join(' ') : null;
+  return [profile.name ? `${profile.name} (@${profile.login})` : `@${profile.login}`, role, profile.location, status, profile.bio]
+    .filter(Boolean)
+    .join('. ')
+    .concat('.');
+}
+
 /**
  * Each part of the dashboard can also be embedded on its own, so a profile README can
  * show only some of them, in its own order. Parts are drawn at the dashboard's width,
  * so stacked parts line up and their text stays the same size.
  */
 type Component =
+  | { label: string; source: 'profile'; draw(metrics: Metrics): Section; summary(metrics: Metrics): string }
   | { label: string; source: 'github'; draw(github: GitHubMetrics, timezone: string): Section; summary(github: GitHubMetrics): string }
   | { label: string; source: 'tokens'; draw(tokens: TokenMetrics): Section; summary(tokens: TokenMetrics): string };
 
-export const COMPONENT_KEYS = ['contributions', 'rhythm', 'languages', 'coauthors', 'churn', 'tokens', 'history'] as const;
+export const COMPONENT_KEYS = ['profile', 'contributions', 'rhythm', 'languages', 'coauthors', 'churn', 'tokens', 'history'] as const;
 export type ComponentKey = (typeof COMPONENT_KEYS)[number];
 
 const COMPONENTS: Record<ComponentKey, Component> = {
-  contributions: { label: 'Contributions', source: 'github', draw: headerSection, summary: contributionsSummary },
+  profile: { label: 'Profile', source: 'profile', draw: profileSection, summary: profileSummary },
+  contributions: { label: 'Contributions', source: 'github', draw: (github) => headerSection(github), summary: contributionsSummary },
   rhythm: {
     label: 'Coding rhythm',
     source: 'github',
@@ -548,6 +688,7 @@ export function availableComponents(metrics: Metrics): { key: ComponentKey; labe
 export function renderComponent(metrics: Metrics, key: ComponentKey, theme: Theme = DEFAULT_THEME): string {
   const component = COMPONENTS[key];
   const heading = `oh-my-stats: ${component.label}`;
+  if (component.source === 'profile') return frame(theme, heading, component.summary(metrics), [component.draw(metrics)], null);
   if (component.source === 'tokens' && metrics.tokens) {
     return frame(theme, heading, component.summary(metrics.tokens), [component.draw(metrics.tokens)], null);
   }
@@ -559,11 +700,11 @@ export function renderComponent(metrics: Metrics, key: ComponentKey, theme: Them
 }
 
 export function renderDashboard(metrics: Metrics, theme: Theme = DEFAULT_THEME): string {
-  const sections: Section[] = [];
+  const sections: Section[] = [profileSection(metrics)];
   const { github, tokens } = metrics;
 
   if (github) {
-    sections.push(headerSection(github), rhythmSection(github, metrics.timezone));
+    sections.push(headerSection(github, 'Contributions'), rhythmSection(github, metrics.timezone));
     const panelGap = 48;
     const leftWidth = Math.round((INNER - panelGap) * 0.58);
     const left = languagesPanel(github, leftWidth);
@@ -577,6 +718,6 @@ export function renderDashboard(metrics: Metrics, theme: Theme = DEFAULT_THEME):
   if (tokens) sections.push(tokensSection(tokens));
   if (github) sections.push(historySection(github));
 
-  const summary = github ? contributionsSummary(github) : tokens ? tokensSummary(tokens) : 'No data yet.';
+  const summary = `${profileSummary(metrics)} ${github ? contributionsSummary(github) : tokens ? tokensSummary(tokens) : 'No data yet.'}`;
   return frame(theme, 'oh-my-stats developer dashboard', summary, sections, `oh-my-stats · updated ${metrics.generatedDate} · ${metrics.timezone}`);
 }
