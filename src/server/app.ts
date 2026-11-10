@@ -274,6 +274,7 @@ async function serveComponentSvg(login: string, key: string, theme: Theme, deps:
 
 async function serveCard(login: string, key: string, deps: Deps): Promise<Response> {
   const notFound = () => new Response('Not found', { status: 404 });
+  if (!CARD_KEYS.includes(key)) return notFound();
   const user = await publicProfile(login, deps);
   if (!user) return notFound();
   const { metrics } = await buildMetrics(user, deps);

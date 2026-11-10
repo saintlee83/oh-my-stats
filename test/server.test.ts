@@ -637,6 +637,18 @@ test('a made-up session cookie gets the shared copy, and still counts against th
   assert.equal((await context.call('/u/octo', forged)).status, 429);
 });
 
+test('a card or part that does not exist is refused before the profile is read', async () => {
+  const db = countingDb();
+  const { context } = await published({ db, cache: fakeCache() });
+  const reads = db.sql.length;
+  // Each made-up name has its own rate limit and its 404 isn't cached, so it mustn't read the profile.
+  for (const path of ['/u/octo/cards/nope.txt', '/u/octo/cards/aaa.txt', '/u/octo/components/nope.svg']) {
+    assert.equal((await context.call(path)).status, 404, path);
+  }
+  assert.equal(db.sql.length, reads, 'nothing is read for a name that cannot exist');
+  assert.equal((await context.call('/u/octo/cards/tokens.txt')).status, 200, 'a real card still works');
+});
+
 test('uploads with impossible dates or too many rows are refused', async () => {
   const context = app();
   const token = await signIn(context);
