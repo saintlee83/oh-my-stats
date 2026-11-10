@@ -1,0 +1,32 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 128 128" width="128" height="128" role="img" aria-labelledby="title">
+  <title id="title">oh-my-stats</title>
+  <rect x="1" y="1" width="126" height="126" rx="28" fill="#0d1117" stroke="#30363d" stroke-width="2"/>
+  <!-- A contribution grid whose filled squares rise like a bar chart. -->
+  <g fill="#21262d">
+    <rect x="15" y="15" width="20" height="20" rx="5"/>
+    <rect x="41" y="15" width="20" height="20" rx="5"/>
+    <rect x="67" y="15" width="20" height="20" rx="5"/>
+    <rect x="15" y="41" width="20" height="20" rx="5"/>
+    <rect x="41" y="41" width="20" height="20" rx="5"/>
+    <rect x="15" y="67" width="20" height="20" rx="5"/>
+  </g>
+  <g fill="#0e4429">
+    <rect x="15" y="93" width="20" height="20" rx="5"/>
+  </g>
+  <g fill="#006d32">
+    <rect x="41" y="67" width="20" height="20" rx="5"/>
+    <rect x="41" y="93" width="20" height="20" rx="5"/>
+  </g>
+  <g fill="#26a641">
+    <rect x="67" y="41" width="20" height="20" rx="5"/>
+    <rect x="67" y="67" width="20" height="20" rx="5"/>
+    <rect x="67" y="93" width="20" height="20" rx="5"/>
+  </g>
+  <g fill="#39d353">
+    <rect x="93" y="41" width="20" height="20" rx="5"/>
+    <rect x="93" y="67" width="20" height="20" rx="5"/>
+    <rect x="93" y="93" width="20" height="20" rx="5"/>
+  </g>
+  <!-- The newest square, lit up the way the dashboard marks the current month. -->
+  <rect x="93" y="15" width="20" height="20" rx="5" fill="#58a6ff"/>
+</svg>

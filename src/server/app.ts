@@ -51,6 +51,7 @@ import {
 } from './db.ts';
 import { dashboardPage, errorPage, landingPage, profilePage } from './pages.ts';
 import { loadPrices } from './prices.ts';
+import { LOGO_SVG } from './logo.ts';
 import { BadRequest, cleanMachineName, parseGitHubMetrics, parseMachine, parseUsageUpload } from './wire.ts';
 
 export interface Deps {
@@ -243,6 +244,16 @@ async function publicProfile(login: string, deps: Deps): Promise<UserRow | null>
   const user = await userByLogin(deps.db, login);
   return user?.is_public === 1 ? user : null;
 }
+
+const favicon = () =>
+  new Response(LOGO_SVG, {
+    headers: {
+      'content-type': 'image/svg+xml; charset=utf-8',
+      'cache-control': 'public, max-age=86400',
+      'content-security-policy': "default-src 'none'",
+      'x-content-type-options': 'nosniff',
+    },
+  });
 
 const svgNotFound = () => new Response('Not found', { status: 404, headers: { 'cache-control': 'no-store' } });
 
@@ -488,6 +499,9 @@ async function route(request: Request, deps: Deps): Promise<Response> {
   if (request.method !== 'GET' && request.method !== 'HEAD') return new Response('Method not allowed', { status: 405 });
 
   if (path === '/healthz') return json({ ok: true });
+  if (path === '/favicon.svg') return favicon();
+  // Browsers that look here before reading the page's icon link get the same icon.
+  if (path === '/favicon.ico') return new Response(null, { status: 301, headers: { location: '/favicon.svg', 'cache-control': 'public, max-age=86400' } });
   if (path === '/') return html(landingPage(url.origin, await viewerFromCookie(request, deps)));
   if (path === '/login') return startLogin(request, deps);
   if (path === '/auth/callback') return finishLogin(request, deps);

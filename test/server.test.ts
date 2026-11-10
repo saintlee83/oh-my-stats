@@ -1,6 +1,8 @@
 import assert from 'node:assert/strict';
+import { readFileSync } from 'node:fs';
 import { test } from 'node:test';
 import { handle, isLocalRequest, type Deps } from '../src/server/app.ts';
+import { LOGO_SVG } from '../src/server/logo.ts';
 import { COMPONENT_KEYS } from '../src/shared/render/svg.ts';
 import { testDb } from './sqlite-d1.ts';
 import { githubMetrics } from './fixtures.ts';
@@ -840,4 +842,17 @@ test('unknown pages, methods and servers without sign-in configured fail cleanly
   assert.equal((await context.call('/', { method: 'DELETE' })).status, 405);
   assert.equal((await context.call('/healthz')).status, 200);
   assert.equal((await app({ githubClientId: '' }).call('/login')).status, 503);
+});
+
+test('every page shows the logo as its icon, the same one the README shows', async () => {
+  const context = app();
+  assert.equal(LOGO_SVG, readFileSync(new URL('../.github/logo.svg', import.meta.url), 'utf8'));
+  for (const path of ['/', '/nope']) assert.match(await (await context.call(path)).text(), /<link rel="icon" href="\/favicon\.svg"/, path);
+  const icon = await context.call('/favicon.svg');
+  assert.equal(icon.status, 200);
+  assert.equal(icon.headers.get('content-type'), 'image/svg+xml; charset=utf-8');
+  assert.equal(await icon.text(), LOGO_SVG);
+  const legacy = await context.call('/favicon.ico');
+  assert.equal(legacy.status, 301);
+  assert.equal(legacy.headers.get('location'), '/favicon.svg');
 });
