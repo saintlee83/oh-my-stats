@@ -32,6 +32,8 @@ const STYLE = `
   .danger { color: var(--danger); }
   input[type=text] { font: inherit; color: inherit; background: var(--bg); border: 1px solid var(--line); border-radius: 8px; padding: 6px 10px; min-height: 36px; width: 100%; max-width: 240px; }
   form.inline { display: inline-flex; gap: 8px; align-items: center; flex-wrap: wrap; margin: 0; }
+  details.confirm summary { cursor: pointer; font-weight: 600; width: fit-content; padding: 6px 0; }
+  details.confirm form { margin-top: 8px; }
   .table { width: 100%; overflow-x: auto; }
   table { width: 100%; border-collapse: collapse; font-variant-numeric: tabular-nums; }
   th, td { text-align: left; padding: 10px 12px 10px 0; border-bottom: 1px solid var(--line); vertical-align: middle; white-space: nowrap; }
@@ -125,7 +127,7 @@ function machineRows(machines: MachineRow[], tokensByMachine: Map<string, number
   <td>${esc(machine.platform ?? '-')}</td>
   <td class="num">${esc(compact(tokensByMachine.get(machine.id) ?? 0))}</td>
   <td>${esc(machine.last_seen_at.slice(0, 16).replace('T', ' '))} UTC</td>
-  <td><form class="inline" method="post" action="/me/machines/${id}/delete"><button class="danger">Remove</button></form></td>
+  <td><details class="confirm"><summary class="danger">Remove</summary><form class="inline" method="post" action="/me/machines/${id}/delete"><span class="muted">Deletes its data and signs it out.</span><button class="danger">Remove this machine</button></form></details></td>
 </tr>`;
     })
     .join('');
@@ -165,10 +167,17 @@ ${
 }
 <div class="panel">
   <h2>Account</h2>
-  <div style="display:flex;gap:8px;flex-wrap:wrap">
-    <form method="post" action="/logout"><button>Sign out</button></form>
-    <form method="post" action="/me/delete"><button class="danger">Delete my account and data</button></form>
-  </div>
+  <form method="post" action="/logout"><button>Sign out</button></form>
+  <details class="confirm" style="margin-top:12px">
+    <summary class="danger">Delete my account and data</summary>
+    <form method="post" action="/me/delete">
+      <p>This deletes everything on this server and signs out every machine. To confirm, type your GitHub username, <code>${esc(user.login)}</code>.</p>
+      <div style="display:flex;gap:8px;flex-wrap:wrap;align-items:center">
+        <input type="text" name="confirm" aria-label="Your GitHub username" maxlength="39" autocomplete="off" spellcheck="false" required>
+        <button class="danger">Delete everything</button>
+      </div>
+    </form>
+  </details>
 </div>`,
     user,
   );

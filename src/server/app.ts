@@ -332,6 +332,10 @@ async function handleWebPost(request: Request, path: string, deps: Deps): Promis
     return redirect('/me');
   }
   if (path === '/me/delete') {
+    // This can't be undone, so it takes more than a stray click.
+    if (form.get('confirm')?.trim().toLowerCase() !== viewer.login.toLowerCase()) {
+      return html(errorPage(400, 'Nothing was deleted. Type your GitHub username to confirm.', viewer), 400);
+    }
     await deleteUser(deps.db, viewer.id);
     await purgeProfile(request, deps, viewer.login);
     return redirect('/', { 'set-cookie': cookie(request, SESSION_COOKIE, '', 0) });

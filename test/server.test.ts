@@ -356,7 +356,7 @@ test('deleting an account removes everything', async () => {
   await context.call('/v1/usage', api(agent, 'PUT', upload(MACHINE_A)));
   await context.call('/v1/github', api(agent, 'PUT', githubMetrics()));
   const session = await webLogin(context);
-  assert.equal((await context.call('/me/delete', webPost(session))).status, 303);
+  assert.equal((await context.call('/me/delete', webPost(session, 'confirm=octo'))).status, 303);
   const raw = (context.deps.db as ReturnType<typeof testDb>).raw;
   for (const table of ['users', 'sessions', 'machines', 'usage_daily', 'tool_totals', 'github_stats']) {
     assert.equal((raw.prepare(`SELECT COUNT(*) AS n FROM ${table}`).get() as { n: number }).n, 0, table);
@@ -464,7 +464,7 @@ test('deleting an account removes its profile from the cache', async () => {
   const { context } = await published({ cache });
   await context.call('/u/octo/dashboard.svg');
   const session = await webLogin(context);
-  await context.call('/me/delete', webPost(session));
+  await context.call('/me/delete', webPost(session, 'confirm=octo'));
   assert.equal(cache.store.size, 0);
   assert.equal((await context.call('/u/octo/dashboard.svg')).status, 404);
 });
@@ -684,6 +684,37 @@ test('a cached page keeps its five minutes, whatever lifetime the edge stored it
   assert.equal(hit.headers.get('cache-control'), 'public, max-age=300');
   assert.equal(hit.headers.get('content-type'), 'image/svg+xml; charset=utf-8');
   assert.equal(await hit.text(), first);
+});
+
+test('deleting an account takes typing its username, and a stray click deletes nothing', async () => {
+  const context = app();
+  const agent = await signIn(context);
+  await context.call('/v1/usage', api(agent, 'PUT', upload(MACHINE_A)));
+  const session = await webLogin(context);
+  const { raw } = context.deps.db as ReturnType<typeof testDb>;
+  for (const body of ['', 'confirm=', 'confirm=someone-else']) {
+    const refused = await context.call('/me/delete', webPost(session, body));
+    assert.equal(refused.status, 400, body);
+    assert.match(await refused.text(), /Nothing was deleted/);
+  }
+  assert.equal(raw.prepare('SELECT COUNT(*) AS rows FROM usage_daily').get()?.rows, 1);
+  assert.equal((await context.call('/v1/me', api(agent, 'GET'))).status, 200);
+
+  assert.equal((await context.call('/me/delete', webPost(session, 'confirm=%20OCTO%20'))).status, 303, 'case and spaces do not matter');
+  assert.equal(raw.prepare('SELECT COUNT(*) AS rows FROM usage_daily').get()?.rows, 0);
+  assert.equal((await context.call('/v1/me', api(agent, 'GET'))).status, 401);
+});
+
+test('no destructive button is one click away on the dashboard', async () => {
+  const context = app();
+  const agent = await signIn(context);
+  await context.call('/v1/usage', api(agent, 'PUT', upload(MACHINE_A)));
+  const session = await webLogin(context);
+  const page = await (await context.call('/me', { headers: { cookie: session } })).text();
+  assert.match(page, /<details class="confirm"[^>]*>\s*<summary class="danger">Delete my account and data<\/summary>\s*<form method="post" action="\/me\/delete">/);
+  assert.match(page, /name="confirm"[^>]*required/);
+  assert.match(page, /<details class="confirm"><summary class="danger">Remove<\/summary><form class="inline" method="post" action="\/me\/machines\//);
+  assert.ok(!page.includes('<details open'), 'closed until asked for');
 });
 
 test('plain http is sent to https, except on this computer', async () => {
