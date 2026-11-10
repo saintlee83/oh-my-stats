@@ -312,6 +312,19 @@ test('one machine at a time collects GitHub stats, about every six hours', async
   assert.equal(await sync(laptop, MACHINE_A), true, 'a lease expires if its holder never finishes');
 });
 
+test('a machine without GitHub access leaves collecting to one that has it', async () => {
+  const context = app();
+  const laptop = await signIn(context, MACHINE_A);
+  const desktop = await signIn(context, MACHINE_B, 'desktop');
+  const sync = async (token: string, id: string, canCollectGitHub?: boolean) =>
+    ((await (await context.call('/v1/usage', api(token, 'PUT', { ...upload(id), canCollectGitHub }))).json()) as { collectGitHub: boolean }).collectGitHub;
+
+  assert.equal(await sync(desktop, MACHINE_B, false), false, 'no access, so it is never asked');
+  assert.equal(await sync(laptop, MACHINE_A, true), true, 'and it took no lease');
+  context.setTime('2026-11-09T12:45:00Z');
+  assert.equal(await sync(desktop, MACHINE_B), true, 'an agent that does not say can still collect');
+});
+
 test('prices are fetched once and stored', async () => {
   const context = app();
   const token = await signIn(context);

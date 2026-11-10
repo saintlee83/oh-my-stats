@@ -111,6 +111,8 @@ export interface UsageUpload {
   timezone: string | null;
   days: Record<string, Record<string, UsageTuple>>;
   totals: TokenTotals;
+  /** False when the machine has no GitHub access. Older agents don't say, and can. */
+  canCollectGitHub: boolean;
 }
 
 /** Rejects dates in the future, allowing for the world's timezones. */
@@ -145,7 +147,7 @@ export function parseUsageUpload(value: unknown, now: Date): UsageUpload {
     totals[tool] = parseFigure(figure);
   }
 
-  return { machine, timezone: isValidTimezone(value.timezone) ? value.timezone : null, days, totals };
+  return { machine, timezone: isValidTimezone(value.timezone) ? value.timezone : null, days, totals, canCollectGitHub: value.canCollectGitHub !== false };
 }
 
 function assertBounded(value: unknown, depth = 0): void {

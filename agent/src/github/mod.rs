@@ -21,6 +21,11 @@ fn local_github_token(config: &Config) -> Option<String> {
     std::env::var("OMS_GITHUB_TOKEN").ok().filter(|token| !token.is_empty()).or_else(|| config.github_token.clone()).or_else(gh_cli_token)
 }
 
+/// Told to the server with each upload, so a machine without access isn't asked to collect.
+pub fn has_access(config: &Config) -> bool {
+    local_github_token(config).is_some()
+}
+
 pub fn collect_and_upload(store: &mut Store, config: &Config, log: Log<'_>) -> Result<()> {
     let token = local_github_token(config).context("No GitHub access for stats. Run `gh auth login`, or set OMS_GITHUB_TOKEN.")?;
     let api = signed_in_api(config)?;

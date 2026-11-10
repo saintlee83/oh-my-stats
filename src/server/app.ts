@@ -427,7 +427,8 @@ async function handleApi(request: Request, path: string, deps: Deps): Promise<Re
     if (!session.expires_at || session.expires_at < daysFrom(now, AGENT_SESSION_RENEW_DAYS)) {
       await renewSession(deps.db, session.token_hash, daysFrom(now, AGENT_SESSION_DAYS));
     }
-    return json({ ok: true, collectGitHub: await claimGitHubCollection(deps.db, session.user_id, now) });
+    // A machine that can't read GitHub would hold the lease and fail, keeping others waiting.
+    return json({ ok: true, collectGitHub: upload.canCollectGitHub && (await claimGitHubCollection(deps.db, session.user_id, now)) });
   }
   if (path === '/v1/github' && request.method === 'PUT') {
     const metrics = parseGitHubMetrics(await readJson(request, MAX_GITHUB_BYTES));
