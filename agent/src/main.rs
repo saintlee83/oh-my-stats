@@ -98,7 +98,13 @@ fn preview() -> Result<()> {
     scan::scan(&mut store, &scan::default_roots()?, config.timezone())?;
     let totals = totals::collect(&store, sync::now_secs(), true)?;
     let rollup = store.rollup()?;
-    let body = json!({ "machine": machine::machine_info(&config)?, "timezone": config.timezone_name(), "days": rollup, "totals": totals });
+    let body = json!({
+        "machine": machine::machine_info(&config)?,
+        "timezone": config.timezone_name(),
+        "days": rollup,
+        "totals": totals,
+        "canCollectGitHub": github::has_access(&config),
+    });
     println!("{}", serde_json::to_string_pretty(&body)?);
     Ok(())
 }

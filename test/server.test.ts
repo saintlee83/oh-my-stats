@@ -1,6 +1,8 @@
 import assert from 'node:assert/strict';
+import { readFileSync } from 'node:fs';
 import { test } from 'node:test';
 import { handle, isLocalRequest, type Deps } from '../src/server/app.ts';
+import { LOGO_SVG } from '../src/server/logo.ts';
 import { COMPONENT_KEYS } from '../src/shared/render/svg.ts';
 import { testDb } from './sqlite-d1.ts';
 import { githubMetrics } from './fixtures.ts';
@@ -310,6 +312,19 @@ test('one machine at a time collects GitHub stats, about every six hours', async
   assert.equal(await sync(laptop, MACHINE_A), false);
   context.setTime('2026-11-09T12:45:00Z');
   assert.equal(await sync(laptop, MACHINE_A), true, 'a lease expires if its holder never finishes');
+});
+
+test('a machine without GitHub access leaves collecting to one that has it', async () => {
+  const context = app();
+  const laptop = await signIn(context, MACHINE_A);
+  const desktop = await signIn(context, MACHINE_B, 'desktop');
+  const sync = async (token: string, id: string, canCollectGitHub?: boolean) =>
+    ((await (await context.call('/v1/usage', api(token, 'PUT', { ...upload(id), canCollectGitHub }))).json()) as { collectGitHub: boolean }).collectGitHub;
+
+  assert.equal(await sync(desktop, MACHINE_B, false), false, 'no access, so it is never asked');
+  assert.equal(await sync(laptop, MACHINE_A, true), true, 'and it took no lease');
+  context.setTime('2026-11-09T12:45:00Z');
+  assert.equal(await sync(desktop, MACHINE_B), true, 'an agent that does not say can still collect');
 });
 
 test('prices are fetched once and stored', async () => {
@@ -827,4 +842,17 @@ test('unknown pages, methods and servers without sign-in configured fail cleanly
   assert.equal((await context.call('/', { method: 'DELETE' })).status, 405);
   assert.equal((await context.call('/healthz')).status, 200);
   assert.equal((await app({ githubClientId: '' }).call('/login')).status, 503);
+});
+
+test('every page shows the logo as its icon, the same one the README shows', async () => {
+  const context = app();
+  assert.equal(LOGO_SVG, readFileSync(new URL('../.github/logo.svg', import.meta.url), 'utf8'));
+  for (const path of ['/', '/nope']) assert.match(await (await context.call(path)).text(), /<link rel="icon" href="\/favicon\.svg"/, path);
+  const icon = await context.call('/favicon.svg');
+  assert.equal(icon.status, 200);
+  assert.equal(icon.headers.get('content-type'), 'image/svg+xml; charset=utf-8');
+  assert.equal(await icon.text(), LOGO_SVG);
+  const legacy = await context.call('/favicon.ico');
+  assert.equal(legacy.status, 301);
+  assert.equal(legacy.headers.get('location'), '/favicon.svg');
 });

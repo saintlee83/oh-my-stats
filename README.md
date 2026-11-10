@@ -1,6 +1,36 @@
-# oh-my-stats
+<p align="center">
+  <img src=".github/logo.svg" width="96" height="96" alt="">
+</p>
 
-The ultimate developer stats platform, at [ohmystats.dev](https://ohmystats.dev). Sign in with GitHub, run a small agent on each computer, and see your AI tokens and contributions in one place, with private work included.
+<h1 align="center">oh-my-stats</h1>
+
+<p align="center">
+  The ultimate developer stats platform, at <a href="https://ohmystats.dev">ohmystats.dev</a>.<br>
+  Your AI tokens and GitHub contributions in one place, with private work included.
+</p>
+
+<p align="center">
+  <a href="https://github.com/saintlee83/oh-my-stats/actions/workflows/ci.yml"><img src="https://github.com/saintlee83/oh-my-stats/actions/workflows/ci.yml/badge.svg" alt="CI"></a>
+  <a href="LICENSE"><img src="https://img.shields.io/badge/license-MIT-blue" alt="MIT license"></a>
+  <img src="https://img.shields.io/badge/agent-macOS%20%C2%B7%20Linux%20%C2%B7%20Windows-555" alt="Agent runs on macOS, Linux and Windows">
+  <a href="https://ohmystats.dev"><img src="https://img.shields.io/badge/site-ohmystats.dev-2f81f7" alt="ohmystats.dev"></a>
+</p>
+
+<p align="center">
+  <a href="#get-started">Get started</a> ·
+  <a href="#show-it-on-your-github-profile">Embed</a> ·
+  <a href="#what-leaves-your-machine">Privacy</a> ·
+  <a href="#run-your-own-server">Self-host</a>
+</p>
+
+<p align="center">
+  <a href="https://ohmystats.dev/u/saintlee83">
+    <img src="https://ohmystats.dev/u/saintlee83/components/contributions.svg" alt="Contributions this year and lifetime, with commits, pull requests, reviews and issues by month">
+    <img src="https://ohmystats.dev/u/saintlee83/components/tokens.svg" alt="AI tokens by tool, cache hit rate, API list price, and tokens per day for 60 days">
+  </a>
+</p>
+
+Sign in with GitHub, run a small agent on each computer, and see the result on your dashboard or your GitHub profile.
 
 - **Continuous:** a background agent records usage as you work, and keeps its own record, so history survives when AI tools delete their logs. It uploads once a day, and `oms sync` uploads right away.
 - **Multi-machine:** every computer signs in to the same account, and their numbers are combined correctly.
@@ -9,14 +39,14 @@ The ultimate developer stats platform, at [ohmystats.dev](https://ohmystats.dev)
 
 ## How it works
 
-```
- Each machine                                   Server (Cloudflare Workers + D1)
-┌─────────────────────────────────────┐        ┌───────────────────────────────┐
-│ oms agent (Rust)                    │        │ GitHub sign-in                │
-│  reads Claude Code and Codex logs   │ totals │ per-machine usage             │
-│  keeps every response in local SQLite├──────▶│ combines machines             │
-│  walks GitHub with a local token    │  only  │ dashboard, profile, SVG embed │
-└─────────────────────────────────────┘        └───────────────────────────────┘
+```mermaid
+flowchart LR
+  subgraph computer ["Each computer"]
+    logs["Claude Code, Claude Desktop<br/>and Codex logs"] --> agent["oms agent<br/>Rust, local SQLite"]
+    repos["Your GitHub repositories<br/>read with a local token"] --> agent
+  end
+  agent -- "totals only" --> server["Server<br/>Cloudflare Workers + D1"]
+  server --> views["Dashboard, profile<br/>and SVG embeds"]
 ```
 
 ## Get started
@@ -37,7 +67,9 @@ Repeat `oms login`, `oms sync` and `oms service install` on each computer. On Wi
 
 The agent reads new log lines every 5 minutes and uploads once a day, so your numbers can be up to a day behind. A machine that was asleep or offline catches up when it comes back. Run `oms sync` to update right away, or change `uploadIntervalMinutes`.
 
-GitHub stats need read access to your repositories, and that access stays on your machine. The agent uses your [GitHub CLI](https://cli.github.com) login if you have one, after `gh auth refresh -s repo,read:org`. Otherwise, set `OMS_GITHUB_TOKEN` to a token with the `repo` and `read:org` scopes.
+GitHub stats need read access to your repositories, and that access stays on your machine. The agent uses your [GitHub CLI](https://cli.github.com) login if you have one, after `gh auth refresh -s repo,read:org`. Otherwise, set `OMS_GITHUB_TOKEN` to a token with the `repo` and `read:org` scopes. Only one computer needs this: GitHub stats are collected once per account, by a computer that has access.
+
+## Show it on your GitHub profile
 
 Once published, add the dashboard to your GitHub profile README:
 

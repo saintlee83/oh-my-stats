@@ -51,6 +51,7 @@ import {
 } from './db.ts';
 import { dashboardPage, errorPage, landingPage, profilePage } from './pages.ts';
 import { loadPrices } from './prices.ts';
+import { LOGO_SVG } from './logo.ts';
 import { BadRequest, cleanMachineName, parseGitHubMetrics, parseMachine, parseUsageUpload } from './wire.ts';
 
 export interface Deps {
@@ -244,6 +245,16 @@ async function publicProfile(login: string, deps: Deps): Promise<UserRow | null>
   return user?.is_public === 1 ? user : null;
 }
 
+const favicon = () =>
+  new Response(LOGO_SVG, {
+    headers: {
+      'content-type': 'image/svg+xml; charset=utf-8',
+      'cache-control': 'public, max-age=86400',
+      'content-security-policy': "default-src 'none'",
+      'x-content-type-options': 'nosniff',
+    },
+  });
+
 const svgNotFound = () => new Response('Not found', { status: 404, headers: { 'cache-control': 'no-store' } });
 
 /** Only an image with data is cached, so the first upload shows at once. */
@@ -427,7 +438,8 @@ async function handleApi(request: Request, path: string, deps: Deps): Promise<Re
     if (!session.expires_at || session.expires_at < daysFrom(now, AGENT_SESSION_RENEW_DAYS)) {
       await renewSession(deps.db, session.token_hash, daysFrom(now, AGENT_SESSION_DAYS));
     }
-    return json({ ok: true, collectGitHub: await claimGitHubCollection(deps.db, session.user_id, now) });
+    // A machine that can't read GitHub would hold the lease and fail, keeping others waiting.
+    return json({ ok: true, collectGitHub: upload.canCollectGitHub && (await claimGitHubCollection(deps.db, session.user_id, now)) });
   }
   if (path === '/v1/github' && request.method === 'PUT') {
     const metrics = parseGitHubMetrics(await readJson(request, MAX_GITHUB_BYTES));
@@ -487,6 +499,9 @@ async function route(request: Request, deps: Deps): Promise<Response> {
   if (request.method !== 'GET' && request.method !== 'HEAD') return new Response('Method not allowed', { status: 405 });
 
   if (path === '/healthz') return json({ ok: true });
+  if (path === '/favicon.svg') return favicon();
+  // Browsers that look here before reading the page's icon link get the same icon.
+  if (path === '/favicon.ico') return new Response(null, { status: 301, headers: { location: '/favicon.svg', 'cache-control': 'public, max-age=86400' } });
   if (path === '/') return html(landingPage(url.origin, await viewerFromCookie(request, deps)));
   if (path === '/login') return startLogin(request, deps);
   if (path === '/auth/callback') return finishLogin(request, deps);

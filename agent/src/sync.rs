@@ -57,7 +57,7 @@ pub fn plan_uploads(rollup: &Rollup, synced: &std::collections::BTreeMap<String,
     batches
 }
 
-pub fn build_body(machine: &MachineInfo, timezone: &str, days: &[(String, Value, String)], totals: Option<&Totals>) -> Value {
+pub fn build_body(machine: &MachineInfo, timezone: &str, days: &[(String, Value, String)], totals: Option<&Totals>, can_collect_github: bool) -> Value {
     let mut day_map = Map::new();
     for (day, value, _) in days {
         day_map.insert(day.clone(), value.clone());
@@ -67,6 +67,7 @@ pub fn build_body(machine: &MachineInfo, timezone: &str, days: &[(String, Value,
         "timezone": timezone,
         "days": day_map,
         "totals": totals.map_or_else(|| json!({}), |totals| json!(totals)),
+        "canCollectGitHub": can_collect_github,
     })
 }
 
@@ -86,6 +87,7 @@ pub fn sync(store: &mut Store, config: &Config, api: &Api, totals: &Totals) -> R
     let rollup = store.rollup().map_err(SyncError::Local)?;
     let synced = store.synced_hashes().map_err(SyncError::Local)?;
     let batches = plan_uploads(&rollup, &synced);
+    let can_collect_github = crate::github::has_access(config);
 
     let totals_text = serde_json::to_string(totals).unwrap_or_default();
     let totals_hash = sha256_hex(&totals_text);
@@ -94,7 +96,7 @@ pub fn sync(store: &mut Store, config: &Config, api: &Api, totals: &Totals) -> R
     let mut outcome = SyncOutcome::default();
 
     let mut send = |days: &[(String, Value, String)], with_totals: bool| -> Result<(), SyncError> {
-        let body = build_body(&machine, &timezone, days, with_totals.then_some(totals));
+        let body = build_body(&machine, &timezone, days, with_totals.then_some(totals), can_collect_github);
         let reply = api.send("PUT", "/v1/usage", &body).map_err(SyncError::Api)?;
         outcome.uploads += 1;
         outcome.days += days.len();
@@ -211,10 +213,11 @@ mod tests {
     fn the_upload_matches_the_servers_format() {
         let machine = MachineInfo { id: "a".repeat(32), name: "Mac".into(), platform: "macos".into(), agent_version: "0.1.0".into() };
         let days = plan_uploads(&rollup(1), &BTreeMap::new()).remove(0);
-        let body = build_body(&machine, "Asia/Seoul", &days, None);
+        let body = build_body(&machine, "Asia/Seoul", &days, None, false);
         assert_eq!(body["machine"]["agentVersion"], "0.1.0");
         assert_eq!(body["timezone"], "Asia/Seoul");
         assert_eq!(body["days"]["2026-01-01"]["claude/opus"], json!([1, 2, 3, 4, 5]));
         assert_eq!(body["totals"], json!({}));
+        assert_eq!(body["canCollectGitHub"], false);
     }
 }
