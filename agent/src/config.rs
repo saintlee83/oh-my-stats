@@ -29,8 +29,12 @@ pub struct Config {
 const DEFAULT_UPLOAD_MINUTES: i64 = 24 * 60;
 const MIN_UPLOAD_MINUTES: i64 = 5;
 
+/// HOME on macOS and Linux, and USERPROFILE on Windows, which is where Claude Code and
+/// Codex keep their logs there. Rust before 1.87 still marks this deprecated, for Windows
+/// behavior that 1.85 fixed.
+#[allow(deprecated)]
 pub fn home_dir() -> Result<PathBuf> {
-    std::env::var_os("HOME").map(PathBuf::from).context("HOME is not set")
+    std::env::home_dir().filter(|path| !path.as_os_str().is_empty()).context("could not find your home folder")
 }
 
 /// Where this agent keeps its state. Override with OMS_HOME.

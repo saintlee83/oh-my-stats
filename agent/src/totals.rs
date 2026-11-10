@@ -4,9 +4,9 @@
 
 use std::collections::BTreeMap;
 use std::fs;
-use std::io::{BufRead, BufReader, Write};
-use std::path::PathBuf;
-use std::process::{Command, Stdio};
+use std::io::{BufRead, BufReader, ErrorKind, Write};
+use std::path::{Path, PathBuf};
+use std::process::{Child, Command, Stdio};
 use std::sync::mpsc;
 use std::time::{Duration, Instant};
 
@@ -120,12 +120,23 @@ fn codex_command(program: &str, args: &[String]) -> Command {
     command
 }
 
+fn spawn_codex(program: &str, args: &[String]) -> Option<Child> {
+    match codex_command(program, args).spawn() {
+        Ok(child) => Some(child),
+        // npm installs Codex on Windows as codex.cmd, which the bare name doesn't find.
+        Err(error) if cfg!(windows) && error.kind() == ErrorKind::NotFound && Path::new(program).extension().is_none() => {
+            codex_command(&format!("{program}.cmd"), args).spawn().ok()
+        }
+        Err(_) => None,
+    }
+}
+
 /// The figure behind Codex's `/usage`: the account's lifetime total, across every device.
 /// It comes from the user's own CLI over its documented app-server protocol, so this agent
 /// never touches Codex credentials. Accounts without usage analytics report nothing.
 pub fn read_codex_account(command: &[String], timeout: Duration) -> Option<ToolTotals> {
     let (program, args) = command.split_first()?;
-    let mut child = codex_command(program, args).spawn().ok()?;
+    let mut child = spawn_codex(program, args)?;
     let mut stdin = child.stdin.take()?;
     let stdout = child.stdout.take()?;
 
@@ -165,6 +176,8 @@ pub fn read_codex_account(command: &[String], timeout: Duration) -> Option<ToolT
             }
         }
     }
+    // Closing its input lets Codex exit by itself, including from behind codex.cmd on Windows.
+    drop(stdin);
     let _ = child.kill();
     let _ = child.wait();
     result

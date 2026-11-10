@@ -21,7 +21,7 @@ The ultimate developer stats platform, at [ohmystats.dev](https://ohmystats.dev)
 
 ## Get started
 
-The agent needs [Rust](https://rustup.rs) to build. Prebuilt binaries aren't published yet.
+The agent needs [Rust](https://rustup.rs) to build. Prebuilt binaries aren't published yet. It runs on macOS, Linux and Windows. On Windows, let rustup install the Visual Studio build tools when it offers, and run the commands below in PowerShell.
 
 ```sh
 git clone https://github.com/saintlee83/oh-my-stats
@@ -33,7 +33,7 @@ oms service install   # keep tracking in the background
 oms publish           # optional: make your profile public
 ```
 
-Repeat `oms login`, `oms sync` and `oms service install` on each computer.
+Repeat `oms login`, `oms sync` and `oms service install` on each computer. On Windows, `oms service install` adds the agent to your startup apps, so it needs no administrator rights.
 
 The agent reads new log lines every 5 minutes and uploads once a day, so your numbers can be up to a day behind. A machine that was asleep or offline catches up when it comes back. Run `oms sync` to update right away, or change `uploadIntervalMinutes`.
 
@@ -80,7 +80,7 @@ oms status                Show sign-in, totals and machines
 oms sync                  Read new logs and upload what changed, right now
 oms sync --github         Also collect GitHub stats now
 oms daemon                Keep tracking in the foreground
-oms service install       Run in the background, starting at login (launchd or systemd)
+oms service install       Run in the background, starting at login (launchd, systemd or a Windows startup app)
 oms service uninstall     Remove the background service
 oms service status        Show whether the service is running
 oms publish               Show your profile to everyone
@@ -148,13 +148,13 @@ Then point agents at it with `oms login --server https://your-server`.
 - **AI tools:** only Claude Code, Claude Desktop agent sessions and Codex are read today.
 - **Default branches only.** Commits still on other branches aren't walked, which matches how GitHub counts contributions. Your GitHub graph can show more than can be itemized, for example work in repositories that were later deleted.
 - **Churn reads the first 300 files of a commit**, and treats a commit over 20,000 lines as a bulk import. Change this with `maxCommitLines` in `~/.oh-my-stats/config.json`.
-- **Windows** isn't supported yet. The agent is tested on macOS and Linux.
+- **On Windows**, run `oms service uninstall` before installing a new version, because Windows can't replace a running program, then `oms service install` again. The agent's folder is kept private by your user folder's permissions, rather than by its own.
 - **Uploads are capped** at 20,000 changed rows per account per day. Anything over that goes through the next day. An account can have 50 machines.
 - **Rate limits are approximate.** They use Cloudflare's rate limiting, which counts per location and can briefly let requests through above the limit.
 
 ## Configuration
 
-`~/.oh-my-stats/config.json`, in addition to what `oms login` writes:
+`~/.oh-my-stats/config.json`, or `%USERPROFILE%\.oh-my-stats\config.json` on Windows, in addition to what `oms login` writes:
 
 | Key | Default | Meaning |
 |---|---|---|

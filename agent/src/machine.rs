@@ -1,8 +1,7 @@
 use std::fs;
-use std::io::Read;
 use std::process::Command;
 
-use anyhow::Result;
+use anyhow::{Context, Result};
 use serde::Serialize;
 use sha2::{Digest, Sha256};
 
@@ -29,12 +28,25 @@ fn hardware_id() -> Option<String> {
         let line = text.lines().find(|line| line.contains("IOPlatformUUID"))?;
         return line.split('"').nth(3).map(str::to_string);
     }
+    if cfg!(windows) {
+        // Set when Windows is installed. `/reg:64` finds it from a 32-bit build too.
+        let output = Command::new("reg").args(["query", r"HKLM\SOFTWARE\Microsoft\Cryptography", "/v", "MachineGuid", "/reg:64"]).output().ok()?;
+        return machine_guid(&String::from_utf8_lossy(&output.stdout));
+    }
     fs::read_to_string("/etc/machine-id").ok().map(|id| id.trim().to_string()).filter(|id| !id.is_empty())
+}
+
+/// The value in `reg query` output, from its line "    MachineGuid    REG_SZ    <id>".
+fn machine_guid(output: &str) -> Option<String> {
+    output.lines().find_map(|line| match line.split_whitespace().collect::<Vec<_>>()[..] {
+        ["MachineGuid", "REG_SZ", id] => Some(id.to_string()),
+        _ => None,
+    })
 }
 
 fn random_id() -> Result<String> {
     let mut bytes = [0u8; 32];
-    fs::File::open("/dev/urandom")?.read_exact(&mut bytes)?;
+    getrandom::fill(&mut bytes).context("could not get random numbers from the system")?;
     Ok(bytes.iter().map(|byte| format!("{byte:02x}")).collect())
 }
 
@@ -81,4 +93,23 @@ pub fn machine_info(config: &Config) -> Result<MachineInfo> {
         platform: std::env::consts::OS.to_string(),
         agent_version: env!("CARGO_PKG_VERSION").to_string(),
     })
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn the_windows_machine_id_comes_out_of_the_registry_listing() {
+        let output = "\r\nHKEY_LOCAL_MACHINE\\SOFTWARE\\Microsoft\\Cryptography\r\n    MachineGuid    REG_SZ    4f1c2a9e-7b3d-4c11-9e2f-0a1b2c3d4e5f\r\n\r\n";
+        assert_eq!(machine_guid(output).as_deref(), Some("4f1c2a9e-7b3d-4c11-9e2f-0a1b2c3d4e5f"));
+        assert_eq!(machine_guid("ERROR: The system was unable to find the specified registry key or value."), None);
+    }
+
+    #[test]
+    fn a_random_id_is_new_each_time() {
+        let (a, b) = (random_id().unwrap(), random_id().unwrap());
+        assert_eq!(a.len(), 64);
+        assert_ne!(a, b);
+    }
 }
