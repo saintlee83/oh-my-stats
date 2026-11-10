@@ -1,6 +1,7 @@
 import assert from 'node:assert/strict';
 import { test } from 'node:test';
 import { handle, isLocalRequest, type Deps } from '../src/server/app.ts';
+import { COMPONENT_KEYS } from '../src/shared/render/svg.ts';
 import { testDb } from './sqlite-d1.ts';
 import { githubMetrics } from './fixtures.ts';
 
@@ -174,13 +175,14 @@ test('a profile is private until published, and looks the same as a missing one'
   const context = app();
   const token = await signIn(context);
   await context.call('/v1/usage', api(token, 'PUT', upload(MACHINE_A)));
-  for (const path of ['/u/octo', '/u/octo/dashboard.svg', '/u/octo/cards/tokens.txt']) {
+  for (const path of ['/u/octo', '/u/octo/dashboard.svg', '/u/octo/cards/tokens.txt', '/u/octo/components/tokens.svg']) {
     assert.equal((await context.call(path)).status, 404, path);
   }
   assert.equal((await context.call('/u/nobody/dashboard.svg')).status, 404);
+  assert.equal((await context.call('/u/nobody/components/tokens.svg')).status, 404);
 
   assert.equal((await context.call('/v1/me', api(token, 'PATCH', { public: true }))).status, 200);
-  for (const path of ['/u/octo', '/u/OCTO', '/u/octo/dashboard.svg', '/u/octo/cards/tokens.txt']) {
+  for (const path of ['/u/octo', '/u/OCTO', '/u/octo/dashboard.svg', '/u/octo/cards/tokens.txt', '/u/octo/components/tokens.svg']) {
     assert.equal((await context.call(path)).status, 200, path);
   }
   await context.call('/v1/me', api(token, 'PATCH', { public: false }));
@@ -193,7 +195,8 @@ test('public pages never show machine names or ids', async () => {
   await context.call('/v1/usage', api(token, 'PUT', upload(MACHINE_A)));
   await context.call('/v1/github', api(token, 'PUT', githubMetrics()));
   await context.call('/v1/me', api(token, 'PATCH', { public: true }));
-  for (const path of ['/u/octo', '/u/octo/dashboard.svg', '/u/octo/cards/tokens.txt', '/u/octo/cards/contributions.txt']) {
+  const parts = COMPONENT_KEYS.map((key) => `/u/octo/components/${key}.svg`);
+  for (const path of ['/u/octo', '/u/octo/dashboard.svg', '/u/octo/cards/tokens.txt', '/u/octo/cards/contributions.txt', ...parts]) {
     const text = await (await context.call(path)).text();
     assert.ok(!text.includes(SECRET_NAME), `${path} leaks the machine name`);
     assert.ok(!text.includes(MACHINE_A), `${path} leaks the machine id`);
@@ -210,6 +213,78 @@ test('the public dashboard is a locked-down, cacheable image', async () => {
   assert.match(response.headers.get('content-security-policy') ?? '', /default-src 'none'/);
   assert.equal(response.headers.get('cache-control'), 'public, max-age=300');
   assert.ok((await response.text()).includes('</svg>'));
+});
+
+test('each part of the dashboard is its own locked-down, cacheable image', async () => {
+  const context = app();
+  const token = await signIn(context);
+  await context.call('/v1/usage', api(token, 'PUT', upload(MACHINE_A)));
+  await context.call('/v1/github', api(token, 'PUT', githubMetrics()));
+  await context.call('/v1/me', api(token, 'PATCH', { public: true }));
+  const dashboard = await (await context.call('/u/octo/dashboard.svg')).text();
+  const drawn: Record<string, string> = {};
+  for (const key of COMPONENT_KEYS) {
+    const response = await context.call(`/u/octo/components/${key}.svg`);
+    assert.equal(response.status, 200, key);
+    assert.match(response.headers.get('content-type') ?? '', /image\/svg\+xml/, key);
+    assert.match(response.headers.get('content-security-policy') ?? '', /default-src 'none'/, key);
+    assert.equal(response.headers.get('cache-control'), 'public, max-age=300', key);
+    drawn[key] = await response.text();
+    assert.match(drawn[key], /^<svg [^>]*viewBox="0 0 1000 [\d.]+"/, `${key} is as wide as the dashboard`);
+    assert.ok(drawn[key].length < dashboard.length, `${key} is smaller than the whole dashboard`);
+  }
+  assert.ok(drawn.languages.includes('Top languages') && !drawn.languages.includes('AI token trace'));
+  assert.ok(drawn.tokens.includes('AI token trace') && !drawn.tokens.includes('Top languages'));
+  assert.ok(drawn.rhythm.includes('When contributions happen'));
+  assert.ok(!drawn.rhythm.includes('updated 2026'), 'only the whole dashboard has a footer');
+
+  for (const path of ['/u/octo/components/nope.svg', '/u/octo/components/Tokens.svg', '/u/octo/components/tokens.png', '/u/octo/components/']) {
+    assert.equal((await context.call(path)).status, 404, path);
+  }
+});
+
+test('a part without its data says so, and is not cached until it has some', async () => {
+  const cache = fakeCache();
+  const { context, token } = await published({ cache });
+  const empty = await context.call('/u/octo/components/languages.svg');
+  assert.equal(empty.status, 200);
+  assert.equal(empty.headers.get('cache-control'), 'no-store');
+  assert.ok((await empty.text()).includes('No GitHub stats yet.'));
+  assert.equal((await context.call('/u/octo/components/tokens.svg')).headers.get('cache-control'), 'public, max-age=300');
+  assert.equal(cache.store.size, 1);
+
+  const page = await (await context.call('/u/octo')).text();
+  assert.ok(page.includes('/u/octo/components/tokens.svg'), 'the profile lists the parts with data');
+  assert.ok(!page.includes('/u/octo/components/languages.svg'), 'and only those');
+
+  await context.call('/v1/github', api(token, 'PUT', githubMetrics()));
+  const full = await context.call('/u/octo/components/languages.svg');
+  assert.equal(full.headers.get('cache-control'), 'public, max-age=300');
+  assert.ok((await full.text()).includes('TypeScript'));
+});
+
+test('an image can use the Tokyo Night theme, however the name is written', async () => {
+  const cache = fakeCache();
+  const { context } = await published({ cache });
+  const github = await (await context.call('/u/octo/dashboard.svg')).text();
+  const tokyo = await (await context.call('/u/octo/dashboard.svg?theme=tokyo-night')).text();
+  assert.ok(github.includes('--surface:#0d1117;') && !github.includes('#1a1b26'), 'GitHub colors by default');
+  assert.ok(tokyo.includes('--surface:#1a1b26;') && !tokyo.includes('#0d1117'), 'Tokyo Night when asked');
+  assert.equal(cache.store.size, 2, 'one copy per theme');
+
+  for (const query of ['?theme=tokyonight', '?theme=Tokyo-Night&v=2', '?v=1&theme=TOKYO_NIGHT']) {
+    assert.equal(await (await context.call(`/u/octo/dashboard.svg${query}`)).text(), tokyo, query);
+  }
+  for (const query of ['?theme=github', '?theme=nope', '?theme=']) {
+    assert.equal(await (await context.call(`/u/octo/dashboard.svg${query}`)).text(), github, query);
+  }
+  assert.equal(cache.store.size, 2, 'other spellings share those copies');
+
+  const part = await (await context.call('/u/octo/components/tokens.svg?theme=tokyo-night')).text();
+  assert.ok(part.includes('--surface:#1a1b26;'), 'parts take a theme too');
+  await context.call('/u/octo?theme=tokyo-night');
+  await context.call('/u/octo');
+  assert.equal(cache.store.size, 4, 'pages other than images ignore the theme');
 });
 
 test('only the account that owns the stats can upload them', async () => {
@@ -448,13 +523,21 @@ test('a missing or private profile is never cached, so publishing shows at once'
 test('making a profile private removes it from the cache', async () => {
   const cache = fakeCache();
   const { context, token } = await published({ cache });
-  for (const path of ['/u/octo', '/u/octo/dashboard.svg', '/u/octo/cards/tokens.txt']) {
+  const paths = [
+    '/u/octo',
+    '/u/octo/dashboard.svg',
+    '/u/octo/dashboard.svg?theme=tokyo-night',
+    '/u/octo/cards/tokens.txt',
+    '/u/octo/components/tokens.svg',
+    '/u/octo/components/tokens.svg?theme=tokyonight',
+  ];
+  for (const path of paths) {
     assert.equal((await context.call(path)).status, 200, path);
   }
-  assert.equal(cache.store.size, 3);
+  assert.equal(cache.store.size, paths.length);
   await context.call('/v1/me', api(token, 'PATCH', { public: false }));
   assert.equal(cache.store.size, 0);
-  for (const path of ['/u/octo', '/u/octo/dashboard.svg', '/u/octo/cards/tokens.txt']) {
+  for (const path of paths) {
     assert.equal((await context.call(path)).status, 404, path);
   }
 });

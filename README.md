@@ -45,6 +45,32 @@ Once published, add the dashboard to your GitHub profile README:
 ![Developer stats](https://ohmystats.dev/u/<login>/dashboard.svg)
 ```
 
+Or show only the parts you want, in any order. Each part is its own image, as wide as the dashboard, so stacked parts line up:
+
+```markdown
+![Contributions](https://ohmystats.dev/u/<login>/components/contributions.svg)
+
+![AI token trace](https://ohmystats.dev/u/<login>/components/tokens.svg)
+```
+
+| Part | Shows |
+|---|---|
+| `contributions` | Contributions this year and lifetime, and commits, PRs, reviews and issues by month |
+| `rhythm` | When you contribute, by weekday and hour, and by time of day |
+| `languages` | Top languages by lines added, split by personal, organization, gist and other repos |
+| `coauthors` | Who you co-author commits with |
+| `churn` | Lines added and removed, by language |
+| `tokens` | AI tokens by tool, cache hit rate, API list price, and tokens per day for 60 days |
+| `history` | Every year by month, streaks, and time to merge and review |
+
+Your profile page lists the embed code for every part that has data. A part without data yet shows a short note instead of a broken image.
+
+Images follow the viewer's light or dark mode. By default they use GitHub's colors, so they blend into a GitHub page. For [Tokyo Night](https://github.com/tokyo-night/tokyo-night-vscode-theme) colors, add `?theme=tokyo-night` to any image address. Dark mode uses Tokyo Night, and light mode uses its Day variant:
+
+```markdown
+![Developer stats](https://ohmystats.dev/u/<login>/dashboard.svg?theme=tokyo-night)
+```
+
 ## Commands
 
 ```
