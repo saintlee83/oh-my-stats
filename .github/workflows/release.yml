@@ -74,8 +74,9 @@ jobs:
         if: contains(matrix.target, 'linux')
         run: file agent/target/${{ matrix.target }}/release/oms | tee /dev/stderr | grep -q 'static'
 
-      - name: Check the macOS binary is signed, which Apple silicon requires
-        if: contains(matrix.target, 'apple')
+      # The linker signs arm64 binaries only. Intel Macs, and Rosetta, run unsigned ones.
+      - name: Check the Apple silicon binary is signed, which macOS requires
+        if: matrix.target == 'aarch64-apple-darwin'
         run: codesign --verify --verbose agent/target/${{ matrix.target }}/release/oms
 
       - name: Package for macOS and Linux
