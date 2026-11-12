@@ -87,6 +87,9 @@ const MAX_USAGE_BYTES = 2_000_000;
 const MAX_GITHUB_BYTES = 256_000;
 const PUBLIC_CACHE = 'public, max-age=300';
 const CARD_KEYS = ['contributions', 'rhythm', 'languages', 'churn', 'tokens', 'coauthors', 'pulse'];
+/** Each release ships its own install scripts, so a script always matches the files it downloads. */
+export const LATEST_RELEASE = 'https://github.com/saintlee83/oh-my-stats/releases/latest/download';
+const INSTALL_SCRIPTS = new Set(['/install.sh', '/install.ps1']);
 
 const HTML_CSP =
   "default-src 'none'; img-src 'self' data: https://avatars.githubusercontent.com; style-src 'unsafe-inline'; form-action 'self' https://github.com; base-uri 'none'; frame-ancestors 'none'";
@@ -556,6 +559,8 @@ async function route(request: Request, deps: Deps): Promise<Response> {
   if (path === '/favicon.svg') return favicon();
   // Browsers that look here before reading the page's icon link get the same icon.
   if (path === '/favicon.ico') return new Response(null, { status: 301, headers: { location: '/favicon.svg', 'cache-control': 'public, max-age=86400' } });
+  // `curl -fsSL https://ohmystats.dev/install.sh | sh` and `irm .../install.ps1 | iex` both follow this.
+  if (INSTALL_SCRIPTS.has(path)) return new Response(null, { status: 302, headers: { location: `${LATEST_RELEASE}${path}`, 'cache-control': PUBLIC_CACHE } });
   if (path === '/') return html(landingPage(url.origin, await viewerFromCookie(request, deps)));
   if (path === '/login') return startLogin(request, deps);
   if (path === '/auth/callback') return finishLogin(request, deps);

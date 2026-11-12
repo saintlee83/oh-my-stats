@@ -125,14 +125,15 @@ pub fn install() -> Result<()> {
         fs::create_dir_all(unit.parent().context("no parent")?)?;
         fs::write(&unit, systemd_unit(&binary, &path))?;
         run_quietly("systemctl", &["--user", "daemon-reload"]);
-        if !run_quietly("systemctl", &["--user", "enable", "--now", SYSTEMD_UNIT]) {
+        // Restart rather than start, so an agent that's already running moves to this binary.
+        if !run_quietly("systemctl", &["--user", "enable", SYSTEMD_UNIT]) || !run_quietly("systemctl", &["--user", "restart", SYSTEMD_UNIT]) {
             bail!("systemctl could not start the agent. See {}", unit.display());
         }
         println!("The agent now runs in the background.\nLogs: journalctl --user -u {SYSTEMD_UNIT}");
     } else if cfg!(windows) {
         let launcher = std::env::current_exe()?.with_file_name(LAUNCHER);
         if !launcher.exists() {
-            bail!("{LAUNCHER} should be next to oms.exe, where `cargo install` puts it. Install the agent again.");
+            bail!("{LAUNCHER} should be next to oms.exe, where the installer and `cargo install` put it. Install the agent again.");
         }
         let log_file = state_dir()?.join("agent.log");
         let entry = run_entry(&launcher.to_string_lossy(), &log_file.to_string_lossy());

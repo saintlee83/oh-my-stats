@@ -1,0 +1,178 @@
+name: Release
+
+# Pushing a tag such as v0.2.0 builds the agent for every platform and publishes a GitHub
+# release, which the install scripts download from. A pull request that changes the release
+# builds it too, without publishing, so a broken platform shows up before a tag does.
+on:
+  push:
+    tags: ['v*']
+  pull_request:
+    paths:
+      - .github/workflows/release.yml
+      - install.sh
+      - install.ps1
+      - agent/.cargo/**
+      - agent/Cargo.toml
+      - agent/Cargo.lock
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  build:
+    name: ${{ matrix.target }}
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          # `native` means the runner can run what it built, so the binary gets a smoke test.
+          - { target: aarch64-apple-darwin, os: macos-latest, native: true }
+          - { target: x86_64-apple-darwin, os: macos-latest, native: false }
+          # musl links everything in, so one binary runs on any Linux distribution.
+          - { target: x86_64-unknown-linux-musl, os: ubuntu-latest, native: true }
+          - { target: aarch64-unknown-linux-musl, os: ubuntu-24.04-arm, native: true }
+          - { target: x86_64-pc-windows-msvc, os: windows-latest, native: true }
+          - { target: aarch64-pc-windows-msvc, os: windows-latest, native: false }
+    defaults:
+      run:
+        shell: bash
+    env:
+      # The C parts (SQLite, zstd, ring) must be compiled against musl too.
+      CC_x86_64_unknown_linux_musl: musl-gcc
+      CC_aarch64_unknown_linux_musl: musl-gcc
+    steps:
+      - uses: actions/checkout@v5
+
+      - name: Check the tag matches the agent's version
+        if: startsWith(github.ref, 'refs/tags/')
+        run: |
+          version=$(sed -n 's/^version = "\(.*\)"$/\1/p' agent/Cargo.toml | head -n 1)
+          if [ "v$version" != "$GITHUB_REF_NAME" ]; then
+            echo "::error::Tag $GITHUB_REF_NAME doesn't match version $version in agent/Cargo.toml"
+            exit 1
+          fi
+
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: ${{ matrix.target }}
+
+      - name: Install musl
+        if: contains(matrix.target, 'musl')
+        run: sudo apt-get update && sudo apt-get install -y musl-tools
+
+      - name: Build
+        working-directory: agent
+        run: cargo build --locked --release --target ${{ matrix.target }}
+
+      - name: Check the binary runs
+        if: matrix.native
+        run: agent/target/${{ matrix.target }}/release/oms --version
+
+      - name: Check the Linux binary needs no system libraries
+        if: contains(matrix.target, 'linux')
+        run: file agent/target/${{ matrix.target }}/release/oms | tee /dev/stderr | grep -q 'static'
+
+      # The linker signs arm64 binaries only. Intel Macs, and Rosetta, run unsigned ones.
+      - name: Check the Apple silicon binary is signed, which macOS requires
+        if: matrix.target == 'aarch64-apple-darwin'
+        run: codesign --verify --verbose agent/target/${{ matrix.target }}/release/oms
+
+      - name: Package for macOS and Linux
+        if: ${{ !contains(matrix.target, 'windows') }}
+        run: |
+          stage=$(mktemp -d)
+          cp agent/target/${{ matrix.target }}/release/oms LICENSE "$stage/"
+          mkdir dist
+          tar -czf "dist/oms-${{ matrix.target }}.tar.gz" -C "$stage" oms LICENSE
+
+      - name: Package for Windows
+        if: contains(matrix.target, 'windows')
+        shell: pwsh
+        run: |
+          $release = "agent/target/${{ matrix.target }}/release"
+          New-Item -ItemType Directory dist | Out-Null
+          # omsw.exe runs the agent in the background with no console window. See agent/src/bin/omsw.rs.
+          Compress-Archive -Path "$release/oms.exe", "$release/omsw.exe", LICENSE -DestinationPath "dist/oms-${{ matrix.target }}.zip"
+
+      # Serve the package the way a release would, then install it with the script users run.
+      - name: Install with install.sh
+        if: matrix.native && !contains(matrix.target, 'windows')
+        run: |
+          serve="$RUNNER_TEMP/serve"
+          mkdir -p "$serve"
+          cp dist/* "$serve/"
+          (cd "$serve" && if command -v sha256sum >/dev/null; then sha256sum -- *; else shasum -a 256 -- *; fi > "$RUNNER_TEMP/SHA256SUMS")
+          mv "$RUNNER_TEMP/SHA256SUMS" "$serve/"
+          python3 -m http.server 8765 --bind 127.0.0.1 --directory "$serve" &
+          server=$!
+          for _ in $(seq 1 20); do curl -fs http://127.0.0.1:8765/SHA256SUMS >/dev/null && break; sleep 0.5; done
+          OMS_DOWNLOAD_URL=http://127.0.0.1:8765 OMS_INSTALL_DIR="$RUNNER_TEMP/bin" sh install.sh
+          "$RUNNER_TEMP/bin/oms" --version
+          kill "$server"
+
+      - name: Install with install.ps1
+        if: matrix.native && contains(matrix.target, 'windows')
+        shell: pwsh
+        run: |
+          $serve = Join-Path $env:RUNNER_TEMP 'serve'
+          New-Item -ItemType Directory $serve | Out-Null
+          Copy-Item dist/* $serve
+          Get-ChildItem $serve -File | ForEach-Object { "$((Get-FileHash $_.FullName -Algorithm SHA256).Hash.ToLower())  $($_.Name)" } |
+            Set-Content (Join-Path $serve 'SHA256SUMS')
+          $server = Start-Process python -ArgumentList '-m', 'http.server', '8765', '--bind', '127.0.0.1', '--directory', $serve -PassThru -NoNewWindow
+          Start-Sleep -Seconds 3
+          $env:OMS_DOWNLOAD_URL = 'http://127.0.0.1:8765'
+          $env:OMS_INSTALL_DIR = Join-Path $env:RUNNER_TEMP 'bin'
+          # The way `irm https://ohmystats.dev/install.ps1 | iex` runs it: in PowerShell 7, then in Windows PowerShell 5.1.
+          Get-Content -Raw install.ps1 | Invoke-Expression
+          powershell -NoProfile -Command 'Get-Content -Raw install.ps1 | Invoke-Expression'
+          if ($LASTEXITCODE -ne 0) { throw 'install.ps1 failed in Windows PowerShell' }
+          & (Join-Path $env:OMS_INSTALL_DIR 'oms.exe') --version
+          Stop-Process $server
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: oms-${{ matrix.target }}
+          path: dist/*
+          if-no-files-found: error
+
+  release:
+    needs: build
+    if: startsWith(github.ref, 'refs/tags/v')
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+      # For the build provenance that `gh attestation verify` checks.
+      id-token: write
+      attestations: write
+    steps:
+      - uses: actions/checkout@v5
+
+      - uses: actions/download-artifact@v4
+        with:
+          path: dist
+          pattern: oms-*
+          merge-multiple: true
+
+      - name: Add the install scripts and checksums
+        run: |
+          cp install.sh install.ps1 dist/
+          cd dist
+          sha256sum -- * > ../SHA256SUMS
+          mv ../SHA256SUMS .
+          cat SHA256SUMS
+
+      - uses: actions/attest-build-provenance@v2
+        with:
+          subject-path: dist/*
+
+      - name: Publish
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          flags=()
+          # A tag such as v0.2.0-rc.1 is a prerelease, which `releases/latest` skips.
+          if [[ "$GITHUB_REF_NAME" == *-* ]]; then flags+=(--prerelease); fi
+          gh release create "$GITHUB_REF_NAME" dist/* --verify-tag --title "$GITHUB_REF_NAME" --generate-notes "${flags[@]}"
