@@ -51,19 +51,41 @@ flowchart LR
 
 ## Get started
 
-The agent needs [Rust](https://rustup.rs) to build. Prebuilt binaries aren't published yet. It runs on macOS, Linux and Windows. On Windows, let rustup install the Visual Studio build tools when it offers, and run the commands below in PowerShell.
+Install the agent on macOS or Linux:
 
 ```sh
-git clone https://github.com/saintlee83/oh-my-stats
-cargo install --path oh-my-stats/agent
+curl -fsSL https://ohmystats.dev/install.sh | sh
+```
 
+On Windows, in PowerShell:
+
+```powershell
+irm https://ohmystats.dev/install.ps1 | iex
+```
+
+The script downloads the [latest release](https://github.com/saintlee83/oh-my-stats/releases/latest), checks it against the release's checksums, and puts `oms` in `~/.local/bin`. On Windows it also adds that folder to your PATH. Then:
+
+```sh
 oms login             # approve a code in your browser
 oms sync              # send your usage now
 oms service install   # keep tracking in the background
 oms publish           # optional: make your profile public
 ```
 
-Repeat `oms login`, `oms sync` and `oms service install` on each computer. On Windows, `oms service install` adds the agent to your startup apps, so it needs no administrator rights.
+Repeat this on each computer. On Windows, `oms service install` adds the agent to your startup apps, so it needs no administrator rights.
+
+To update, run the install command again. If the agent runs in the background, it restarts on the new version. Set `OMS_VERSION` to install a particular release, such as `v0.1.0`, or `OMS_INSTALL_DIR` to put `oms` somewhere else.
+
+Every file in a release has build provenance from GitHub Actions. To check a download, run `gh attestation verify <file> --repo saintlee83/oh-my-stats`.
+
+### Build from source
+
+Prebuilt agents cover macOS, Linux and Windows on x86_64 and ARM64. Elsewhere, or to run your own changes, build with [Rust](https://rustup.rs). On Windows, let rustup install the Visual Studio build tools when it offers.
+
+```sh
+git clone https://github.com/saintlee83/oh-my-stats
+cargo install --path oh-my-stats/agent
+```
 
 The agent reads new log lines every 5 minutes and uploads once a day, so your numbers can be up to a day behind. A machine that was asleep or offline catches up when it comes back. Run `oms sync` to update right away, or change `uploadIntervalMinutes`.
 
@@ -184,7 +206,8 @@ Then point agents at it with `oms login --server https://your-server`.
 - **AI tools:** only Claude Code, Claude Desktop agent sessions and Codex are read today.
 - **Default branches only.** Commits still on other branches aren't walked, which matches how GitHub counts contributions. Your GitHub graph can show more than can be itemized, for example work in repositories that were later deleted.
 - **Churn reads the first 300 files of a commit**, and treats a commit over 20,000 lines as a bulk import. Change this with `maxCommitLines` in `~/.oh-my-stats/config.json`.
-- **On Windows**, run `oms service uninstall` before installing a new version, because Windows can't replace a running program, then `oms service install` again. The agent's folder is kept private by your user folder's permissions, rather than by its own.
+- **On Windows**, Windows can't replace a running program. The install script stops the agent and starts it again for you, but with `cargo install`, run `oms service uninstall` first and `oms service install` afterwards. The agent's folder is kept private by your user folder's permissions, rather than by its own.
+- **Releases aren't signed by Apple or Microsoft.** The install scripts aren't affected, but a file downloaded with a browser can be blocked by Gatekeeper on macOS or flagged by SmartScreen on Windows.
 - **Uploads are capped** at 20,000 changed rows per account per day. Anything over that goes through the next day. An account can have 50 machines.
 - **Rate limits are approximate.** They use Cloudflare's rate limiting, which counts per location and can briefly let requests through above the limit.
 
@@ -221,6 +244,7 @@ cargo run -- login --server http://localhost:8787 --gh
 With `ALLOW_ANY_GITHUB_TOKEN=true` in `.dev.vars`, a local server accepts your GitHub CLI login, so you don't need a GitHub App to develop. The server ignores this setting anywhere but this computer, and the agent only uses `--gh` with a server on this computer.
 
 - **Adding an AI tool:** add a parser in `agent/src/parse.rs`, and its log folder in `agent/src/scan.rs`.
+- **Releasing:** set the version in `agent/Cargo.toml`, merge, then push a matching tag, such as `git tag v0.2.0 && git push origin v0.2.0`. The release workflow builds every platform, tests the install scripts against the build, and publishes the release. A tag with a suffix, such as `v0.2.0-rc.1`, becomes a prerelease, which the install scripts skip unless `OMS_VERSION` names it.
 - **The one rule that matters:** repository, organization and file names exist only inside `agent/src/github/collect.rs`. `Snapshot` has none, so nothing downstream can leak them. Its one piece of free text is your public GitHub profile, which anyone can already see.
 
 ## License

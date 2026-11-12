@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
 import { test } from 'node:test';
-import { handle, isLocalRequest, type Deps } from '../src/server/app.ts';
+import { handle, isLocalRequest, LATEST_RELEASE, type Deps } from '../src/server/app.ts';
 import { LOGO_SVG } from '../src/server/logo.ts';
 import { COMPONENT_KEYS } from '../src/shared/render/svg.ts';
 import { testDb } from './sqlite-d1.ts';
@@ -855,6 +855,20 @@ test('every page shows the logo as its icon, the same one the README shows', asy
   const legacy = await context.call('/favicon.ico');
   assert.equal(legacy.status, 301);
   assert.equal(legacy.headers.get('location'), '/favicon.svg');
+});
+
+test('the install commands on the website lead to the scripts each release ships', async () => {
+  const context = app();
+  const workflow = readFileSync(new URL('../.github/workflows/release.yml', import.meta.url), 'utf8');
+  assert.match(workflow, /cp install\.sh install\.ps1 dist\//, 'each release uploads both scripts');
+  const landing = await (await context.call('/')).text();
+  for (const script of ['install.sh', 'install.ps1']) {
+    const response = await context.call(`/${script}`);
+    assert.equal(response.status, 302, script);
+    assert.equal(response.headers.get('location'), `${LATEST_RELEASE}/${script}`);
+    assert.ok(readFileSync(new URL(`../${script}`, import.meta.url), 'utf8').length > 0, `${script} is in the repository`);
+    assert.ok(landing.includes(`${ORIGIN}/${script}`), `the landing page shows ${script}`);
+  }
 });
 
 test('the profile header uses what the owner wrote on the website, and their GitHub profile for the rest', async () => {

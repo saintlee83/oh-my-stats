@@ -83,9 +83,10 @@ function layout(title: string, body: string, viewer: UserRow | null): string {
 
 const HOSTED_ORIGIN = 'https://ohmystats.dev';
 
-const installSnippet = (origin: string) => `# Build the agent (a prebuilt release is on the way)
-git clone https://github.com/saintlee83/oh-my-stats
-cargo install --path oh-my-stats/agent
+const installSnippet = (origin: string) => `# Install the agent on macOS or Linux
+curl -fsSL ${origin}/install.sh | sh
+# or on Windows, in PowerShell
+irm ${origin}/install.ps1 | iex
 
 # Sign in on each machine, then let it run in the background
 oms login${origin === HOSTED_ORIGIN ? '' : ` --server ${origin}`}
