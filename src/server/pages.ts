@@ -36,8 +36,25 @@ function avatar(url: string | null, size: number): string {
   }
 }
 
-function layout(title: string, body: string, viewer: UserRow | null, page: { description?: string; bleed?: boolean } = {}): string {
+/**
+ * What a page says about itself. A page worth sharing gives the address it's served from, and
+ * gets the preview image: sites that show link previews only follow a full address.
+ */
+interface PageOptions {
+  description?: string;
+  bleed?: boolean;
+  origin?: string;
+}
+
+function layout(title: string, body: string, viewer: UserRow | null, page: PageOptions = {}): string {
   const description = esc(page.description ?? DESCRIPTION);
+  const preview = page.origin
+    ? `<meta property="og:image" content="${esc(page.origin)}/og.png">
+<meta property="og:image:width" content="2400">
+<meta property="og:image:height" content="1260">
+<meta property="og:image:alt" content="${SITE}. Your real developer stats, from every machine.">
+<meta name="twitter:card" content="summary_large_image">`
+    : '<meta name="twitter:card" content="summary">';
   const account = viewer
     ? `<a class="button" href="/me">${avatar(viewer.avatar_url, 20)}@${esc(viewer.login)}</a>`
     : '<a class="button" href="/login">Sign in</a>';
@@ -52,7 +69,7 @@ function layout(title: string, body: string, viewer: UserRow | null, page: { des
 <meta property="og:type" content="website">
 <meta property="og:title" content="${esc(title)}">
 <meta property="og:description" content="${description}">
-<meta name="twitter:card" content="summary">
+${preview}
 <meta name="theme-color" content="#ffffff" media="(prefers-color-scheme: light)">
 <meta name="theme-color" content="#0d1117" media="(prefers-color-scheme: dark)">
 <link rel="icon" href="/favicon.svg" type="image/svg+xml">
@@ -106,6 +123,7 @@ export function rankingsPage(
   viewer: UserRow | null,
   positions: PublicPosition[],
   filter: ProviderFilter = { provider: null, providers: [] },
+  origin?: string,
 ): string {
   const isPublic = Array.isArray(data);
   const path = isPublic ? '/rankings' : '/me/rankings';
@@ -147,7 +165,7 @@ ${unranked ? `<p class="muted">${unranked}</p>` : ''}
 <p>${isPublic ? 'Published profiles, by AI tokens used: input, output, cache reads and cache writes.' : 'Where you stand, and how your own devices and providers compare. Only you can see this page.'}</p></div></div>
 <div class="toolbar"><nav class="segments" aria-label="Ranking periods">${periods}</nav>${views}</div>
 ${period.days === 'all' ? '' : `<p class="muted">${period.start} through ${period.end} · Reporting dates through today in UTC.</p>`}
-${content}`, viewer, isPublic ? { description: 'Published developer profiles ranked by AI token usage: all time, the last 7 days and the last 30 days.' } : {});
+${content}`, viewer, isPublic ? { origin, description: 'Published developer profiles ranked by AI token usage: all time, the last 7 days and the last 30 days.' } : {});
 }
 
 /** The same steps on every system but the first, so the reader picks theirs once. */
@@ -266,7 +284,7 @@ ${leaders}
 <div class="wrap"><section class="cta"><h2>Start counting</h2><p>Install the agent, sign in with GitHub, and run <code>oms sync</code> to see your first numbers.</p>
 <div class="actions">${start}<a class="button lg" href="${REPO_URL}#get-started">Read the guide</a></div></section></div>`,
     viewer,
-    { bleed: true },
+    { bleed: true, origin },
   );
 }
 
@@ -359,7 +377,7 @@ ${providerActivity(tokens)}
   ${cards.length ? `<h2>Text cards</h2><ul>${cardLinks}</ul>` : ''}
 </div>`,
     viewer,
-    { description: `The developer stats of @${user.login}: AI tokens and GitHub contributions, counted across every machine.` },
+    { origin, description: `The developer stats of @${user.login}: AI tokens and GitHub contributions, counted across every machine.` },
   );
 }
 

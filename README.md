@@ -305,6 +305,7 @@ cargo run -- login --server http://localhost:8787 --gh
 With `ALLOW_ANY_GITHUB_TOKEN=true` in `.dev.vars`, a local server accepts your GitHub CLI login, so you don't need a GitHub App to develop. The server ignores this setting anywhere but this computer, and the agent only uses `--gh` with a server on this computer.
 
 - **Adding an AI tool:** use the JSONL export format above, or add a native reader in `agent/src/providers.rs` and register its discovery root and parsing branch in `agent/src/scan.rs`. Each reader emits a normalized `UsageEvent`; storage, upload and analysis use its provider ID.
+- **The link preview image:** `public/og.png` is what sites show when someone shares a link to the server. It is `.github/banner.svg` drawn at twice its size, 2400 by 1260. After changing the drawing, open it in a browser and save a screenshot at that size. Wrangler serves the `public` folder as it is.
 - **Releasing:** set the version in `agent/Cargo.toml`, merge, then push a matching tag, such as `git tag v0.2.0 && git push origin v0.2.0`. The release workflow builds every platform, tests the install scripts against the build, and publishes the release. A tag with a suffix, such as `v0.2.0-rc.1`, becomes a prerelease, which the install scripts skip unless `OMS_VERSION` names it.
 - **The one rule that matters:** repository, organization and file names exist only inside `agent/src/github/collect.rs`. `Snapshot` has none, so nothing downstream can leak them. Its one piece of free text is your public GitHub profile, which anyone can already see.
 

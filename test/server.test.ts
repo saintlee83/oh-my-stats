@@ -1089,6 +1089,28 @@ test('pages load nothing the content policy would block, and share one frame', a
   assert.doesNotMatch(await (await context.call('/u/octo')).text(), /Edit profile/);
 });
 
+test('pages worth sharing name the preview image by its full address, and the image is there to serve', async () => {
+  const { context } = await published();
+  const session = await webLogin(context);
+  for (const path of ['/', '/rankings', '/rankings?days=7&provider=codex', '/u/octo']) {
+    const text = await (await context.call(path)).text();
+    assert.match(text, /<meta property="og:image" content="https:\/\/stats\.example\/og\.png">/, path);
+    assert.match(text, /<meta name="twitter:card" content="summary_large_image">/, path);
+  }
+  for (const [path, init] of [['/nope', {}], ['/me', { headers: { cookie: session } }], ['/me/rankings', { headers: { cookie: session } }]] as const) {
+    const text = await (await context.call(path, init)).text();
+    assert.doesNotMatch(text, /og:image/, `${path} is not for sharing`);
+    assert.match(text, /<meta name="twitter:card" content="summary">/, path);
+  }
+  // Wrangler serves this folder at the site's root, so the Worker never sees the request.
+  assert.match(readFileSync(new URL('../wrangler.jsonc', import.meta.url), 'utf8'), /"assets": \{ "directory": "\.\/public" \}/);
+  const image = readFileSync(new URL('../public/og.png', import.meta.url));
+  assert.equal(image.subarray(1, 4).toString('latin1'), 'PNG');
+  assert.deepEqual([image.readUInt32BE(16), image.readUInt32BE(20)], [2400, 1260], 'the size the pages declare');
+  assert.ok(image.length < 1_000_000, 'light enough for any site that draws link previews');
+  assert.match(readFileSync(new URL('../.github/banner.svg', import.meta.url), 'utf8'), /^<svg [^>]*viewBox="0 0 1200 630"/, 'the drawing it is made from, at half the size');
+});
+
 test('install commands are shown per system, each with the same next steps', async () => {
   const context = app();
   const session = await webLogin(context);

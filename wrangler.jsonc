@@ -9,6 +9,8 @@
   "preview_urls": false,
   // Without this, `wrangler dev` tells the Worker it's running at the address above.
   "dev": { "port": 8787, "host": "localhost:8787" },
+  // Served as they are, without running the Worker: the image shown where a link to the site is shared.
+  "assets": { "directory": "./public" },
   "observability": {
     "enabled": true,
     "traces": { "enabled": true }

@@ -622,7 +622,7 @@ async function route(request: Request, deps: Deps): Promise<Response> {
     }
     const provider = rankingProvider(url.searchParams.get('provider'));
     const board = await publicRankings(deps.db, period, viewer?.id, provider);
-    return html(rankingsPage(period, board.users, viewer, [board.position], { provider, providers: board.providers }));
+    return html(rankingsPage(period, board.users, viewer, [board.position], { provider, providers: board.providers }, url.origin));
   }
 
   const profile = /^\/u\/([A-Za-z0-9-]{1,39})(?:\/(dashboard\.svg|cards\/([a-z]+)\.txt|components\/([a-z]+)\.svg))?$/.exec(path);
