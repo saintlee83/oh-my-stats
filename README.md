@@ -258,7 +258,7 @@ Your dashboard, public token card and `oms status` compare the most recent seven
 
 Gemini CLI sessions under `~/.gemini/tmp/<project>/chats/session-*.jsonl` and older `session-*.json` files are discovered automatically. Cached input is counted once, tool-prompt tokens contribute to input, and thinking tokens contribute to output. Repeated message records count once by message ID. Gemini and imported usage cover the machines running the agent. [Gemini CLI recording format](https://github.com/google-gemini/gemini-cli/blob/main/packages/core/src/services/chatRecordingTypes.ts)
 
-### Automatically collected CLI histories
+### Automatically collected histories
 
 The agent discovers these histories on the machine where you run `oms`. An existing history is included on the first scan. Run `oms preview` to inspect its daily totals.
 
@@ -323,6 +323,8 @@ The server is a single Cloudflare Worker with a D1 database, and has no runtime 
 
 Then point agents at it with `oms login --server https://your-server`.
 
+To update a server, apply any new migrations before deploying: `npx wrangler d1 migrations apply DB --remote`, then `npx wrangler deploy`. A page that needs a table the database doesn't have yet fails until they are applied.
+
 ## Known limits
 
 - **Claude Code has no account-wide figure** for individual plans in its docs, so a machine without the agent isn't counted. Its statistics file isn't a public format, so a future version could change it. If it does, the agent keeps the last known total and uses logs.
@@ -369,7 +371,7 @@ cargo run -- login --server http://localhost:8787 --gh
 With `ALLOW_ANY_GITHUB_TOKEN=true` in `.dev.vars`, a local server accepts your GitHub CLI login, so you don't need a GitHub App to develop. The server ignores this setting anywhere but this computer, and the agent only uses `--gh` with a server on this computer.
 
 - **Adding an AI tool:** use the JSONL export format above, or add a native reader in `agent/src/providers.rs` and register its discovery root and parsing branch in `agent/src/scan.rs`. Each reader emits a normalized `UsageEvent`; storage, upload and analysis use its provider ID.
-- **The link preview image:** `public/og.png` is what sites show when someone shares a link to the server. It is `.github/banner.svg` drawn at twice its size, 2400 by 1260. After changing the drawing, open it in a browser and save a screenshot at that size. Wrangler serves the `public` folder as it is.
+- **The link preview image:** `public/og.png` is what sites show when someone shares a link to the server, other than a link to a profile. It is `.github/banner.svg` drawn at twice its size, 2400 by 1260. After changing the drawing, open it in a browser and save a screenshot at that size. Wrangler serves the `public` folder as it is. A profile's own preview, `/u/<login>/og.png`, is drawn by the server from squares, with no image library: see `src/shared/render/preview.ts`.
 - **Releasing:** set the version in `agent/Cargo.toml`, merge, then push a matching tag, such as `git tag v0.2.0 && git push origin v0.2.0`. The release workflow builds every platform, tests the install scripts against the build, and publishes the release. A tag with a suffix, such as `v0.2.0-rc.1`, becomes a prerelease, which the install scripts skip unless `OMS_VERSION` names it.
 - **The one rule that matters:** repository, organization and file names exist only inside `agent/src/github/collect.rs`. `Snapshot` has none, so nothing downstream can leak them. Its one piece of free text is your public GitHub profile, which anyone can already see.
 
