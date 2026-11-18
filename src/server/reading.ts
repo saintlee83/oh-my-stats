@@ -170,8 +170,9 @@ const TERMS: ReadingPage = {
     ['usage', 'Your usage', `<p>Upload only your own real usage: what your own tools recorded, on your own accounts. Don’t make up or inflate numbers, don’t upload someone else’s usage as yours, and don’t try to get around the limits.</p>
 <p>An account can have 50 machines and can change 20,000 rows a day, and requests are rate limited.</p>`],
     ['publishing', 'What you publish', `<p>Your profile is private until you publish it, and publishing is your choice. Once published, anyone can see your profile, embed its images, and find you in the rankings and the sitemap.</p>
-<p>You can unpublish at any time. <a href="/privacy#caching">Privacy</a> says how long a copy can remain.</p>`],
-    ['removal', 'Removal', `<p>Whoever runs this server may remove an account that abuses the service or the rankings, for example with made-up usage or by flooding the server.</p>
+<p>You can unpublish at any time. <a href="/privacy#caching">Privacy</a> says how long a copy can remain.</p>
+<p>Joining a group is also your choice, and shows your token totals to its members. A public group’s name and description are shown to everyone.</p>`],
+    ['removal', 'Removal', `<p>Whoever runs this server may remove an account or a group that abuses the service or the rankings, for example with made-up usage, by flooding the server, or with a group name or description that is not fit to show others.</p>
 <p>You can leave at any time: delete your account on your dashboard, and everything on the server is removed.</p>`],
     ['changes', 'Changes', `<p>The service may change or stop, and these terms may change with it. The date above says when they last did.</p>
 <p>Questions go to the project’s <a href="${ISSUES_URL}">issue tracker</a>.</p>`],

@@ -149,7 +149,7 @@ test('the terms are short: no warranty, your own real usage, and publishing by c
     '<a href="https://github.com/saintlee83/oh-my-stats/blob/main/LICENSE">MIT license</a>',
     'without warranty of any kind',
     'Upload only your own real usage',
-    'may remove an account that abuses the service or the rankings',
+    'may remove an account or a group that abuses the service or the rankings',
     'publishing is your choice',
     'The service may change or stop',
   ]) assert.ok(page.includes(fact), fact);
