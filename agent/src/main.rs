@@ -5,6 +5,7 @@ mod github;
 mod login;
 mod machine;
 mod parse;
+mod providers;
 mod scan;
 mod service;
 mod store;
@@ -95,17 +96,14 @@ fn set_public(public: bool) -> Result<()> {
 fn preview() -> Result<()> {
     let config = Config::load()?;
     let mut store = Store::open(&state_dir()?.join("agent.db"))?;
-    scan::scan(&mut store, &scan::default_roots()?, config.timezone())?;
+    scan::scan(&mut store, &scan::default_roots(&config.skip_native_logs)?, config.timezone())?;
     let totals = totals::collect(&store, sync::now_secs(), true)?;
-    let rollup = store.rollup()?;
-    let body = json!({
-        "machine": machine::machine_info(&config)?,
-        "timezone": config.timezone_name(),
-        "days": rollup,
-        "totals": totals,
-        "canCollectGitHub": github::has_access(&config),
-    });
-    println!("{}", serde_json::to_string_pretty(&body)?);
+    let requests = sync::preview(&store, &config, &totals)?;
+    if let [only] = requests.as_slice() {
+        println!("{}", serde_json::to_string_pretty(only)?);
+    } else {
+        println!("{}", serde_json::to_string_pretty(&requests)?);
+    }
     Ok(())
 }
 

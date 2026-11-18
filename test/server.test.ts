@@ -955,3 +955,79 @@ test('only GitHub\'s avatar server is asked for an avatar', async () => {
   assert.equal((await context.call('/u/eve/components/profile.svg')).status, 200);
   assert.ok(!context.github.calls.some((url) => url.includes('internal.example')));
 });
+
+test('concurrent machines get one GitHub collection lease', async () => {
+  const { claimGitHubCollection } = await import('../src/server/db.ts');
+  const db = testDb();
+  const claim = () => claimGitHubCollection(db, 'same-user', new Date('2026-11-09T00:00:00Z'));
+  assert.equal((await Promise.all([claim(), claim()])).filter(Boolean).length, 1);
+});
+
+test('a malformed nested GitHub snapshot cannot replace the last renderable snapshot', async () => {
+  const context = app();
+  const token = await signIn(context);
+  const valid = githubMetrics();
+  const put = (value: unknown) => context.call('/v1/github', api(token, 'PUT', value));
+  assert.equal((await put(valid)).status, 200);
+  assert.equal((await put({ ...valid, rhythm: { ...valid.rhythm, weekdays: null } })).status, 400);
+  assert.equal((await put({ ...valid, churn: { ...valid.churn, rows: [null] } })).status, 400);
+  await context.call('/v1/me', api(token, 'PATCH', { public: true }));
+  assert.equal((await context.call('/u/octo/dashboard.svg')).status, 200);
+});
+
+test('the Rust-generated GitHub snapshot uploads and renders on public routes', async () => {
+  const payload = JSON.parse(readFileSync(new URL('../agent/tests/fixtures/github-metrics.json', import.meta.url), 'utf8'));
+  const context = app();
+  const token = await signIn(context);
+  assert.equal((await context.call('/v1/github', api(token, 'PUT', payload))).status, 200);
+  await context.call('/v1/me', api(token, 'PATCH', { public: true }));
+  for (const path of ['/u/octo', '/u/octo/dashboard.svg', '/u/octo/cards/languages.txt']) {
+    const response = await context.call(path);
+    assert.equal(response.status, 200);
+    assert.match(await response.text(), /Rust/);
+  }
+});
+
+test('custom provider usage reaches status, the private dashboard and the published table', async () => {
+  const context = app();
+  const token = await signIn(context);
+  const usage = { ...upload(MACHINE_A), days: { '2026-11-09': { 'local-ai/my-model': [100, 50, 25, 0, 1] } } };
+  assert.equal((await context.call('/v1/usage', api(token, 'PUT', usage))).status, 200);
+  const me = await (await context.call('/v1/me', api(token, 'GET'))).json() as { tokens: { tools: { activity: unknown }[] } };
+  assert.deepEqual(me.tokens.tools[0].activity, { last7: 175, previous7: 0, responses30: 1, activeDays30: 1, tokensPerResponse30: 175 });
+  const session = await webLogin(context);
+  const check = async (page: Response) => assert.match(await page.text(), /Provider activity[\s\S]*<td>local-ai<\/td>[\s\S]*>175<\/td>/);
+  await check(await context.call('/me', { headers: { cookie: session } }));
+  assert.equal((await context.call('/u/octo')).status, 404);
+  await context.call('/v1/me', api(token, 'PATCH', { public: true }));
+  await check(await context.call('/u/octo'));
+});
+
+test('the owner can compare device periods and see lifetime usage with no matching device', async () => {
+  const context = app();
+  const a = await signIn(context);
+  const b = await signIn(context, MACHINE_B, 'desktop-office');
+  const totals = { codex: { scope: 'account', total: 1000, asOf: '2026-11-09', daily: { '2026-11-09': 1000 } } };
+  for (const [id, token, day, used] of [[MACHINE_A, a, '2026-11-09', 100], [MACHINE_B, b, '2026-10-25', 50]] as const) {
+    assert.equal((await context.call('/v1/usage', api(token, 'PUT', {
+      ...upload(id), days: { [day]: { 'codex/model': [used, 0, 0, 0, 1] } }, totals,
+    }))).status, 200);
+  }
+  const me = await (await context.call('/v1/me', api(a, 'GET'))).json() as {
+    machines: { id: string; tokens: number; last7: number; last30: number }[];
+  };
+  assert.deepEqual(me.machines.map(m => [m.id, m.last7, m.last30, m.tokens]).sort(), [
+    [MACHINE_A, 100, 100, 100], [MACHINE_B, 0, 50, 50],
+  ]);
+  const cookie = await webLogin(context);
+  const owner = await (await context.call('/me', { headers: { cookie } })).text();
+  assert.match(owner, /Lifetime tokens/);
+  assert.match(owner, /850 lifetime tokens have no matching device/);
+  await context.call('/v1/me', api(a, 'PATCH', { public: true }));
+  for (const path of ['/u/octo', '/u/octo/dashboard.svg', '/u/octo/cards/tokens.txt']) {
+    const published = await (await context.call(path)).text();
+    for (const privateValue of [SECRET_NAME, 'desktop-office', MACHINE_A, MACHINE_B, '850 lifetime tokens have no matching device']) {
+      assert.ok(!published.includes(privateValue));
+    }
+  }
+});

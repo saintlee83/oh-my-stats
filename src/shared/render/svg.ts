@@ -1,5 +1,5 @@
 import type { GitHubMetrics, Metrics, ProfileMetrics, ProfileStatus, TokenMetrics } from '../metrics.ts';
-import { commas, compact, hours, money, percent } from '../format.ts';
+import { clip, commas, compact, costLabel, hours, percent, providerName } from '../format.ts';
 import { WEEKDAYS } from '../time.ts';
 
 type Palette = Record<
@@ -466,7 +466,6 @@ function churnSection(github: GitHubMetrics): Section {
 }
 
 function tokensSection(tokens: TokenMetrics): Section {
-  const toolLabel: Record<string, string> = { claude: 'Claude Code', codex: 'Codex' };
   const machineCount = (count: number) => (count === 1 ? '1 machine' : `${count} machines`);
   const reach = {
     machine: (count: number) => `on ${machineCount(count)}`,
@@ -476,29 +475,34 @@ function tokensSection(tokens: TokenMetrics): Section {
   const isMinimum = tokens.unpricedModels.length > 0 || tokens.unattributed > 0;
   const tileItems: [string, string][] = [
     ['Total tokens', compact(tokens.total)],
-    ...tokens.tools.slice(0, 2).map((row): [string, string] => [toolLabel[row.tool] ?? row.tool, compact(row.total)]),
+    ...tokens.tools.slice(0, 2).map((row): [string, string] => [clip(providerName(row.tool), 20), compact(row.total)]),
     ['Cache hit rate', percent(tokens.cacheShare, 1)],
-    ['At API list price', `${isMinimum ? '≥' : '≈'}${money(tokens.cost)}`],
+    ['At API list price', costLabel(tokens.cost, tokens.models.some((m) => m.cost !== null), isMinimum)],
   ];
   let body = text(0, 14, 'AI token trace', 'h1');
-  body += text(0, 32, tokens.tools.map((row) => `${toolLabel[row.tool] ?? row.tool} ${reach[row.scope](row.machines)}`).join(', '), 'note');
+  body += text(0, 32, clip(tokens.tools.map((row) => `${providerName(row.tool)} ${reach[row.scope](row.machines)}`).join(', '), 110), 'note');
   const tileWidth = INNER / tileItems.length;
   tileItems.forEach(([label, value], index) => {
     body += text(index * tileWidth, 66, value, 'tile-value');
     body += text(index * tileWidth, 86, label, 'label');
   });
 
-  // Fixed per tool, so a tool keeps its color when the ranking changes.
-  const TOOL_FILLS: Record<string, string> = { claude: 'c1', codex: 'c2' };
-  const spare = ['c3', 'c4'];
-  const toolNames = tokens.tools.map((tool) => tool.tool).sort();
-  const fillOf = (tool: string) => TOOL_FILLS[tool] ?? spare[Math.max(0, toolNames.indexOf(tool)) % spare.length];
+  // Keep the compact embed readable; the text card lists every provider individually.
+  const visible = tokens.tools.slice(0, tokens.tools.length > 4 ? 3 : 4);
+  const groups = visible.map(({ tool }) => ({ label: providerName(tool), tools: [tool] }));
+  if (visible.length < tokens.tools.length) {
+    groups.push({ label: 'Others', tools: tokens.tools.slice(visible.length).map(({ tool }) => tool) });
+  }
+  const colors = new Map([['claude', 'c1'], ['codex', 'c2'], ['gemini', 'c3']]);
+  const usedColors = new Set(visible.map(({ tool }) => colors.get(tool)));
+  const spare = ['c1', 'c2', 'c3', 'c4'].filter((color) => !usedColors.has(color));
+  const series = groups.map((group) => ({
+    ...group, fill: (group.tools.length === 1 && colors.get(group.tools[0])) || spare.shift()!,
+  }));
+  const labels = series.map(({ label, fill }) => ({ label: clip(label, 16), fill }));
+  const legendWidth = labels.reduce((sum, { label }) => sum + 33 + label.length * 6.6, 0);
   body += text(0, 120, 'Tokens per day, last 60 days', 'label');
-  body += legend(
-    INNER - toolNames.length * 110,
-    120,
-    toolNames.map((tool) => ({ label: toolLabel[tool] ?? tool, fill: fillOf(tool) })),
-  );
+  body += legend(INNER - legendWidth, 120, labels);
 
   const axisWidth = 44;
   const plotTop = 134;
@@ -514,15 +518,15 @@ function tokensSection(tokens: TokenMetrics): Section {
   const slot = plotWidth / tokens.daily.length;
   tokens.daily.forEach((day, index) => {
     const x = axisWidth + index * slot;
-    const parts = toolNames
-      .map((tool) => ({ tool, fill: fillOf(tool), value: day.byTool[tool] ?? 0 }))
+    const parts = series
+      .map(({ label, fill, tools }) => ({ label, fill, value: tools.reduce((sum, tool) => sum + (day.byTool[tool] ?? 0), 0) }))
       .filter((part) => part.value > 0);
     let stack = 0;
     parts.forEach((part, position) => {
       const raw = (part.value / peak) * plotHeight;
       const isTop = position === parts.length - 1;
       const drawn = Math.max(1, isTop ? raw : raw - 2);
-      body += barUp(x + 1, baseline - stack, slot - 2, drawn, part.fill, `${day.date}, ${toolLabel[part.tool] ?? part.tool}: ${compact(part.value)}`, isTop);
+      body += barUp(x + 1, baseline - stack, slot - 2, drawn, part.fill, `${day.date}, ${part.label}: ${compact(part.value)}`, isTop);
       stack += raw;
     });
   });

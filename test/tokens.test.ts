@@ -169,3 +169,43 @@ test('text from an upload is escaped in the dashboard', () => {
   assert.ok(!svg.includes('<script>'));
   assert.ok(svg.includes('A&lt;script&gt;&amp;&quot;'));
 });
+
+test('provider activity compares disjoint weeks and averages only logged responses', () => {
+  const sample: MachineUsage = {
+    id: 'one',
+    days: {
+      '2026-11-09': { 'gemini/gemini-flash': [20, 1, 4, 0, 1] },
+      '2026-11-03': { 'gemini/gemini-flash': [10, 0, 0, 0, 1] },
+      '2026-11-02': { 'gemini/gemini-flash': [1, 1, 0, 0, 1] },
+      '2026-10-27': { 'gemini/gemini-flash': [3, 0, 0, 0, 1] },
+      '2026-10-10': { 'gemini/gemini-flash': [100, 0, 0, 0, 1] },
+    },
+    totals: { codex: { scope: 'account', total: 50, asOf: '2026-11-09', daily: { '2026-11-09': 50 } } },
+  };
+  const metrics = computeTokens([sample], { 'gemini/gemini-flash': PRICES['gpt-6-astra'] }, TZ, NOW, null)!;
+  assert.deepEqual(tool(metrics, 'gemini').activity, { last7: 35, previous7: 5, activeDays30: 4, responses30: 4, tokensPerResponse30: 10 });
+  assert.equal(tool(metrics, 'gemini').cost, 136);
+  assert.equal(tool(metrics, 'codex').activity.tokensPerResponse30, null);
+  assert.equal(tool(metrics, 'codex').activity.last7, 50);
+  const other: MachineUsage = { id: 'two', days: { '2026-11-09': {
+    'local/one': [1, 0, 0, 0, 1], 'second/two': [2, 0, 0, 0, 1], 'third/three': [3, 0, 0, 0, 1],
+  } } };
+  const rendered = metricsFor([sample, other]);
+  assert.match(renderDashboard(rendered), /Others/);
+  assert.match(buildCards(rendered).find(c => c.key === 'tokens')!.details.join('\n'), /PROVIDER ACTIVITY[\s\S]*Gemini CLI/);
+});
+
+test('device periods use local Codex logs and each machine’s own Claude daily figures', () => {
+  const a = laptop();
+  a.days['2026-10-01'] = { 'pi/local': [50, 0, 0, 0, 1] };
+  a.days['2026-11-10'] = { 'pi/local': [9, 0, 0, 0, 1] };
+  const b = desktop();
+  // A machine-wide lifetime figure without a model split still belongs to it.
+  b.totals!.claude = { scope: 'machine', asOf: '2026-11-08', total: 200, daily: { '2026-10-20': 150 } };
+  const metrics = compute([a, b]);
+  assert.deepEqual(metrics.machines, [
+    { id: a.id, total: 1081, last7: 12, last30: 622 },
+    { id: b.id, total: 217, last7: 7, last30: 167 },
+  ]);
+  assert.equal(metrics.total - metrics.machines.reduce((s, row) => s + row.total, 0), 480);
+});

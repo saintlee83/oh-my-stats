@@ -17,7 +17,11 @@ pub struct MachineInfo {
 }
 
 pub fn sha256_hex(input: &str) -> String {
-    let digest = Sha256::digest(input.as_bytes());
+    hash_bytes(input.as_bytes())
+}
+
+pub fn hash_bytes(bytes: &[u8]) -> String {
+    let digest = Sha256::digest(bytes);
     digest.iter().map(|byte| format!("{byte:02x}")).collect()
 }
 

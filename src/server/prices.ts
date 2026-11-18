@@ -5,7 +5,7 @@ import type { Db } from './db.ts';
 const KEY = 'prices';
 const MAX_AGE_MS = 24 * 3_600_000;
 /** Only families this platform tracks, so the table fits comfortably in one database row. */
-const RELEVANT = /^(anthropic\/|openai\/)?(claude|gpt|o\d|codex|chatgpt)/i;
+const RELEVANT = /^(anthropic\/|openai\/|gemini\/)?(claude|gpt|o\d|codex|chatgpt|gemini)/i;
 
 async function refresh(db: Db, fetchImpl: typeof fetch, now: Date): Promise<PriceTable | null> {
   try {

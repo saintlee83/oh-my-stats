@@ -1,6 +1,6 @@
 import type { GitHubMetrics } from '../shared/metrics.ts';
 import type { MachineUsage, ToolTotals, UsageTuple } from '../shared/types.ts';
-import type { MachineInfo, UsageUpload } from './wire.ts';
+import { BadRequest, parseGitHubMetrics, type MachineInfo, type UsageUpload } from './wire.ts';
 
 /** The small part of D1 this app uses, so tests can run against plain SQLite. */
 export interface Statement {
@@ -273,7 +273,14 @@ export async function saveGitHubStats(db: Db, userId: string, metrics: GitHubMet
 
 export async function loadGitHubStats(db: Db, userId: string): Promise<{ metrics: GitHubMetrics; collectedAt: string } | null> {
   const row = await db.prepare('SELECT payload, collected_at FROM github_stats WHERE user_id = ?').bind(userId).first<{ payload: string; collected_at: string }>();
-  return row ? { metrics: JSON.parse(row.payload) as GitHubMetrics, collectedAt: row.collected_at } : null;
+  if (!row) return null;
+  try {
+    return { metrics: parseGitHubMetrics(JSON.parse(row.payload)), collectedAt: row.collected_at };
+  } catch (error) {
+    // A snapshot accepted by an older server can be incomplete. Keep serving token data.
+    if (error instanceof BadRequest || error instanceof SyntaxError) return null;
+    throw error;
+  }
 }
 
 const GITHUB_STALE_MS = 6 * 3_600_000;
@@ -284,14 +291,18 @@ const LEASE_MS = 30 * 60_000;
  * thousands of API calls. The first agent to sync once they're stale gets a short lease.
  */
 export async function claimGitHubCollection(db: Db, userId: string, now: Date): Promise<boolean> {
-  const stats = await db.prepare('SELECT collected_at FROM github_stats WHERE user_id = ?').bind(userId).first<{ collected_at: string }>();
-  if (stats && now.getTime() - new Date(stats.collected_at).getTime() < GITHUB_STALE_MS) return false;
-  const key = `github-lease:${userId}`;
-  const lease = await db.prepare('SELECT updated_at FROM kv WHERE key = ?').bind(key).first<{ updated_at: string }>();
-  if (lease && now.getTime() - new Date(lease.updated_at).getTime() < LEASE_MS) return false;
-  await db
-    .prepare('INSERT INTO kv (key, value, updated_at) VALUES (?, ?, ?) ON CONFLICT (key) DO UPDATE SET updated_at = excluded.updated_at')
-    .bind(key, '1', now.toISOString())
-    .run();
-  return true;
+  const claimed = await db.prepare(`
+    INSERT INTO kv (key, value, updated_at)
+    SELECT ?, '1', ? WHERE NOT EXISTS (
+      SELECT 1 FROM github_stats WHERE user_id = ? AND collected_at > ?
+    )
+    ON CONFLICT (key) DO UPDATE SET updated_at = excluded.updated_at
+      WHERE kv.updated_at <= ?
+    RETURNING key
+  `).bind(
+    `github-lease:${userId}`, now.toISOString(), userId,
+    new Date(now.getTime() - GITHUB_STALE_MS).toISOString(),
+    new Date(now.getTime() - LEASE_MS).toISOString(),
+  ).first();
+  return claimed !== null;
 }

@@ -352,7 +352,7 @@ async function renderProfile(login: string, request: Request, deps: Deps, viewer
   const origin = new URL(request.url).origin;
   // The page names whoever is signed in, so only signed-out visits share a cached copy.
   const shared = !viewer && hasData(metrics);
-  const page = profilePage(user, renderDashboard(await withAvatar(metrics, user, origin, deps)), buildCards(metrics), availableComponents(metrics), origin, viewer);
+  const page = profilePage(user, renderDashboard(await withAvatar(metrics, user, origin, deps)), metrics.tokens, buildCards(metrics), availableComponents(metrics), origin, viewer);
   return html(page, 200, shared ? { 'cache-control': PUBLIC_CACHE } : {});
 }
 
@@ -408,10 +408,9 @@ async function serveMe(request: Request, deps: Deps): Promise<Response> {
   if (!viewer) return redirect('/login');
   const [machines, { metrics, github }] = await Promise.all([listMachines(deps.db, viewer.id), buildMetrics(viewer, deps)]);
   const origin = new URL(request.url).origin;
-  const tokensByMachine = new Map((metrics.tokens?.machines ?? []).map((row) => [row.id, row.total]));
   const dashboard = hasData(metrics) ? renderDashboard(await withAvatar(metrics, viewer, origin, deps)) : null;
   const profile = { manual: manualProfileFromJson(viewer.profile), github: github?.profile ?? null };
-  return html(dashboardPage(viewer, machines, tokensByMachine, dashboard, availableComponents(metrics), origin, profile));
+  return html(dashboardPage(viewer, machines, dashboard, metrics.tokens, availableComponents(metrics), origin, profile));
 }
 
 async function handleWebPost(request: Request, path: string, deps: Deps): Promise<Response> {
@@ -509,15 +508,21 @@ async function handleApi(request: Request, path: string, deps: Deps): Promise<Re
     const user = await userById(deps.db, session.user_id);
     if (!user) return json({ error: 'Account not found.' }, 401);
     const [machines, { metrics }] = await Promise.all([listMachines(deps.db, user.id), buildMetrics(user, deps)]);
-    const totals = new Map((metrics.tokens?.machines ?? []).map((row) => [row.id, row.total]));
+    const totals = new Map((metrics.tokens?.machines ?? []).map((row) => [row.id, row]));
     return json({
       login: user.login,
       public: user.is_public === 1,
       profileUrl: `${new URL(request.url).origin}/u/${encodeURIComponent(user.login)}`,
       machine: session.machine_id,
-      tokens: metrics.tokens ? { total: metrics.tokens.total, tools: metrics.tokens.tools.map(({ tool, total, scope, machines: count }) => ({ tool, total, scope, machines: count })) } : null,
+      tokens: metrics.tokens ? { total: metrics.tokens.total, tools: metrics.tokens.tools.map(({ tool, total, scope, machines: count, activity }) => ({ tool, total, scope, machines: count, activity })) } : null,
       github: metrics.github ? { commits: metrics.github.counts.commits, pulls: metrics.github.counts.pulls } : null,
-      machines: machines.map((machine) => ({ id: machine.id, name: machine.name, platform: machine.platform, lastSeenAt: machine.last_seen_at, tokens: totals.get(machine.id) ?? 0 })),
+      machines: machines.map((machine) => {
+        const usage = totals.get(machine.id);
+        return {
+          id: machine.id, name: machine.name, platform: machine.platform, lastSeenAt: machine.last_seen_at,
+          tokens: usage?.total ?? 0, last7: usage?.last7 ?? 0, last30: usage?.last30 ?? 0,
+        };
+      }),
     });
   }
   if (path === '/v1/me' && request.method === 'PATCH') {

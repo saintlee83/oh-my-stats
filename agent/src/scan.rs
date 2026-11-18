@@ -4,21 +4,18 @@ use std::path::{Path, PathBuf};
 use std::time::UNIX_EPOCH;
 
 use anyhow::Result;
-use chrono::{DateTime, Datelike, Utc};
+use chrono::{DateTime, Utc};
 use chrono_tz::Tz;
 
-use crate::config::home_dir;
+use crate::config::{home_dir, state_dir};
 use crate::machine::sha256_hex;
-use crate::parse::{CLAUDE, CODEX, CodexChunk, CodexState, UsageEvent, parse_claude_line, parse_codex_line};
-use crate::store::Store;
+use crate::parse::{CodexChunk, UsageEvent, parse_claude_line, parse_codex_line};
+use crate::providers::{self, Reader};
+use crate::store::{Cursor, FileRow, Store};
 
-#[derive(Debug, Clone)]
-pub struct LogRoots {
-    pub claude: Vec<PathBuf>,
-    pub codex: Vec<PathBuf>,
-}
+pub type LogRoots = Vec<(Reader, PathBuf)>;
 
-pub fn default_roots() -> Result<LogRoots> {
+pub fn default_roots(skip_native_logs: &[String]) -> Result<LogRoots> {
     let home = home_dir()?;
     let mut claude = match std::env::var_os("CLAUDE_CONFIG_DIR").filter(|value| !value.is_empty()) {
         Some(dir) => vec![PathBuf::from(dir).join("projects")],
@@ -27,7 +24,34 @@ pub fn default_roots() -> Result<LogRoots> {
     // Claude Desktop keeps agent sessions of its own, in the same format.
     claude.extend(claude_desktop_dirs(&home).into_iter().map(|dir| dir.join("local-agent-mode-sessions")));
     let codex_base = std::env::var_os("CODEX_HOME").filter(|value| !value.is_empty()).map(PathBuf::from).unwrap_or_else(|| home.join(".codex"));
-    Ok(LogRoots { claude, codex: vec![codex_base.join("sessions"), codex_base.join("archived_sessions")] })
+    let setting = |key: &str, default: PathBuf| std::env::var_os(key).filter(|v| !v.is_empty()).map(PathBuf::from).unwrap_or(default);
+    let data = setting("XDG_DATA_HOME", home.join(".local/share"));
+    let qwen = setting("QWEN_RUNTIME_DIR", setting("QWEN_HOME", home.join(".qwen")));
+    let hermes = setting("HERMES_HOME", home.join(".hermes"));
+    let cline = setting("CLINE_DATA_DIR", setting("CLINE_DIR", home.join(".cline")).join("data"));
+    let mut roots: LogRoots = claude.into_iter().map(|path| (Reader::Claude, path)).collect();
+    roots.extend([
+        (Reader::Codex, codex_base.join("sessions")),
+        (Reader::Codex, codex_base.join("archived_sessions")),
+        (Reader::Gemini, home.join(".gemini/tmp")),
+        (Reader::Pi, setting("PI_CODING_AGENT_DIR", home.join(".pi/agent")).join("sessions")),
+        (Reader::Qwen, qwen.join("projects")),
+        (Reader::Copilot, setting("COPILOT_HOME", home.join(".copilot")).join("session-state")),
+        (Reader::Kimi, setting("KIMI_CODE_HOME", home.join(".kimi-code")).join("sessions")),
+        (Reader::Cline, setting("CLINE_SESSION_DATA_DIR", cline.join("sessions"))),
+        (Reader::Amp, data.join("amp/threads")),
+        (Reader::OpenCode, data.join("opencode/opencode.db")),
+        (Reader::OpenCodeJson, data.join("opencode/storage/message")),
+        (Reader::Hermes, hermes.join("state.db")),
+        (Reader::Export, state_dir()?.join("imports")),
+    ]);
+    if let Ok(profiles) = fs::read_dir(hermes.join("profiles")) {
+        for profile in profiles.flatten().filter(|e| e.file_type().is_ok_and(|t| t.is_dir())) {
+            roots.push((Reader::Hermes, profile.path().join("state.db")));
+        }
+    }
+    roots.retain(|(reader, _)| !reader.provider().is_some_and(|id| skip_native_logs.iter().any(|skip| skip == id)));
+    Ok(roots)
 }
 
 /// Claude Desktop's own folder. On Windows, a packaged (MSIX) install keeps it inside its package.
@@ -49,49 +73,62 @@ fn claude_desktop_dirs(home: &Path) -> Vec<PathBuf> {
 #[derive(Debug, Clone)]
 pub struct LogFile {
     pub path: PathBuf,
-    pub tool: &'static str,
+    pub reader: Reader,
+    pub identity: String,
     pub size: i64,
     pub mtime: i64,
 }
 
-fn walk(dir: &Path, tool: &'static str, matches: fn(&str) -> bool, out: &mut Vec<LogFile>) {
+fn walk(dir: &Path, reader: Reader, out: &mut Vec<LogFile>) {
     let Ok(entries) = fs::read_dir(dir) else { return };
     for entry in entries.flatten() {
         let Ok(kind) = entry.file_type() else { continue };
         let path = entry.path();
         if kind.is_dir() {
-            walk(&path, tool, matches, out);
-        } else if kind.is_file() && path.file_name().and_then(|name| name.to_str()).is_some_and(matches) {
+            walk(&path, reader, out);
+        } else if kind.is_file() && reader.accepts(&path) {
             let Ok(meta) = entry.metadata() else { continue };
-            let mtime = meta.modified().ok().and_then(|time| time.duration_since(UNIX_EPOCH).ok()).map_or(0, |time| time.as_millis() as i64);
-            out.push(LogFile { path, tool, size: meta.len() as i64, mtime });
+            let mtime = meta.modified().ok().and_then(|time| time.duration_since(UNIX_EPOCH).ok()).map_or(0, |time| time.as_nanos() as i64);
+            out.push(LogFile { path, reader, identity: file_identity(&meta), size: meta.len() as i64, mtime });
         }
     }
 }
 
 pub fn discover(roots: &LogRoots) -> Vec<LogFile> {
     let mut out = Vec::new();
-    for root in &roots.claude {
-        walk(root, CLAUDE, |name| name.ends_with(".jsonl"), &mut out);
-    }
-    for root in &roots.codex {
-        walk(root, CODEX, |name| name.ends_with(".jsonl") || name.ends_with(".jsonl.zst"), &mut out);
+    for (reader, path) in roots {
+        if reader.database() {
+            if let Ok(meta) = fs::metadata(path) {
+                // SQLite can commit usage to the WAL without touching the main file.
+                let stamp = |m: &fs::Metadata| m.modified().ok().and_then(|t| t.duration_since(UNIX_EPOCH).ok()).map_or(0, |t| t.as_nanos() as i64);
+                let mut identity = file_identity(&meta);
+                if let Ok(wal) = fs::metadata(path.with_extension("db-wal")) {
+                    identity.push_str(&format!(":{}:{}:{}", file_identity(&wal), wal.len(), stamp(&wal)));
+                }
+                out.push(LogFile { path: path.clone(), reader: *reader, identity, size: meta.len() as i64, mtime: stamp(&meta) });
+            }
+        } else {
+            walk(path, *reader, &mut out);
+        }
     }
     out
 }
 
 /// The server refuses dates from before AI tools existed, so a corrupt timestamp is skipped
 /// here rather than holding up every upload after it.
-const EARLIEST_YEAR: i32 = 2020;
+const EARLIEST_DAY: &str = "2020-01-01";
 
 fn day_of(at: &str, tz: Tz) -> Option<String> {
     let time: DateTime<Utc> = at.parse().ok()?;
-    (time.year() >= EARLIEST_YEAR).then(|| time.with_timezone(&tz).format("%Y-%m-%d").to_string())
+    let day = time.with_timezone(&tz).date_naive();
+    let latest = Utc::now().date_naive() + chrono::Duration::days(2);
+    let label = day.to_string();
+    (label.as_str() >= EARLIEST_DAY && day <= latest).then_some(label)
 }
 
 /// Hands complete lines to `on_line` and returns how many bytes they took, so a line still
 /// being written is read again next time rather than parsed half-finished.
-fn read_lines<R: Read>(reader: R, mut on_line: impl FnMut(&str), last_line_may_be_open: bool) -> Result<u64> {
+fn read_lines<R: Read>(reader: R, mut on_line: impl FnMut(&str, u64), last_line_may_be_open: bool) -> Result<u64> {
     let mut reader = BufReader::with_capacity(1 << 16, reader);
     let mut buffer = Vec::new();
     let mut consumed = 0u64;
@@ -106,7 +143,7 @@ fn read_lines<R: Read>(reader: R, mut on_line: impl FnMut(&str), last_line_may_b
         }
         consumed += read as u64;
         if let Ok(line) = std::str::from_utf8(&buffer) {
-            on_line(line.trim_end());
+            on_line(line.trim_end(), consumed - read as u64);
         }
     }
 }
@@ -117,48 +154,125 @@ pub struct ScanReport {
     pub read: usize,
     pub failed: usize,
     pub new_events: usize,
+    pub invalid_exports: usize,
 }
 
-fn read_file(store: &mut Store, file: &LogFile, path_hash: &str, tz: Tz) -> Result<usize> {
-    let saved = store.file(path_hash)?;
-    let compressed = file.path.extension().is_some_and(|extension| extension == "zst");
-    // A log that shrank was rewritten, and a compressed one can only be read whole.
-    let resume = saved.as_ref().filter(|row| !compressed && row.offset <= file.size);
-    let start = resume.map_or(0, |row| row.offset);
-    let mut state = resume.map_or_else(CodexState::default, |row| row.state.clone());
+#[cfg(unix)]
+fn file_identity(meta: &fs::Metadata) -> String {
+    use std::os::unix::fs::MetadataExt;
+    format!("{}:{}", meta.dev(), meta.ino())
+}
 
-    let source = File::open(&file.path)?;
-    let mut claude_events: Vec<UsageEvent> = Vec::new();
-    let mut chunk = CodexChunk::default();
-    let tool = file.tool;
-    let key = path_hash.to_string();
-    let mut handle = |line: &str| {
-        if tool == CLAUDE {
-            claude_events.extend(parse_claude_line(line));
-        } else {
-            parse_codex_line(line, &key, &mut state, &mut chunk);
+#[cfg(not(unix))]
+fn file_identity(_: &fs::Metadata) -> String { "file".into() }
+
+/// Fingerprint the bytes just before the committed offset. Only the hash reaches SQLite.
+fn boundary(source: &mut File, offset: i64) -> Result<String> {
+    let length = offset.min(256);
+    source.seek(SeekFrom::Start((offset - length) as u64))?;
+    let mut bytes = [0; 256];
+    source.read_exact(&mut bytes[..length as usize])?;
+    Ok(crate::machine::hash_bytes(&bytes[..length as usize]))
+}
+
+fn path_key(path: &Path) -> String {
+    sha256_hex(&path.to_string_lossy())[..24].to_string()
+}
+
+// Previous versions keyed legacy events by absolute path. Recognize the standard active,
+// archived and compressed locations even when the file moved before the first upgrade scan.
+fn old_codex_paths(path: &Path, roots: &LogRoots) -> Vec<String> {
+    let plain = if path.extension().is_some_and(|e| e == "zst") { path.with_extension("") } else { path.to_owned() };
+    let mut paths = vec![plain.clone()];
+    if let Some(name) = plain.file_name().and_then(|n| n.to_str()) {
+        for (_, root) in roots.iter().filter(|(reader, _)| *reader == Reader::Codex) {
+            if let Some(date) = name.strip_prefix("rollout-").and_then(|n| n.get(..10))
+                && let Ok(date) = date.parse::<chrono::NaiveDate>() {
+                paths.push(root.join(name));
+                paths.push(root.join(date.format("%Y/%m/%d").to_string()).join(name));
+            }
         }
-    };
+    }
+    let mut keys: Vec<_> = paths.iter().flat_map(|p| [path_key(p), path_key(&p.with_extension("jsonl.zst"))]).collect();
+    keys.sort();
+    keys.dedup();
+    keys
+}
 
-    let offset = if compressed {
-        read_lines(zstd::stream::read::Decoder::new(source)?, &mut handle, false)?;
-        file.size
+fn read_file(store: &mut Store, file: &LogFile, path_hash: &str, tz: Tz, saved: Option<FileRow>, roots: &LogRoots) -> Result<(usize, usize)> {
+    if file.reader.database() {
+        let events = providers::native::database(file.reader, &file.path)?.into_iter()
+            .filter_map(|event| day_of(&event.at, tz).map(|day| (event, day))).collect::<Vec<_>>();
+        let checkpoint = FileRow { size: file.size, mtime: file.mtime, offset: 0,
+            state: Cursor { identity: file.identity.clone(), ..Default::default() } };
+        return Ok((store.save_read(path_hash, &checkpoint, &[], &events, None)?, 0));
+    }
+    let mut source = File::open(&file.path)?;
+    let meta = source.metadata()?;
+    let size = i64::try_from(meta.len())?;
+    let identity = file_identity(&meta);
+    let compressed = file.path.extension().is_some_and(|e| e == "zst");
+    let snapshot = matches!(file.reader, Reader::Gemini | Reader::Amp | Reader::Cline | Reader::OpenCodeJson) && file.path.extension().is_some_and(|e| e == "json");
+    let mut start = 0;
+    let mut cursor = Cursor::default();
+    if let Some(row) = saved && !snapshot && !compressed && row.state.identity == identity
+        && row.offset <= size && row.size < size && row.state.boundary == boundary(&mut source, row.offset)? {
+        start = row.offset;
+        cursor = row.state;
+    }
+    source.seek(SeekFrom::Start(start as u64))?;
+    let mut events: Vec<UsageEvent> = Vec::new();
+    let mut chunk = CodexChunk::default();
+    let mut invalid_exports = 0;
+    let mut handle = |line: &str, position: u64| match file.reader {
+        Reader::Claude => events.extend(parse_claude_line(line)),
+        Reader::Codex => parse_codex_line(line, &mut cursor.codex, &mut chunk),
+        Reader::Gemini => providers::read_gemini_line(line, &mut events),
+        Reader::Pi | Reader::Qwen | Reader::Kimi | Reader::Copilot =>
+            events.extend(providers::native::line(file.reader, line, &file.path, start as u64 + position)),
+        Reader::Cline | Reader::Amp | Reader::OpenCode | Reader::OpenCodeJson | Reader::Hermes => unreachable!("snapshot reader"),
+        Reader::Export => match providers::export_line(line) {
+            Some(event) => events.push(event),
+            None => invalid_exports += 1,
+        },
+    };
+    let input = (&mut source).take((size - start) as u64);
+    let offset = if snapshot {
+        events = if file.reader == Reader::Gemini { providers::gemini_snapshot(BufReader::new(input))? }
+            else { providers::native::snapshot(file.reader, BufReader::new(input))? };
+        size
+    } else if compressed {
+        read_lines(zstd::stream::read::Decoder::new(input)?, &mut handle, false)?;
+        size
     } else {
-        let mut source = source;
-        source.seek(SeekFrom::Start(start as u64))?;
-        start + read_lines(source, &mut handle, true)? as i64
+        start + read_lines(input, &mut handle, true)? as i64
     };
-
+    cursor.boundary = boundary(&mut source, offset)?;
+    cursor.identity = identity;
     let first_model = chunk.first_model.clone();
-    let events = if tool == CLAUDE { claude_events } else { chunk.into_events(&state) };
+    events.extend(chunk.into_events(&cursor.codex));
     let with_days: Vec<(UsageEvent, String)> = events
         .into_iter()
         .filter_map(|event| {
-            let day = day_of(&event.at, tz)?;
+            let day = day_of(&event.at, tz);
+            if day.is_none() && file.reader == Reader::Export {
+                invalid_exports += 1;
+            }
+            let day = day?;
             Some((event, day))
         })
         .collect();
-    store.save_read(path_hash, file.size, file.mtime, offset, &state, &with_days, first_model.as_deref())
+    let mut old_paths = Vec::new();
+    if start == 0 && with_days.iter().any(|(event, _)| event.legacy_total.is_some()) {
+        for candidate in old_codex_paths(&file.path, roots) {
+            if store.file(&candidate)?.is_some_and(|row| row.state.identity.is_empty()) {
+                old_paths.push(candidate);
+            }
+        }
+    }
+    let checkpoint = FileRow { size, mtime: file.mtime, offset, state: cursor };
+    let added = store.save_read(path_hash, &checkpoint, &old_paths, &with_days, first_model.as_deref())?;
+    Ok((added, invalid_exports))
 }
 
 /// Reads only what's new: untouched files cost a `stat`, and a growing one is read from
@@ -167,18 +281,26 @@ pub fn scan(store: &mut Store, roots: &LogRoots, tz: Tz) -> Result<ScanReport> {
     let files = discover(roots);
     let mut report = ScanReport { files: files.len(), ..Default::default() };
     for file in &files {
-        let path_hash = sha256_hex(&file.path.to_string_lossy())[..24].to_string();
-        if let Some(row) = store.file(&path_hash)?
+        let path_hash = path_key(&file.path);
+        let saved = store.file(&path_hash)?;
+        if let Some(row) = &saved
+            && row.state.identity == file.identity
             && row.size == file.size
             && row.mtime == file.mtime
         {
             continue;
         }
         report.read += 1;
-        match read_file(store, file, &path_hash, tz) {
-            Ok(events) => report.new_events += events,
+        match read_file(store, file, &path_hash, tz, saved, roots) {
+            Ok((events, invalid)) => {
+                report.new_events += events;
+                report.invalid_exports += invalid;
+            }
             Err(_) => report.failed += 1,
         }
+    }
+    if report.invalid_exports > 0 {
+        eprintln!("Skipped {} invalid provider export rows. Check the JSONL usage format.", report.invalid_exports);
     }
     Ok(report)
 }
@@ -214,7 +336,7 @@ mod tests {
     }
 
     fn roots(dir: &Path) -> LogRoots {
-        LogRoots { claude: vec![dir.join("claude")], codex: vec![dir.join("codex")] }
+        vec![(Reader::Claude, dir.join("claude")), (Reader::Codex, dir.join("codex")), (Reader::Gemini, dir.join("gemini")), (Reader::Export, dir.join("imports"))]
     }
 
     fn append(path: &Path, text: &str) {
@@ -282,6 +404,81 @@ mod tests {
         assert_eq!(scan(&mut store, &roots(&dir.0), SEOUL).unwrap().new_events, 0);
         append(&path, &row("m1", 9));
         assert_eq!(scan(&mut store, &roots(&dir.0), SEOUL).unwrap().new_events, 1, "a more complete row does count");
+    }
+
+    #[test]
+    fn replacing_or_overwriting_a_log_with_a_larger_file_restarts_the_reader() {
+        let dir = TempDir::new("rotation");
+        let mut store = temp_store();
+        let path = dir.0.join("claude/a.jsonl");
+        append(&path, &row("m1", 5));
+        scan(&mut store, &roots(&dir.0), SEOUL).unwrap();
+        let replacement = dir.0.join("replacement");
+        fs::write(&replacement, row("m2", 5) + &row("m3", 5)).unwrap();
+        fs::rename(replacement, &path).unwrap();
+        scan(&mut store, &roots(&dir.0), SEOUL).unwrap();
+        assert_eq!(store.event_count().unwrap(), 3);
+        fs::write(&path, row("m4", 5) + &row("m5", 5) + &row("m6", 5)).unwrap();
+        scan(&mut store, &roots(&dir.0), SEOUL).unwrap();
+        assert_eq!(store.event_count().unwrap(), 6);
+    }
+
+    #[test]
+    fn archived_legacy_sessions_reconcile_pre_upgrade_rows_and_compressed_copies() {
+        use crate::parse::CODEX;
+        let dir = TempDir::new("archive");
+        let mut store = temp_store();
+        let active = dir.0.join("sessions");
+        let archive = dir.0.join("archived_sessions");
+        let name = "rollout-2026-11-08T10-00-00-sample.jsonl";
+        let old_file = path_key(&active.join("2026/11/08").join(name));
+        let event = UsageEvent {
+            key: format!("codex:{old_file}:25"), at: "2026-11-08T10:00:00Z".into(),
+            tool: CODEX.into(), model: "unknown".into(), input: 20, output: 5,
+            cache_read: 0, cache_write: 0, legacy_total: None, cumulative_responses: None,
+        };
+        store.save_read(&old_file, &FileRow::default(), &[], &[(event, "2026-11-08".into())], None).unwrap();
+        let lines = concat!(
+            "{\"type\":\"session_meta\",\"payload\":{\"id\":\"session-id\"}}\n",
+            "{\"type\":\"event_msg\",\"timestamp\":\"2026-11-08T10:00:00Z\",\"payload\":{\"type\":\"token_count\",\"info\":{\"total_token_usage\":{\"total_tokens\":25},\"last_token_usage\":{\"input_tokens\":20,\"output_tokens\":5}}}}\n"
+        );
+        append(&archive.join(name), lines);
+        let sources = vec![(Reader::Codex, active.clone()), (Reader::Codex, archive)];
+        scan(&mut store, &sources, SEOUL).unwrap();
+        fs::create_dir_all(&active).unwrap();
+        fs::write(active.join("renamed.jsonl.zst"), zstd::stream::encode_all(lines.as_bytes(), 0).unwrap()).unwrap();
+        scan(&mut store, &sources, SEOUL).unwrap();
+        assert_eq!(store.rollup().unwrap()["2026-11-08"]["codex/unknown"], [20, 5, 0, 0, 1]);
+    }
+
+    #[test]
+    fn gemini_and_export_readers_share_the_rollup_and_preserve_response_identity() {
+        use serde_json::json;
+        let dir = TempDir::new("providers");
+        let mut store = temp_store();
+        let gemini = dir.0.join("gemini/project/chats");
+        let message = json!({
+            "type": "gemini", "id": "abc", "timestamp": "2026-11-08T23:00:00Z", "model": "gemini-2.5-pro",
+            "content": "PRIVATE", "tokens": {"input": 20, "cached": 5, "output": 6, "thoughts": 4, "tool": 2}
+        });
+        append(&gemini.join("session-a.jsonl"), &(message.to_string() + "\n"));
+        append(&gemini.join("session-old.json"), &json!({"messages": [message]}).to_string());
+        let mut queued = message.clone();
+        queued["id"] = json!("checkpoint-only");
+        append(&gemini.join("session-a.jsonl"), &(json!({"$set": {"messages": [message, queued]}}).to_string() + "\n"));
+        let path = dir.0.join("imports/usage.jsonl");
+        let export = json!({"provider":"local-ai","id":"abc","model":"my-model","timestamp":"2026-11-08T23:00:00Z","input":9,"output":2});
+        append(&path, &(export.to_string() + "\n" + &export.to_string() + "\n"));
+        let mut invalid = export.clone();
+        invalid["id"] = json!("different");
+        invalid["model"] = json!("bad model");
+        append(&path, &(invalid.to_string() + "\n"));
+        let report = scan(&mut store, &roots(&dir.0), SEOUL).unwrap();
+        assert_eq!((report.new_events, report.failed, report.invalid_exports), (3, 0, 1));
+        let day = &store.rollup().unwrap()["2026-11-09"];
+        assert_eq!(day["gemini/gemini-2.5-pro"], [34, 20, 10, 0, 2]);
+        assert_eq!(day["local-ai/my-model"], [9, 2, 0, 0, 1]);
+        assert_eq!(day.len(), 2);
     }
 
     #[test]

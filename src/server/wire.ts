@@ -162,24 +162,69 @@ function assertBounded(value: unknown, depth = 0): void {
   }
 }
 
-/**
- * GitHub metrics are the user's own aggregates, drawn into the user's own pages. The
- * renderers escape all text, so this checks shape: a malformed upload must fail here
- * rather than break a public page later.
- */
+type Guard<T> = (value: unknown) => value is T;
+
+function fields<T>(checks: { [K in keyof T]: Guard<T[K]> }): Guard<T> {
+  return (value): value is T => isObject(value) && Object.entries<Guard<unknown>>(checks)
+    .every(([key, check]) => Object.hasOwn(value, key) && check(value[key]));
+}
+
+function list<T>(check: Guard<T>, length?: number): Guard<T[]> {
+  return (value): value is T[] => Array.isArray(value) && (length === undefined || value.length === length) && value.every(check);
+}
+
+function nullable<T>(check: Guard<T>): Guard<T | null> {
+  return (value): value is T | null => value === null || check(value);
+}
+
+function oneOf<const T extends string>(...choices: T[]): Guard<T> {
+  return (value): value is T => choices.some((choice) => choice === value);
+}
+
+const string: Guard<string> = (v): v is string => typeof v === 'string';
+const num: Guard<number> = isCount;
+const net: Guard<number> = (v): v is number => typeof v === 'number' && isCount(Math.abs(v));
+const index = (size: number): Guard<number> => (v): v is number => num(v) && Number.isInteger(v) && v < size;
+const kinds = { commits: num, pulls: num, issues: num, reviews: num };
+const changes = { add: num, del: num };
+const namedCounts = list(fields({ name: string, count: num }));
+const months = list(num, 12);
+
+const githubShape = fields<Omit<GitHubMetrics, 'profile'>>({
+  login: string, memberSince: string, commitsLast30: num,
+  counts: fields({ ...kinds, merged: num, comments: num, calendar: num, attributed: num }),
+  thisYear: fields({ ...kinds, year: num, calendar: num }),
+  months: list(string, 12), monthly: fields({ commits: months, pulls: months, issues: months, reviews: months }),
+  years: list(fields({ ...kinds, year: num, calendar: num, hidden: num })),
+  yearGrid: list(fields({ year: num, months })),
+  scopes: fields({ personal: fields(kinds), org: fields(kinds), external: fields(kinds) }),
+  rhythm: fields({
+    punch: list(list(num, 24), 7), weekdays: list(num, 7), persona: string, total: num,
+    peak: nullable(fields({ weekday: index(7), hour: index(24), count: num })),
+    buckets: list(fields({ key: oneOf('morning', 'daytime', 'evening', 'night'), label: string, emoji: string, range: string, count: num, share: num }), 4),
+  }),
+  coauthors: fields({
+    rows: list(fields({ label: string, kind: oneOf('ai', 'bot', 'person', 'private'), commits: num, share: num })),
+    coauthored: num, solo: num, soloShare: num, privatePeople: num, byKind: fields({ ai: num, bot: num, person: num }),
+  }),
+  languages: list(fields({ name: string, lines: num, bytes: num, share: num, personal: num, org: num, external: num, gist: num })),
+  languageTotals: fields({ personal: num, org: num, external: num, gist: num }),
+  churn: fields({
+    ...changes, skipped: num, rows: list(fields({ name: string, ...changes, net })), docs: fields(changes),
+    bulk: fields({ commits: num, lines: num }), monthly: list(fields({ month: string, ...changes })),
+  }),
+  pulse: fields({
+    streak: num, bestStreak: num, activeDaysYear: num, busiest: nullable(fields({ date: string, count: num })),
+    aiCommits: num, aiShare: num, aiAgents: namedCounts, aiShareRecent: num, mergeRate: num, mergeHours: nullable(num),
+    reviewHours: nullable(num), kinds: namedCounts, avgCommitSize: nullable(num), stars: num, followers: num, organizations: num,
+  }),
+  coverage: fields({ reposListed: num, reposWalked: num, reposFailed: num, reposWithCommits: num, churnDone: num, churnPending: num, churnFailed: num, gists: num }),
+});
+
 export function parseGitHubMetrics(value: unknown): GitHubMetrics {
-  assert(isObject(value), 'metrics must be an object');
   assertBounded(value);
-  assert(typeof value.login === 'string', 'metrics.login is missing');
-  for (const key of ['counts', 'thisYear', 'monthly', 'scopes', 'rhythm', 'coauthors', 'languageTotals', 'churn', 'pulse', 'coverage']) {
-    assert(isObject(value[key]), `metrics.${key} is missing`);
-  }
-  for (const key of ['months', 'years', 'yearGrid', 'languages']) {
-    assert(Array.isArray(value[key]), `metrics.${key} is missing`);
-  }
-  const rhythm = value.rhythm as Record<string, unknown>;
-  assert(Array.isArray(rhythm.punch) && rhythm.punch.length === 7, 'metrics.rhythm.punch is invalid');
-  assert(Array.isArray(rhythm.buckets) && rhythm.buckets.length === 4, 'metrics.rhythm.buckets is invalid');
-  // Free text that's drawn on public pages, so it's cleaned rather than taken as sent.
-  return { ...value, profile: cleanGitHubProfile(value.profile) } as unknown as GitHubMetrics;
+  assert(isObject(value), 'metrics must be an object');
+  const profile = cleanGitHubProfile(value.profile);
+  assert(githubShape(value), 'GitHub metrics have missing or invalid fields');
+  return { ...value, profile };
 }

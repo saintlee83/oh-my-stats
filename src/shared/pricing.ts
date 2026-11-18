@@ -26,8 +26,8 @@ export function trimPrices(raw: Record<string, RawPrice>): PriceTable {
 
 export function findPrice(prices: PriceTable, model: string): Price | null {
   const undated = model.replace(/-\d{8}$/, '');
-  for (const name of [model, undated, `anthropic/${undated}`, `openai/${undated}`]) {
-    if (prices[name]) return prices[name];
+  for (const name of [model, undated, `anthropic/${undated}`, `openai/${undated}`, `gemini/${undated}`]) {
+    if (Object.hasOwn(prices, name)) return prices[name];
   }
   return null;
 }

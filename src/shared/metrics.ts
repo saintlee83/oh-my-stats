@@ -59,6 +59,14 @@ export interface TokenToolRow {
   asOf: string | null;
   /** How many machines report this tool. */
   machines: number;
+  activity: {
+    last7: number;
+    previous7: number;
+    activeDays30: number;
+    responses30: number;
+    /** Both numerator and denominator come from logged responses. */
+    tokensPerResponse30: number | null;
+  };
 }
 
 export interface TokenMetrics {
@@ -78,7 +86,7 @@ export interface TokenMetrics {
   models: ModelUsage[];
   tools: TokenToolRow[];
   /** Tokens per machine, for its owner. Never rendered publicly. */
-  machines: { id: string; total: number }[];
+  machines: { id: string; total: number; last7: number; last30: number }[];
   /** Trailing 60 days, oldest first. */
   daily: { date: string; total: number; byTool: Record<string, number> }[];
   monthly: { month: string; total: number; byTool: Record<string, number> }[];

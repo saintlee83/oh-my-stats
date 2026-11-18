@@ -4,6 +4,7 @@ import {
   bytes,
   clip,
   commas,
+  costLabel,
   compact,
   displayWidth,
   hours,
@@ -11,6 +12,7 @@ import {
   padEnd,
   padStart,
   percent,
+  providerName,
   sparkline,
   table,
 } from '../format.ts';
@@ -250,8 +252,6 @@ function shortModel(model: string): string {
   return model.replace(/^claude-/, '').replace(/-\d{8}$/, '');
 }
 
-const TOOL_NAMES: Record<string, string> = { claude: 'Claude', codex: 'Codex' };
-const toolName = (tool: string) => TOOL_NAMES[tool] ?? tool;
 const plural = (count: number) => (count === 1 ? '1 machine' : `${count} machines`);
 const SOURCE_LABELS = {
   machine: (machines: number) => `its own statistics, ${plural(machines)}`,
@@ -261,11 +261,11 @@ const SOURCE_LABELS = {
 
 function tokensCard(tokens: TokenMetrics): Card {
   const isMinimum = tokens.unpricedModels.length > 0 || tokens.unattributed > 0;
-  const costLabel = `${isMinimum ? '≥' : '≈'}${money(tokens.cost)}`;
-  const perTool = tokens.tools.map((row) => `${toolName(row.tool)} ${compact(row.total)}`).join(' ');
+  const cost = costLabel(tokens.cost, tokens.models.some((m) => m.cost !== null), isMinimum);
+  const perTool = tokens.tools.map((row) => `${providerName(row.tool)} ${compact(row.total)}`).join(' ');
   // The card title already says "tokens", so the word goes first when space is tight.
-  const headline = `${compact(tokens.total)} tokens · ${costLabel} API · ${perTool}`;
-  const hero = [clip(displayWidth(headline) <= CARD_WIDTH ? headline : `${compact(tokens.total)} · ${costLabel} API · ${perTool}`, CARD_WIDTH)];
+  const headline = `${compact(tokens.total)} tokens · ${cost} API · ${perTool}`;
+  const hero = [clip(displayWidth(headline) <= CARD_WIDTH ? headline : `${compact(tokens.total)} · ${cost} API · ${perTool}`, CARD_WIDTH)];
   for (const row of tokens.models.slice(0, 3)) {
     const share = tokens.total ? row.total / tokens.total : 0;
     const cost = row.cost === null ? '   n/a' : padStart(money(row.cost), 6);
@@ -282,17 +282,31 @@ function tokensCard(tokens: TokenMetrics): Card {
     ...table(
       [
         ['Tool', 'Total', 'API cost', 'Source', 'Through'],
-        ...tokens.tools.map((row) => [toolName(row.tool), compact(row.total), money(row.cost), SOURCE_LABELS[row.scope](row.machines), row.asOf ?? '-']),
+        ...tokens.tools.map((row) => {
+          const models = tokens.models.filter((m) => m.tool === row.tool);
+          const cost = costLabel(row.cost, models.some((m) => m.cost !== null), row.unattributed > 0 || models.some((m) => m.cost === null));
+          return [providerName(row.tool), compact(row.total), cost, SOURCE_LABELS[row.scope](row.machines), row.asOf ?? '-'];
+        }),
       ],
       ['l', 'r', 'r', 'l', 'l'],
     ),
     '',
+    'PROVIDER ACTIVITY',
+    ...table([
+      ['Provider', 'Last 7d', 'Prior 7d', 'Active days / 30', 'Responses / 30d', 'Tokens / response'],
+      ...tokens.tools.map(({ tool, activity: a }) => [
+        providerName(tool), compact(a.last7), compact(a.previous7), String(a.activeDays30),
+        commas(a.responses30), a.tokensPerResponse30 === null ? 'n/a' : compact(a.tokensPerResponse30),
+      ]),
+    ], ['l', 'r', 'r', 'r', 'r', 'r']),
+    'Response counts and averages use logged responses from the last 30 days.',
+    '',
     'BY MODEL',
     ...table(
       [
-        ['Model', 'Total', 'Input', 'Output', 'Cache read', 'Cache write', 'API cost'],
+        ['Provider', 'Model', 'Total', 'Input', 'Output', 'Cache read', 'Cache write', 'API cost'],
         ...tokens.models.map((row) => [
-          row.model,
+          providerName(row.tool), row.model,
           compact(row.total),
           compact(row.input),
           compact(row.output),
@@ -300,15 +314,15 @@ function tokensCard(tokens: TokenMetrics): Card {
           compact(row.cacheWrite),
           row.cost === null ? 'n/a' : money(row.cost),
         ]),
-        ...(tokens.unattributed > 0 ? [['Model unknown', compact(tokens.unattributed), '-', '-', '-', '-', 'n/a']] : []),
+        ...(tokens.unattributed > 0 ? [['-', 'Model unknown', compact(tokens.unattributed), '-', '-', '-', '-', 'n/a']] : []),
       ],
-      ['l', 'r', 'r', 'r', 'r', 'r', 'r'],
+      ['l', 'l', 'r', 'r', 'r', 'r', 'r', 'r'],
     ),
     '',
     'BY MONTH',
     ...table(
       [
-        ['Month', ...monthTools.map(toolName), 'Total'],
+        ['Month', ...monthTools.map(providerName), 'Total'],
         ...tokens.monthly.map((row) => [row.month, ...monthTools.map((tool) => compact(row.byTool[tool] ?? 0)), compact(row.total)]),
         ...(tokens.undated > 0 ? [['Earlier', ...monthTools.map(() => ''), compact(tokens.undated)]] : []),
       ],
@@ -320,7 +334,7 @@ function tokensCard(tokens: TokenMetrics): Card {
     `Active days      ${commas(tokens.activeDays)}${tokens.firstDay ? ` since ${tokens.firstDay}` : ''}`,
     ...(tokens.peak ? [`Peak day         ${tokens.peak.date} (${compact(tokens.peak.total)})`] : []),
     `Last 30 days     ${compact(tokens.last30.total)}`,
-    ...(tokens.last30.perCommit ? [`Uncached/commit  ${compact(tokens.last30.perCommit)} over 30 days, from this machine's logs`] : []),
+    ...(tokens.last30.perCommit ? [`Uncached/commit  ${compact(tokens.last30.perCommit)} over 30 days, from synced logs`] : []),
     '',
     'HOW THIS IS COUNTED',
     "Claude Code: each signed-in machine's lifetime statistics, added together. They survive",

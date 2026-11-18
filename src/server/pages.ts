@@ -1,7 +1,7 @@
 import type { Card } from '../shared/render/cards.ts';
 import type { ComponentKey } from '../shared/render/svg.ts';
-import { compact } from '../shared/format.ts';
-import type { GitHubProfile } from '../shared/metrics.ts';
+import { commas, compact, providerName } from '../shared/format.ts';
+import type { GitHubProfile, TokenMetrics } from '../shared/metrics.ts';
 import { PROFILE_LIMITS, STATUS_CHOICES, type ManualProfile } from '../shared/profile.ts';
 import type { MachineRow, UserRow } from './db.ts';
 
@@ -126,7 +126,19 @@ function embedCode(url: string, parts: Part[]): string {
   <p class="muted">For Tokyo Night colors, add <code>?theme=tokyo-night</code> to any image address.</p>`;
 }
 
-export function profilePage(user: UserRow, svg: string, cards: Card[], parts: Part[], origin: string, viewer: UserRow | null): string {
+function providerActivity(tokens: TokenMetrics | null): string {
+  if (!tokens) return '';
+  const rows = tokens.tools.map(({ tool, activity: a }) => `<tr><td>${esc(providerName(tool))}</td>
+    <td class="num">${compact(a.last7)}</td><td class="num">${compact(a.previous7)}</td>
+    <td class="num">${a.activeDays30}</td><td class="num">${commas(a.responses30)}</td>
+    <td class="num">${a.tokensPerResponse30 === null ? '—' : compact(a.tokensPerResponse30)}</td></tr>`).join('');
+  return `<section class="panel"><h2>Provider activity</h2>
+    <div class="table"><table><thead><tr><th>Provider</th><th class="num">Tokens · last 7d</th><th class="num">Tokens · prior 7d</th>
+    <th class="num">Active days · 30d</th><th class="num">Responses · 30d</th><th class="num">Tokens / response · 30d</th></tr></thead>
+    <tbody>${rows}</tbody></table></div><p class="muted">Response counts and averages use responses recorded by your synced machines.</p></section>`;
+}
+
+export function profilePage(user: UserRow, svg: string, tokens: TokenMetrics | null, cards: Card[], parts: Part[], origin: string, viewer: UserRow | null): string {
   const url = `${origin}/u/${encodeURIComponent(user.login)}`;
   const avatar = user.avatar_url ? `<img src="${esc(user.avatar_url)}" alt="">` : '';
   const cardLinks = cards
@@ -136,6 +148,7 @@ export function profilePage(user: UserRow, svg: string, cards: Card[], parts: Pa
     `@${user.login} on oh-my-stats`,
     `<div class="profile">${avatar}<div><h1>@${esc(user.login)}</h1>${user.name ? `<p>${esc(user.name)}</p>` : ''}</div></div>
 <div class="dash">${svg}</div>
+${providerActivity(tokens)}
 <div class="panel">
   <h2>Add this to your GitHub profile</h2>
   ${embedCode(url, parts)}
@@ -145,14 +158,18 @@ export function profilePage(user: UserRow, svg: string, cards: Card[], parts: Pa
   );
 }
 
-function machineRows(machines: MachineRow[], tokensByMachine: Map<string, number>): string {
+function machineRows(machines: MachineRow[], tokens: TokenMetrics | null): string {
+  const totals = new Map(tokens?.machines.map(row => [row.id, row]));
   return machines
     .map((machine) => {
       const id = esc(machine.id);
+      const usage = totals.get(machine.id);
       return `<tr>
   <td><form class="inline" method="post" action="/me/machines/${id}/rename"><input type="text" name="name" value="${esc(machine.name)}" aria-label="Machine name" maxlength="64"><button>Rename</button></form></td>
   <td>${esc(machine.platform ?? '-')}</td>
-  <td class="num">${esc(compact(tokensByMachine.get(machine.id) ?? 0))}</td>
+  <td class="num">${commas(usage?.last7 ?? 0)}</td>
+  <td class="num">${commas(usage?.last30 ?? 0)}</td>
+  <td class="num">${commas(usage?.total ?? 0)}</td>
   <td>${esc(machine.last_seen_at.slice(0, 16).replace('T', ' '))} UTC</td>
   <td><details class="confirm"><summary class="danger">Remove</summary><form class="inline" method="post" action="/me/machines/${id}/delete"><span class="muted">Deletes its data and signs it out.</span><button class="danger">Remove this machine</button></form></details></td>
 </tr>`;
@@ -197,20 +214,22 @@ function profileForm(manual: ManualProfile, github: GitHubProfile | null): strin
 export function dashboardPage(
   user: UserRow,
   machines: MachineRow[],
-  tokensByMachine: Map<string, number>,
   svg: string | null,
+  tokens: TokenMetrics | null,
   parts: Part[],
   origin: string,
   profile: { manual: ManualProfile; github: GitHubProfile | null },
 ): string {
   const url = `${origin}/u/${encodeURIComponent(user.login)}`;
   const isPublic = user.is_public === 1;
+  const unassigned = tokens ? Math.max(0, tokens.total - tokens.machines.reduce((n, m) => n + m.total, 0)) : 0;
   const empty = `<div class="panel"><h2>Connect your first machine</h2><pre><code>${esc(installSnippet(origin))}</code></pre></div>`;
   return layout(
     'Your dashboard',
     `<h1>Your dashboard</h1>
 ${machines.length === 0 ? empty : ''}
 ${svg ? `<div class="dash">${svg}</div>` : ''}
+${providerActivity(tokens)}
 <div class="panel">
   <h2>Profile <span class="badge">${isPublic ? 'Public' : 'Private'}</span></h2>
   ${
@@ -224,9 +243,10 @@ ${profileForm(profile.manual, profile.github)}
 ${
   machines.length
     ? `<div class="panel"><h2>Machines</h2><div class="table"><table>
-<thead><tr><th>Name</th><th>Platform</th><th class="num">Tokens</th><th>Last sync</th><th></th></tr></thead>
-<tbody>${machineRows(machines, tokensByMachine)}</tbody></table></div>
-<p class="muted">Machines upload once a day, so numbers can be up to a day behind. Run <code>oms sync</code> on a machine to update it now. Codex's account total isn't split by machine, so per-machine tokens cover what each machine logged. Removing a machine deletes its data and signs it out.</p></div>`
+<thead><tr><th>Name</th><th>Platform</th><th class="num">Tokens · last 7d</th><th class="num">Tokens · last 30d</th><th class="num">Lifetime tokens</th><th>Last sync</th><th></th></tr></thead>
+<tbody>${machineRows(machines, tokens)}</tbody></table></div>
+${unassigned ? `<p>${commas(unassigned)} lifetime tokens have no matching device record.</p>` : ''}
+<p class="muted">Machines upload once a day, so numbers can be up to a day behind. Run <code>oms sync</code> on a machine to update it now. For providers with an account-wide total, device attribution uses local logs. Account usage with no matching machine record appears only in the account total. Removing a machine deletes its data and signs it out.</p></div>`
     : ''
 }
 <div class="panel">

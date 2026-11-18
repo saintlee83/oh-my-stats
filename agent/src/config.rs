@@ -19,6 +19,8 @@ pub struct Config {
     pub named_coauthors: Vec<String>,
     pub agent_coauthors: Vec<String>,
     pub exclude_languages: Vec<String>,
+    /// Native log readers to skip on this machine (e.g. mirrored or exported histories).
+    pub skip_native_logs: Vec<String>,
     pub max_commit_lines: Option<i64>,
     pub max_file_lines: Option<i64>,
     pub max_requests_per_run: Option<usize>,

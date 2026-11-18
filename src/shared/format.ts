@@ -127,3 +127,16 @@ export function table(rows: string[][], align: ('l' | 'r')[]): string[] {
       .trimEnd(),
   );
 }
+
+const providers = new Map([
+  ['claude', 'Claude Code'], ['codex', 'Codex'], ['gemini', 'Gemini CLI'],
+  ['amp', 'Amp'], ['cline-cli', 'Cline CLI'], ['copilot-cli', 'GitHub Copilot CLI'],
+  ['hermes-agent', 'Hermes Agent'], ['kimi-cli', 'Kimi Code CLI'], ['opencode', 'OpenCode'],
+  ['pi', 'Pi'], ['qwen-code', 'Qwen Code'],
+]);
+
+export const providerName = (id: string): string => providers.get(id) ?? id;
+
+export function costLabel(cost: number, hasPrice: boolean, partial: boolean): string {
+  return hasPrice ? `${partial ? '≥' : '≈'}${money(cost)}` : 'n/a';
+}

@@ -1,0 +1,20 @@
+{
+  "churn": {"add": 5, "bulk": {"commits": 0, "lines": 0}, "del": 2, "docs": {"add": 0, "del": 0}, "monthly": [{"add": 5, "del": 2, "month": "2026-11"}], "rows": [{"add": 5, "del": 2, "name": "Rust", "net": 3}], "skipped": 0},
+  "coauthors": {"byKind": {"ai": 0, "bot": 0, "person": 0}, "coauthored": 0, "privatePeople": 0, "rows": [], "solo": 0, "soloShare": 0.0},
+  "commitsLast30": 1,
+  "counts": {"attributed": 1, "calendar": 1, "comments": 0, "commits": 1, "issues": 0, "merged": 0, "pulls": 0, "reviews": 0},
+  "coverage": {"churnDone": 0, "churnFailed": 0, "churnPending": 0, "gists": 0, "reposFailed": 0, "reposListed": 0, "reposWalked": 0, "reposWithCommits": 0},
+  "languageTotals": {"external": 0, "gist": 0, "org": 0, "personal": 5},
+  "languages": [{"bytes": 0.0, "external": 0, "gist": 0, "lines": 5, "name": "Rust", "org": 0, "personal": 5, "share": 1.0}],
+  "login": "octo",
+  "memberSince": "2020-01-01T00:00:00Z",
+  "monthly": {"commits": [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 1], "issues": [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0], "pulls": [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0], "reviews": [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0]},
+  "months": ["2025-12", "2026-01", "2026-02", "2026-03", "2026-04", "2026-05", "2026-06", "2026-07", "2026-08", "2026-09", "2026-10", "2026-11"],
+  "profile": {"bio": null, "company": null, "hireable": false, "location": null, "name": null, "status": null},
+  "pulse": {"activeDaysYear": 1, "aiAgents": [], "aiCommits": 0, "aiShare": 0.0, "aiShareRecent": 0.0, "avgCommitSize": null, "bestStreak": 1, "busiest": {"count": 1, "date": "2026-11-08"}, "followers": 0, "kinds": [], "mergeHours": null, "mergeRate": 0.0, "organizations": 0, "reviewHours": null, "stars": 0, "streak": 1},
+  "rhythm": {"buckets": [{"count": 0, "emoji": "🌅", "key": "morning", "label": "Morning", "range": "06-12", "share": 0.0}, {"count": 0, "emoji": "🌞", "key": "daytime", "label": "Daytime", "range": "12-18", "share": 0.0}, {"count": 1, "emoji": "🌆", "key": "evening", "label": "Evening", "range": "18-24", "share": 1.0}, {"count": 0, "emoji": "🌙", "key": "night", "label": "Night", "range": "00-06", "share": 0.0}], "peak": {"count": 1, "hour": 21, "weekday": 6}, "persona": "evening hacker", "punch": [[0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0], [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0], [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0], [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0], [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0], [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0], [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 1, 0, 0]], "total": 1, "weekdays": [0, 0, 0, 0, 0, 0, 1]},
+  "scopes": {"external": {"commits": 0, "issues": 0, "pulls": 0, "reviews": 0}, "org": {"commits": 0, "issues": 0, "pulls": 0, "reviews": 0}, "personal": {"commits": 1, "issues": 0, "pulls": 0, "reviews": 0}},
+  "thisYear": {"calendar": 1, "commits": 1, "issues": 0, "pulls": 0, "reviews": 0, "year": 2026},
+  "yearGrid": [{"months": [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 1, 0], "year": 2026}],
+  "years": [{"calendar": 0, "commits": 1, "hidden": 0, "issues": 0, "pulls": 0, "reviews": 0, "year": 2026}]
+}

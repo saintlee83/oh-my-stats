@@ -542,14 +542,14 @@ mod tests {
     }
 
     #[test]
-    fn the_output_has_every_field_the_server_needs_even_when_empty() {
-        let metrics = compute(&empty(), SEOUL, now(), DEFAULT_MAX_COMMIT_LINES, &[]);
-        for key in ["counts", "thisYear", "monthly", "scopes", "rhythm", "coauthors", "languageTotals", "churn", "pulse", "coverage", "months", "years", "yearGrid", "languages"] {
-            assert!(!metrics[key].is_null(), "{key}");
-        }
-        assert_eq!(metrics["rhythm"]["punch"].as_array().unwrap().len(), 7);
-        assert_eq!(metrics["rhythm"]["buckets"].as_array().unwrap().len(), 4);
-        assert_eq!(metrics["months"].as_array().unwrap().len(), 12);
+    fn github_snapshot_matches_shared_contract_fixture() {
+        let mut snapshot = empty();
+        snapshot.commits = vec![commit("sample", "2026-11-08T12:00:00Z", Scope::Personal)];
+        snapshot.churn.insert("sample".into(), churn_of(&[("Rust", 5, 2)]));
+        snapshot.calendar = days(&["2026-11-08"]);
+        let metrics = compute(&snapshot, SEOUL, now(), DEFAULT_MAX_COMMIT_LINES, &[]);
+        let expected: Value = serde_json::from_str(include_str!("../../tests/fixtures/github-metrics.json")).unwrap();
+        assert_eq!(metrics, expected);
     }
 
     #[test]

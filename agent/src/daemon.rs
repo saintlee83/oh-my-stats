@@ -84,7 +84,6 @@ fn collect_github_in_background(running: &Arc<AtomicBool>) {
 pub fn run(interval_secs: u64) -> Result<()> {
     let dir = state_dir()?;
     take_lock(&dir.join("agent.lock"))?;
-    let roots = default_roots()?;
     let mut store = Store::open(&dir.join("agent.db"))?;
     let github_running = Arc::new(AtomicBool::new(false));
     let mut failures = 0u32;
@@ -93,6 +92,7 @@ pub fn run(interval_secs: u64) -> Result<()> {
     loop {
         // Reloaded each time, so `oms login` and settings changes apply without a restart.
         let config = Config::load()?;
+        let roots = default_roots(&config.skip_native_logs)?;
         let wait = match signed_in_api(&config) {
             Err(error) => {
                 log(&format!("{error}"));
@@ -102,7 +102,7 @@ pub fn run(interval_secs: u64) -> Result<()> {
                 Ok((report, outcome)) => {
                     failures = 0;
                     if report.new_events > 0 {
-                        log(&format!("Recorded {} new responses.", report.new_events));
+                        log(&format!("Updated {} usage records.", report.new_events));
                     }
                     if outcome.uploads > 0 {
                         log(&format!("Uploaded {} days{}.", outcome.days, if outcome.totals_sent { " and lifetime totals" } else { "" }));
@@ -132,9 +132,9 @@ pub fn run_once_verbose(force_github: bool) -> Result<()> {
     let api = signed_in_api(&config)?;
     let mut store = Store::open(&state_dir()?.join("agent.db"))?;
     let started = now_secs();
-    let (report, outcome) = run_once(&mut store, &config, &api, &default_roots()?, true)?;
+    let (report, outcome) = run_once(&mut store, &config, &api, &default_roots(&config.skip_native_logs)?, true)?;
     println!(
-        "Read {} of {} log files: {} new responses{}.",
+        "Read {} of {} log files: {} updated usage records{}.",
         report.read,
         report.files,
         report.new_events,
@@ -174,29 +174,50 @@ pub fn print_status() -> Result<()> {
     let public = me.get("public").and_then(Value::as_bool).unwrap_or(false);
     let url = me.get("profileUrl").and_then(Value::as_str).unwrap_or("?");
     println!("Profile       {}", if public { format!("public at {url}") } else { "private. Run `oms publish` to share it.".to_string() });
-    let billions = |value: Option<f64>| format!("{:.2}B", value.unwrap_or(0.0) / 1e9);
+    let volume = |value: Option<f64>| {
+        let tokens = value.unwrap_or(0.0);
+        for (unit, suffix) in [(1e9, "B"), (1e6, "M"), (1e3, "k")] {
+            if tokens >= unit {
+                return format!("{:.2}{suffix}", tokens / unit);
+            }
+        }
+        format!("{tokens:.0}")
+    };
     if let Some(total) = me.pointer("/tokens/total").and_then(Value::as_f64) {
-        println!("Tokens        {}", billions(Some(total)));
+        println!("Tokens        {}", volume(Some(total)));
         for tool in me.pointer("/tokens/tools").and_then(Value::as_array).into_iter().flatten() {
             println!(
                 "  {:<11} {} ({})",
                 tool.get("tool").and_then(Value::as_str).unwrap_or("?"),
-                billions(tool.get("total").and_then(Value::as_f64)),
+                volume(tool.get("total").and_then(Value::as_f64)),
                 tool.get("scope").and_then(Value::as_str).unwrap_or("?")
             );
+            if let Some(activity) = tool.get("activity") {
+                let metric = |key: &str| activity.get(key).and_then(Value::as_u64).unwrap_or(0);
+                let average = activity.get("tokensPerResponse30").and_then(Value::as_f64)
+                    .map_or_else(|| "n/a".into(), |n| format!("{n:.0}"));
+                println!("    7d {} tokens (prior 7d {}); 30d: {} active days, {} responses, {} tokens/response",
+                    metric("last7"), metric("previous7"), metric("activeDays30"), metric("responses30"), average);
+            }
         }
     }
-    println!("Machines");
+    println!("Machines        (tokens by device)");
     let this = me.get("machine").and_then(Value::as_str).unwrap_or("");
+    let mut assigned = 0u64;
     for machine in me.get("machines").and_then(Value::as_array).into_iter().flatten() {
         let id = machine.get("id").and_then(Value::as_str).unwrap_or("");
+        let period = |key| machine.get(key).and_then(Value::as_u64).map_or_else(|| "n/a".into(), |n| n.to_string());
+        assigned += machine.get("tokens").and_then(Value::as_u64).unwrap_or(0);
         println!(
-            "  {} {:<24} {:>9}  last sync {}",
+            "  {} {:<24}  7d {}  30d {}  lifetime {}  last sync {}",
             if id == this { "*" } else { " " },
             machine.get("name").and_then(Value::as_str).unwrap_or("?"),
-            billions(machine.get("tokens").and_then(Value::as_f64)),
+            period("last7"), period("last30"), period("tokens"),
             machine.get("lastSeenAt").and_then(Value::as_str).unwrap_or("?").chars().take(16).collect::<String>()
         );
+    }
+    if let Some(total) = me.pointer("/tokens/total").and_then(Value::as_u64) && total > assigned {
+        println!("  {} lifetime tokens have no matching device record.", total - assigned);
     }
     Ok(())
 }

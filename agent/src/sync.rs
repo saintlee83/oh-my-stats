@@ -79,45 +79,54 @@ pub struct SyncOutcome {
     pub collect_github: bool,
 }
 
-/// Sends what changed. Each day replaces the server's copy for this machine, so a failed
-/// upload is simply tried again, and a day is only marked done once the server accepted it.
+struct PlannedUpload {
+    body: Value,
+    days: Vec<(String, String)>,
+    totals_hash: Option<String>,
+}
+
+fn usage_plan(store: &Store, machine: &MachineInfo, timezone: &str, totals: &Totals, can_collect_github: bool) -> Result<Vec<PlannedUpload>> {
+    let mut rollup = store.rollup()?;
+    let synced = store.synced_hashes()?;
+    // A repair may remove the final row on a previously uploaded day.
+    for day in synced.keys() {
+        rollup.entry(day.clone()).or_default();
+    }
+    let mut batches = plan_uploads(&rollup, &synced);
+    if batches.is_empty() {
+        batches.push(Vec::new()); // A heartbeat also checks whether GitHub stats are due.
+    }
+    let hash = sha256_hex(&serde_json::to_string(totals)?);
+    let mut totals_hash = (store.get(TOTALS_HASH_KEY)?.as_ref() != Some(&hash)).then_some(hash);
+    Ok(batches.into_iter().map(|days| {
+        let totals_hash = totals_hash.take();
+        let body = build_body(machine, timezone, &days, totals_hash.as_ref().map(|_| totals), can_collect_github);
+        PlannedUpload { body, days: days.into_iter().map(|(day, _, hash)| (day, hash)).collect(), totals_hash }
+    }).collect())
+}
+
+pub fn preview(store: &Store, config: &Config, totals: &Totals) -> Result<Vec<Value>> {
+    let plan = usage_plan(store, &machine_info(config)?, &config.timezone_name(), totals, crate::github::has_access(config))?;
+    Ok(plan.into_iter().map(|upload| upload.body).collect())
+}
+
+/// Checkpoint each accepted request so an interrupted multi-batch sync resumes safely.
 pub fn sync(store: &mut Store, config: &Config, api: &Api, totals: &Totals) -> Result<SyncOutcome, SyncError> {
     let machine = machine_info(config).map_err(SyncError::Local)?;
-    let timezone = config.timezone_name();
-    let rollup = store.rollup().map_err(SyncError::Local)?;
-    let synced = store.synced_hashes().map_err(SyncError::Local)?;
-    let batches = plan_uploads(&rollup, &synced);
-    let can_collect_github = crate::github::has_access(config);
-
-    let totals_text = serde_json::to_string(totals).unwrap_or_default();
-    let totals_hash = sha256_hex(&totals_text);
-    let totals_changed = store.get(TOTALS_HASH_KEY).map_err(SyncError::Local)?.as_deref() != Some(totals_hash.as_str());
-    let now = now_secs();
+    let plan = usage_plan(store, &machine, &config.timezone_name(), totals, crate::github::has_access(config)).map_err(SyncError::Local)?;
     let mut outcome = SyncOutcome::default();
-
-    let mut send = |days: &[(String, Value, String)], with_totals: bool| -> Result<(), SyncError> {
-        let body = build_body(&machine, &timezone, days, with_totals.then_some(totals), can_collect_github);
-        let reply = api.send("PUT", "/v1/usage", &body).map_err(SyncError::Api)?;
-        outcome.uploads += 1;
-        outcome.days += days.len();
-        outcome.collect_github = outcome.collect_github || reply.get("collectGitHub").and_then(Value::as_bool).unwrap_or(false);
-        let done: Vec<(String, String)> = days.iter().map(|(day, _, hash)| (day.clone(), hash.clone())).collect();
-        store.mark_synced(&done).map_err(SyncError::Local)?;
-        if with_totals {
+    for upload in plan {
+        let reply = api.send("PUT", "/v1/usage", &upload.body).map_err(SyncError::Api)?;
+        store.mark_synced(&upload.days).map_err(SyncError::Local)?;
+        if let Some(hash) = upload.totals_hash {
+            store.set(TOTALS_HASH_KEY, &hash).map_err(SyncError::Local)?;
             outcome.totals_sent = true;
-            store.set(TOTALS_HASH_KEY, &totals_hash).map_err(SyncError::Local)?;
         }
-        Ok(())
-    };
-
-    if batches.is_empty() {
-        send(&[], totals_changed)?;
-    } else {
-        for (index, batch) in batches.iter().enumerate() {
-            send(batch, index == 0 && totals_changed)?;
-        }
+        outcome.days += upload.days.len();
+        outcome.uploads += 1;
+        outcome.collect_github |= reply.get("collectGitHub").and_then(Value::as_bool).unwrap_or(false);
     }
-    store.set(LAST_UPLOAD_KEY, &now.to_string()).map_err(SyncError::Local)?;
+    store.set(LAST_UPLOAD_KEY, &now_secs().to_string()).map_err(SyncError::Local)?;
     Ok(outcome)
 }
 
@@ -207,6 +216,24 @@ mod tests {
         assert_eq!(batches.len(), 3);
         assert!(batches.iter().all(|batch| batch.len() <= MAX_DAYS_PER_UPLOAD));
         assert_eq!(batches.iter().map(Vec::len).sum::<usize>(), 250);
+    }
+
+    #[test]
+    fn planned_requests_include_stale_day_removals_then_only_a_heartbeat() {
+        let machine = MachineInfo { id: "a".repeat(32), name: "test".into(), platform: "linux".into(), agent_version: "test".into() };
+        let mut store = crate::store::temp_store();
+        store.mark_synced(&[("2026-01-01".into(), "old".into())]).unwrap();
+        let totals = Totals::new();
+        let plan = usage_plan(&store, &machine, "UTC", &totals, true).unwrap();
+        assert_eq!(plan[0].body["days"], json!({"2026-01-01": {}}));
+        assert_eq!(plan[0].body["canCollectGitHub"], true);
+        assert!(plan[0].totals_hash.is_some());
+        store.mark_synced(&plan[0].days).unwrap();
+        store.set(TOTALS_HASH_KEY, plan[0].totals_hash.as_ref().unwrap()).unwrap();
+        let second = usage_plan(&store, &machine, "UTC", &totals, true).unwrap();
+        assert_eq!(second.len(), 1);
+        assert_eq!(second[0].body["days"], json!({}));
+        assert!(second[0].totals_hash.is_none());
     }
 
     #[test]

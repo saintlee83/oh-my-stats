@@ -56,7 +56,10 @@ export function computeTokens(
   if (toolNames.size === 0) return null;
 
   const today = zoned(now, timezone).date;
-  const window30 = new Set(lastDays(today, 30));
+  const dates30 = lastDays(today, 30);
+  const window30 = new Set(dates30);
+  const window7 = new Set(dates30.slice(-7));
+  const responseUsage = new Map<string, { responses: number; tokens: number }>();
   const accounts = new Map<string, ToolTotals>();
   for (const tool of toolNames) {
     const figure = accountFigure(machines, tool);
@@ -70,13 +73,13 @@ export function computeTokens(
     day[tool] = (day[tool] ?? 0) + value;
     days.set(date, day);
   };
-  const perMachine = new Map<string, number>();
+  const perMachine: TokenMetrics['machines'] = [];
   const toolKnownPerMachine = new Map<string, number>(); // machine-scope totals, summed
   const accountNewer = new Map<string, number>();
   const figureTools = new Set<string>();
   let last30Fresh = 0;
 
-  const addRow = (machineId: string, tool: string, model: string, usage: TokenBreakdown, messages: number) => {
+  const addRow = (tool: string, model: string, usage: TokenBreakdown, messages: number) => {
     const key = `${tool}/${model}`;
     const row = rows.get(key) ?? { tool, model, input: 0, output: 0, cacheRead: 0, cacheWrite: 0, messages: 0, total: 0, cost: null };
     row.input += usage[0];
@@ -86,10 +89,14 @@ export function computeTokens(
     row.messages += messages;
     row.total += totalOf(usage);
     rows.set(key, row);
-    perMachine.set(machineId, (perMachine.get(machineId) ?? 0) + totalOf(usage));
   };
 
   for (const machine of machines) {
+    const summary = { id: machine.id, total: 0, last7: 0, last30: 0 };
+    const addMachineDay = (date: string, value: number) => {
+      if (window7.has(date)) summary.last7 += value;
+      if (window30.has(date)) summary.last30 += value;
+    };
     const logged = new Map<string, LoggedModel>();
     const logDays = new Map<string, Record<string, number>>();
 
@@ -107,7 +114,13 @@ export function computeTokens(
         const sum = tuple[0] + tuple[1] + tuple[2] + tuple[3];
         day[tool] = (day[tool] ?? 0) + sum;
         logDays.set(date, day);
-        if (window30.has(date)) last30Fresh += tuple[0] + tuple[1] + tuple[3];
+        if (window30.has(date)) {
+          last30Fresh += tuple[0] + tuple[1] + tuple[3];
+          const usage = responseUsage.get(tool) ?? { responses: 0, tokens: 0 };
+          usage.responses += tuple[4];
+          usage.tokens += sum;
+          responseUsage.set(tool, usage);
+        }
       }
     }
 
@@ -122,14 +135,14 @@ export function computeTokens(
         const combined: TokenBreakdown = [...usage];
         if (log) addInto(combined, log.newer);
         const best = log && totalOf(log.usage) > totalOf(combined) ? log.usage : combined;
-        addRow(machine.id, tool, model, best, log?.messages ?? 0);
+        addRow(tool, model, best, log?.messages ?? 0);
         knownByTool[tool] = (knownByTool[tool] ?? 0) + totalOf(best);
         handled.add(key);
       }
     }
     for (const [key, log] of logged) {
       if (handled.has(key)) continue;
-      addRow(machine.id, log.tool, log.model, log.usage, log.messages);
+      addRow(log.tool, log.model, log.usage, log.messages);
       knownByTool[log.tool] = (knownByTool[log.tool] ?? 0) + totalOf(log.usage);
     }
 
@@ -138,12 +151,14 @@ export function computeTokens(
       const newer = [...logged.values()].filter((row) => row.tool === tool).reduce((sum, row) => sum + totalOf(row.newer), 0);
       if (accounts.has(tool)) {
         accountNewer.set(tool, (accountNewer.get(tool) ?? 0) + newer);
+        summary.total += knownByTool[tool] ?? 0;
         continue;
       }
       const figure = machine.totals?.[tool];
       if (figure) figureTools.add(tool);
       const known = knownByTool[tool] ?? 0;
       const total = figure ? Math.max(figure.total + newer, known) : known;
+      summary.total += total;
       toolKnownPerMachine.set(tool, (toolKnownPerMachine.get(tool) ?? 0) + total);
     }
 
@@ -154,12 +169,19 @@ export function computeTokens(
         const figure = accounts.get(tool) ?? machine.totals?.[tool];
         const covered = figure?.asOf && Object.keys(figure.daily ?? {}).length > 0 && date <= figure.asOf;
         if (!covered) addDay(date, tool, value);
+        // Account-wide daily totals carry no machine identity. Keep the local
+        // log breakdown for the owner even when an account total covers the day.
+        if (!covered || figure?.scope === 'account') addMachineDay(date, value);
       }
     }
     for (const [tool, figure] of Object.entries(machine.totals ?? {})) {
       if (accounts.has(tool)) continue;
-      for (const [date, value] of Object.entries(figure.daily ?? {})) addDay(date, tool, value);
+      for (const [date, value] of Object.entries(figure.daily ?? {})) {
+        addDay(date, tool, value);
+        addMachineDay(date, value);
+      }
     }
+    perMachine.push(summary);
   }
   for (const [tool, figure] of accounts) {
     for (const [date, value] of Object.entries(figure.daily ?? {})) addDay(date, tool, value);
@@ -182,6 +204,9 @@ export function computeTokens(
         (machine) => machine.totals?.[tool] || Object.values(machine.days).some((entries) => Object.keys(entries).some((key) => key.startsWith(`${tool}/`))),
       ).length;
       const asOfs = machines.map((machine) => machine.totals?.[tool]?.asOf).filter((date): date is string => Boolean(date)).sort();
+      const recent = dates30.map((date) => days.get(date)?.[tool] ?? 0);
+      const weekTotal = (week: number[]) => week.reduce((sum, count) => sum + count, 0);
+      const logged = responseUsage.get(tool);
       const scope: TokenToolRow['scope'] = account ? 'account' : figureTools.has(tool) ? 'machine' : 'logs';
       return {
         tool,
@@ -192,6 +217,13 @@ export function computeTokens(
         scope,
         asOf: account?.asOf ?? asOfs.at(-1) ?? null,
         machines: reporting,
+        activity: {
+          last7: weekTotal(recent.slice(-7)),
+          previous7: weekTotal(recent.slice(-14, -7)),
+          activeDays30: recent.filter((tokens) => tokens > 0).length,
+          responses30: logged?.responses ?? 0,
+          tokensPerResponse30: logged?.responses ? logged.tokens / logged.responses : null,
+        },
       };
     })
     .sort((a, b) => b.total - a.total);
@@ -235,7 +267,7 @@ export function computeTokens(
     unattributed: toolRows.reduce((total, row) => total + row.unattributed, 0),
     models: modelRows,
     tools: toolRows,
-    machines: [...perMachine.entries()].map(([id, total]) => ({ id, total })).sort((a, b) => b.total - a.total),
+    machines: perMachine.sort((a, b) => b.total - a.total),
     daily: lastDays(today, 60).map((date) => ({ date, total: dayTotal(date), byTool: { ...days.get(date) } })),
     monthly: [...monthly.values()].sort((a, b) => a.month.localeCompare(b.month)),
     undated: toolRows.reduce((total, row) => total + Math.max(0, row.total - (datedByTool[row.tool] ?? 0)), 0),

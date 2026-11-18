@@ -12,8 +12,12 @@ pub const CODEX: &str = "codex";
 pub struct UsageEvent {
     pub key: String,
     pub at: String,
-    pub tool: &'static str,
+    pub tool: String,
+    /// Cumulative count used to reconcile keys from older local databases.
+    pub legacy_total: Option<i64>,
     pub model: String,
+    /// Some for a cumulative session counter. A regular event represents one response.
+    pub cumulative_responses: Option<i64>,
     pub input: i64,
     pub output: i64,
     pub cache_read: i64,
@@ -74,7 +78,8 @@ pub fn parse_claude_line(line: &str) -> Option<UsageEvent> {
     Some(UsageEvent {
         key: format!("{id}:{}", row.request_id.unwrap_or_default()),
         at: row.timestamp?,
-        tool: CLAUDE,
+        tool: CLAUDE.into(),
+        legacy_total: None, cumulative_responses: None,
         model,
         input: count(usage.input_tokens),
         output: count(usage.output_tokens),
@@ -93,6 +98,7 @@ struct CodexRow {
 
 #[derive(Deserialize)]
 struct CodexPayload {
+    id: Option<String>,
     #[serde(rename = "type")]
     kind: Option<String>,
     model: Option<String>,
@@ -126,6 +132,7 @@ struct CodexUsage {
 #[serde(rename_all = "camelCase", default)]
 pub struct CodexState {
     pub model: Option<String>,
+    pub session: Option<String>,
     pub last_total: i64,
     pub has_records: bool,
 }
@@ -152,14 +159,18 @@ fn normalize(usage: &CodexUsage) -> (i64, i64, i64, i64) {
 /// Newer Codex logs have a `token_usage_record` per response with a unique id. Older ones
 /// only have `token_count` events, which repeat when nothing changed, so those are
 /// deduped on the session's running total.
-pub fn parse_codex_line(line: &str, file_key: &str, state: &mut CodexState, chunk: &mut CodexChunk) {
-    if !line.contains("token_usage_record") && !line.contains("\"token_count\"") && !line.contains("\"turn_context\"") {
+pub fn parse_codex_line(line: &str, state: &mut CodexState, chunk: &mut CodexChunk) {
+    if !line.contains("token_usage_record") && !line.contains("\"token_count\"") && !line.contains("\"turn_context\"") && !line.contains("\"session_meta\"") {
         return;
     }
     let Ok(row) = serde_json::from_str::<CodexRow>(line) else { return };
     let Some(payload) = row.payload else { return };
     let kind = row.kind.as_deref();
 
+    if kind == Some("session_meta") {
+        state.session = payload.id.filter(|id| !id.is_empty()).map(|id| crate::machine::sha256_hex(&id));
+        return;
+    }
     if kind == Some("turn_context") {
         if let Some(model) = payload.model.filter(|model| !model.is_empty()) {
             if state.model.is_none() {
@@ -177,7 +188,7 @@ pub fn parse_codex_line(line: &str, file_key: &str, state: &mut CodexState, chun
         let (Some(usage), Some(id)) = (payload.usage, payload.response_id) else { return };
         let (input, output, cache_read, cache_write) = normalize(&usage);
         state.has_records = true;
-        chunk.records.push(UsageEvent { key: format!("codex:{id}"), at, tool: CODEX, model, input, output, cache_read, cache_write });
+        chunk.records.push(UsageEvent { key: format!("codex:{id}"), at, tool: CODEX.into(), legacy_total: None, cumulative_responses: None, model, input, output, cache_read, cache_write });
     } else if payload.kind.as_deref() == Some("token_count") {
         let Some(info) = payload.info else { return };
         let Some(last) = info.last_token_usage else { return };
@@ -187,7 +198,8 @@ pub fn parse_codex_line(line: &str, file_key: &str, state: &mut CodexState, chun
         }
         state.last_total = total;
         let (input, output, cache_read, cache_write) = normalize(&last);
-        chunk.legacy.push(UsageEvent { key: format!("codex:{file_key}:{total}"), at, tool: CODEX, model, input, output, cache_read, cache_write });
+        let session = state.session.as_deref().unwrap_or(&at);
+        chunk.legacy.push(UsageEvent { key: format!("legacy-codex:{session}:{total}"), at, tool: CODEX.into(), legacy_total: Some(total), cumulative_responses: None, model, input, output, cache_read, cache_write });
     }
 }
 
@@ -248,7 +260,7 @@ mod tests {
         let mut state = CodexState::default();
         let mut chunk = CodexChunk::default();
         for line in lines {
-            parse_codex_line(line, "file", &mut state, &mut chunk);
+            parse_codex_line(line, &mut state, &mut chunk);
         }
         let first = chunk.first_model.clone();
         (chunk.into_events(&state), state, first)
@@ -287,13 +299,13 @@ mod tests {
     fn codex_state_carries_across_reads_of_a_growing_file() {
         let mut state = CodexState::default();
         let mut first = CodexChunk::default();
-        parse_codex_line(&turn_context("m"), "file", &mut state, &mut first);
-        parse_codex_line(&token_count(100, 100), "file", &mut state, &mut first);
+        parse_codex_line(&turn_context("m"), &mut state, &mut first);
+        parse_codex_line(&token_count(100, 100), &mut state, &mut first);
         let _ = first.into_events(&state);
 
         let mut second = CodexChunk::default();
-        parse_codex_line(&token_count(100, 100), "file", &mut state, &mut second);
-        parse_codex_line(&token_count(130, 30), "file", &mut state, &mut second);
+        parse_codex_line(&token_count(100, 100), &mut state, &mut second);
+        parse_codex_line(&token_count(130, 30), &mut state, &mut second);
         let events = second.into_events(&state);
         assert_eq!(events.len(), 1, "the repeat from the previous read is recognized");
         assert_eq!(events[0].model, "m");
