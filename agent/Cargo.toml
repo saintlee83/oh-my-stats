@@ -1,7 +1,7 @@
 [package]
 name = "oh-my-stats"
 default-run = "oms"
-version = "0.3.0"
+version = "0.3.1"
 edition = "2024"
 license = "MIT"
 description = "Tracks AI token usage and GitHub contributions continuously, on every machine."
