@@ -1077,7 +1077,7 @@ test('rankings reconcile tool figures, respect visibility, and keep device and p
   assert.match(privateHtml, /<a href="\/rankings\?days=30">Everyone<\/a><a href="\/me\/rankings\?days=30" aria-current="page">Mine<\/a>/);
   const own = await (await context.call('/rankings?days=7', { headers: { cookie } })).text();
   assert.match(own, /3 ranked public profiles · You are <strong>#1<\/strong>/);
-  assert.match(own, /<tr class="me">[\s\S]*?@octo<\/a><span class="badge">You<\/span>/, 'the viewer finds their own row');
+  assert.match(own, /<tr class="me">[\s\S]*?<b>Octo Cat<\/b><small>@octo<\/small><\/span><\/a><span class="badge">You<\/span>/, 'the viewer finds their own row');
   assert.equal(own.match(/class="me"/g)?.length, 1);
   assert.match(await (await context.call('/me/rankings', { headers: { cookie } })).text(), />1,083</);
   await context.call('/v1/me', api(a, 'PATCH', { public: false }));
@@ -1154,11 +1154,11 @@ test('the public board ranks one provider at a time, with the scores each profil
   const board = await (await context.call('/rankings?days=7&provider=codex')).text();
   assert.match(board, /<a href="\/rankings\?days=7&amp;provider=codex" aria-current="page">Codex<\/a>/);
   assert.match(board, /<a href="\/rankings\?days=30&amp;provider=codex">Last 30 days<\/a>/, 'changing the period keeps the provider');
-  assert.match(board, /Top 100 public profiles · Codex<\/h2><p class="muted">2 ranked public profiles<\/p>/);
-  assert.match(board, /@alpha<\/a>[\s\S]*<strong>500<\/strong>[\s\S]*@octo<\/a>[\s\S]*<strong>300<\/strong>/);
+  assert.match(board, /Places 1–2 · Codex<\/h2><p class="muted"><span title="800 tokens">800 tokens<\/span> from 2 ranked public profiles<\/p>/);
+  assert.match(board, /@alpha<\/a>[\s\S]*<strong>500<\/strong>[\s\S]*@octo<\/small><\/span><\/a>[\s\S]*<strong>300<\/strong>/);
   assert.doesNotMatch(board, /@beta/);
   const custom = await (await context.call('/rankings?provider=local-ai')).text();
-  assert.match(custom, /aria-current="page">local-ai<\/a>[\s\S]*@octo<\/a>[\s\S]*<strong>7<\/strong>/, 'it can still be asked for by address');
+  assert.match(custom, /aria-current="page">local-ai<\/a>[\s\S]*@octo<\/small><\/span><\/a>[\s\S]*<strong>7<\/strong>/, 'it can still be asked for by address');
   const unused = await context.call('/rankings?provider=amp');
   assert.match(await unused.text(), /aria-current="page">Amp<\/a>[\s\S]*0 ranked public profiles[\s\S]*No token usage for this period/);
   for (const bad of ['Codex', 'codex%20', '<b>', 'a'.repeat(33)]) assert.equal((await context.call(`/rankings?provider=${bad}`)).status, 400, bad);

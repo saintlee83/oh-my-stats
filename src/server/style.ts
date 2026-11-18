@@ -237,6 +237,35 @@ const SOURCE = `
   .notice .actions { justify-content: center; }
 
   /* Rankings boards */
+  .board-tabs { display: flex; gap: 4px; margin: 0 0 16px; box-shadow: inset 0 -1px 0 var(--line); }
+  .board-tabs a { padding: 8px 12px; border-bottom: 2px solid transparent; font-size: 14px; font-weight: 500; color: var(--ink2); text-decoration: none; }
+  .board-tabs a:hover { color: var(--ink); border-bottom-color: var(--line); }
+  .board-tabs a[aria-current=page] { color: var(--ink); font-weight: 600; border-bottom-color: var(--accent); }
+  /* Five periods are wider than a phone, so they take a second row and fill both. */
+  .segments { flex-wrap: wrap; }
+  .segments a { flex: 1 1 auto; text-align: center; }
+  .toolbar .filters { margin: 0; }
+  .who b, .who small { display: block; line-height: 1.35; }
+  .who a b, .who a small { max-width: 32ch; overflow: hidden; text-overflow: ellipsis; }
+  .who small { font-size: 12px; font-weight: 400; color: var(--muted); }
+  .reach .meter { width: 24%; }
+  .standings .up { color: var(--accent); }
+  .standings .down { color: var(--danger); }
+  .standings small.narrow { display: none; }
+  .board-pager { display: grid; grid-template-columns: 1fr auto 1fr; align-items: center; justify-items: start; gap: 12px; margin-top: 16px; font-size: 13px; color: var(--muted); }
+  .board-pager > :last-child { justify-self: end; }
+  @media (max-width: 640px) {
+    /* A phone shows one column of numbers. What the others said is written under the name or the number. */
+    .standings .wide, .standings small.narrow + small { display: none; }
+    .standings small.narrow { display: block; }
+    /* The name takes the width the numbers leave, and a long one is cut short there. */
+    .standings .who { width: 100%; max-width: 0; overflow: hidden; text-overflow: ellipsis; }
+    .who a { max-width: 100%; overflow: hidden; }
+    .who a:focus-visible { outline-offset: -2px; }
+    .me .who a { max-width: calc(100% - 46px); }
+    .who a span { min-width: 0; }
+    .reach .who { white-space: normal; overflow-wrap: anywhere; }
+  }
 
   /* Profile and dashboard */
   /* The name keeps room for its rank beside the 64px picture and its gap. The buttons drop below when none is left. */

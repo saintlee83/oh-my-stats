@@ -56,9 +56,11 @@ import {
   type SessionRow,
   type UserRow,
 } from './db.ts';
+import { modelsPage, myRankingsPage, providersPage, rankingsPage } from './board-pages.ts';
+import { boardSort, costBoard, modelBoard, providerBoard } from './boards.ts';
 import { groupGet, groupPost } from './grouproutes.ts';
-import { dashboardPage, errorPage, landingPage, profilePage, rankingsPage, REPO_URL, type LandingBoard } from './pages.ts';
-import { personalRankings, publicRankings, rankBoard, rankingPeriod, rankingProvider } from './rankings.ts';
+import { dashboardPage, errorPage, landingPage, profilePage, REPO_URL, type LandingBoard } from './pages.ts';
+import { personalRankings, publicRankings, rankBoard, rankingPage, rankingPeriod, rankingProvider } from './rankings.ts';
 import { crawlerFile, publicLogins, READING_PAGES, robotsTxt, sitemapXml } from './reading.ts';
 import { loadPrices } from './prices.ts';
 import { LOGO_SVG } from './logo.ts';
@@ -713,26 +715,33 @@ async function route(request: Request, deps: Deps): Promise<Response> {
   if (path === '/login') return startLogin(request, deps);
   if (path === '/auth/callback') return finishLogin(request, deps);
   if (path === '/me') return serveMe(request, deps);
-  if (path === '/rankings' || path === '/me/rankings') {
+
+  // Boards under /rankings.
+  if (path === '/rankings' || path === '/rankings/providers' || path === '/rankings/models' || path === '/me/rankings') {
     if (deps.allow && !(await deps.allow('public', `rankings:${clientIp(request)}`))) return tooMany();
     const viewer = await viewerFromCookie(request, deps);
     const now = deps.now();
-    const period = rankingPeriod(url.searchParams.get('days'), now);
+    const period = rankingPeriod(url.searchParams.get('days'), now, true);
     if (path === '/me/rankings') {
       if (!viewer) return redirect('/login');
-      const ranges = period.days === 30 ? ['all', '7', '30'] : ['all', '7'];
+      // The viewer's place all time and this week, and in the period chosen when it is another.
+      const ranges = [rankingPeriod('all', now), rankingPeriod('7', now), ...(period.days === 'all' || period.days === 7 ? [] : [period])];
       const [personal, ...boards] = await Promise.all([
         personalRankings(deps.db, viewer.id, period),
-        ...ranges.map(days => publicRankings(deps.db, rankingPeriod(days, now), viewer.id)),
+        ...ranges.map(range => publicRankings(deps.db, range, viewer.id)),
       ] as const);
-      return html(rankingsPage(period, personal, viewer, boards.map(b => b.position)));
+      return html(myRankingsPage(period, personal, viewer, boards.map(b => b.position)));
     }
-    const provider = rankingProvider(url.searchParams.get('provider'));
-    const board = await publicRankings(deps.db, period, viewer?.id, provider);
-    return html(rankingsPage(period, board.users, viewer, [board.position], { provider, providers: board.providers }, url.origin));
+    if (path === '/rankings/providers') return html(providersPage(period, await providerBoard(deps.db, period), viewer, url.origin));
+    const prices = () => loadPrices(deps.db, deps.fetch, deps.waitUntil, now);
+    if (path === '/rankings/models') return html(modelsPage(period, await modelBoard(deps.db, await prices(), period), viewer, url.origin));
+    const view = { viewerId: viewer?.id, provider: rankingProvider(url.searchParams.get('provider')), page: rankingPage(url.searchParams.get('page')) };
+    // Only the board by cost reads the logs and the prices. By tokens, a visit costs what it always has.
+    const board = boardSort(url.searchParams.get('sort')) === 'cost'
+      ? await costBoard(deps.db, await prices(), period, view)
+      : await rankBoard(deps.db, period, { kind: 'public' }, view);
+    return html(rankingsPage(period, board, viewer, view.provider, url.origin));
   }
-
-  // Boards under /rankings.
 
   // Groups.
   const group = /^\/groups(?:\/([a-z0-9-]{1,64}))?$/.exec(path);
