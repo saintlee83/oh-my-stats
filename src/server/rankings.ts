@@ -213,6 +213,8 @@ export interface Board {
   tokens: number;
   page: number;
   pages: number;
+  /** The page the viewer's own row is on, when they are ranked. Equal scores can put it past the page their rank suggests. */
+  viewerPage?: number | null;
 }
 
 /**
@@ -255,14 +257,16 @@ export async function rankBoard(
   const profiles = results.filter(row => row.kind === 'profile');
   const total = results.find(row => row.kind === 'total');
   const participants = total?.count ?? 0;
+  const own = profiles.find(row => row.id === viewerId);
   return {
     users: profiles.filter(row => row.row_num > (page - 1) * BOARD_PAGE && row.row_num <= page * BOARD_PAGE)
       .map(({ rank, label, name, tokens }) => ({ rank, label, name, tokens })),
-    position: { days: period.days, rank: profiles.find(row => row.id === viewerId)?.rank ?? null, participants },
+    position: { days: period.days, rank: own?.rank ?? null, participants },
     providers: results.filter(row => row.kind === 'provider').map(({ label, tokens, count }) => ({ tool: label, tokens, profiles: count })),
     tokens: total?.tokens ?? 0,
     page,
     pages: Math.max(1, Math.ceil(participants / BOARD_PAGE)),
+    viewerPage: own ? Math.ceil(own.row_num / BOARD_PAGE) : null,
   };
 }
 

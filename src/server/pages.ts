@@ -1,11 +1,11 @@
 import type { Card } from '../shared/render/cards.ts';
 import type { ComponentKey } from '../shared/render/svg.ts';
-import { commas, compact, percent, PROVIDERS, providerName } from '../shared/format.ts';
+import { commas, compact, money, percent, PROVIDERS, providerName } from '../shared/format.ts';
 import { providerMix } from '../shared/insights.ts';
 import type { GitHubProfile, TokenMetrics } from '../shared/metrics.ts';
 import { PROFILE_LIMITS, STATUS_CHOICES, type ManualProfile } from '../shared/profile.ts';
 import type { MachineRow, UserRow } from './db.ts';
-import type { PersonalRankings, ProviderUsage, PublicPosition, RankingPeriod, Standing } from './rankings.ts';
+import type { PublicPosition, RankingPeriod, Standing } from './rankings.ts';
 import { STYLE } from './style.ts';
 
 /** Server-rendered pages. Every value from a user or machine goes through `esc`. */
@@ -91,25 +91,57 @@ ${preview}
 }
 
 /**
+ * A number in a table: the short figure to scan, and the exact one beneath it when they differ.
+ * A phone has room for one column of numbers, so `narrow` is what it shows beneath instead:
+ * the figure of a column it leaves out.
+ */
+export const figure = (short: string, exact = short, narrow = '') =>
+  `<strong>${short}</strong>${narrow && `<small class="narrow">${narrow}</small>`}${short === exact ? '' : `<small>${exact}</small>`}`;
+
+/** A cost as its short figure and its exact one. Under a cent, the amount itself would read as nothing. */
+export const costFigures = (cost: number): [short: string, exact: string] =>
+  cost < 0.005 ? ['&lt;$0.01', '&lt;$0.01'] : [money(cost), `$${cost.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`];
+
+/** What a list of profiles can show beyond their logins: the viewer's own row, names, and a cost that leads the tokens. */
+export interface ProfileRows {
+  viewer: string | null;
+  /** Shows a row's `name` above its login, when it has one. */
+  names?: boolean;
+  /** The heading of a column for each row's `cost`. The list is then measured by cost. */
+  cost?: string;
+}
+
+/** A cost, then the tokens it is for. On a phone the tokens go under the cost, and their own column is left out. */
+const costCells = (cost: number, tokens: number) =>
+  `<td class="num">${figure(...costFigures(cost), `${compact(tokens)} ${tokens === 1 ? 'token' : 'tokens'}`)}</td><td class="num wide">${figure(compact(tokens), commas(tokens))}</td>`;
+
+/**
  * A ranked list. Totals span orders of magnitude, so each row has the short figure to
  * scan, the exact one beneath it, and a bar comparing it with the leader.
  */
-export function standings(rows: Standing[], column: string, tokenColumn: string, profiles: { viewer: string | null } | null = null): string {
+export function standings(
+  rows: (Standing & { name?: string | null; cost?: number })[],
+  column: string,
+  tokenColumn: string,
+  profiles: ProfileRows | null = null,
+): string {
   if (!rows.length) return '<p>No token usage for this period.</p>';
-  const most = rows[0].tokens;
+  const byCost = profiles?.cost !== undefined;
+  const score = (row: (typeof rows)[number]) => (byCost ? row.cost ?? 0 : row.tokens);
+  const most = score(rows[0]);
   const body = rows.map((row) => {
     const mine = profiles?.viewer?.toLowerCase() === row.label.toLowerCase();
     const login = esc(encodeURIComponent(row.label));
+    const handle = `@${esc(row.label)}`;
     const who = profiles
-      ? `<a href="/u/${login}"><img src="${AVATARS}/${login}?s=56" alt="" width="28" height="28" loading="lazy">@${esc(row.label)}</a>${mine ? '<span class="badge">You</span>' : ''}`
+      ? `<a href="/u/${login}"><img src="${AVATARS}/${login}?s=56" alt="" width="28" height="28" loading="lazy">${profiles.names && row.name ? `<span><b>${esc(row.name)}</b><small>${handle}</small></span>` : handle}</a>${mine ? '<span class="badge">You</span>' : ''}`
       : esc(row.label);
-    const exact = commas(row.tokens);
-    const short = compact(row.tokens);
     return `<tr${mine ? ' class="me"' : ''}><td class="rank"><span class="place"${profiles && row.rank <= 3 ? ` data-place="${row.rank}"` : ''}>${row.rank}</span></td><td class="who">${who}</td>
-<td class="meter" aria-hidden="true"><span style="--share:${((100 * row.tokens) / most).toFixed(1)}%"></span></td>
-<td class="num"><strong>${short}</strong>${short === exact ? '' : `<small>${exact}</small>`}</td></tr>`;
+<td class="meter" aria-hidden="true"><span style="--share:${((100 * score(row)) / most).toFixed(1)}%"></span></td>
+${byCost ? costCells(row.cost ?? 0, row.tokens) : `<td class="num">${figure(compact(row.tokens), commas(row.tokens))}</td>`}</tr>`;
   }).join('');
-  return `<div class="table"><table class="standings"><thead><tr><th class="rank">Rank</th><th>${column}</th><td class="meter" aria-hidden="true"></td><th class="num">${tokenColumn}</th></tr></thead><tbody>${body}</tbody></table></div>`;
+  const heads = byCost ? `<th class="num">${profiles?.cost}</th><th class="num wide">${tokenColumn}</th>` : `<th class="num">${tokenColumn}</th>`;
+  return `<div class="table"><table class="standings"><thead><tr><th class="rank">Rank</th><th>${column}</th><td class="meter" aria-hidden="true"></td>${heads}</tr></thead><tbody>${body}</tbody></table></div>`;
 }
 
 export const periodLabel = (days: RankingPeriod['days']) =>
@@ -120,63 +152,6 @@ export const tokenColumnLabel = (days: RankingPeriod['days']) =>
   days === 'all' ? 'Lifetime tokens' : typeof days === 'number' ? `Tokens (${days} days)` : `Tokens (${periodLabel(days).toLowerCase()})`;
 
 export const profileCount = (count: number) => `${commas(count)} ranked public ${count === 1 ? 'profile' : 'profiles'}`;
-
-/** Which provider the public board ranks by, and the providers its profiles use. */
-export interface ProviderFilter {
-  provider: string | null;
-  providers: ProviderUsage[];
-}
-
-export function rankingsPage(
-  period: RankingPeriod,
-  data: Standing[] | PersonalRankings,
-  viewer: UserRow | null,
-  positions: PublicPosition[],
-  filter: ProviderFilter = { provider: null, providers: [] },
-  origin?: string,
-): string {
-  const isPublic = Array.isArray(data);
-  const path = isPublic ? '/rankings' : '/me/rankings';
-  const title = isPublic ? 'Public token rankings' : 'My token rankings';
-  const current = (active: boolean) => (active ? ' aria-current="page"' : '');
-  const board = (days: RankingPeriod['days'], provider: string | null) =>
-    `${path}?days=${days}${provider === null ? '' : `&amp;provider=${esc(encodeURIComponent(provider))}`}`;
-  const periods = (['all', 7, 30] as const).map(days => `<a href="${board(days, filter.provider)}"${current(period.days === days)}>${periodLabel(days)}</a>`).join('');
-  // Provider IDs are chosen by whoever uploads them, so only the known ones are offered to everyone.
-  const offered = filter.providers.map(({ tool }) => tool).filter(tool => PROVIDERS.has(tool));
-  if (filter.provider !== null && !offered.includes(filter.provider)) offered.push(filter.provider);
-  const providers = offered.length > 1 || filter.provider !== null
-    ? `<nav class="filters" aria-label="Providers"><a href="${board(period.days, null)}"${current(filter.provider === null)}>All providers</a>${offered
-      .map(tool => `<a href="${board(period.days, tool)}"${current(filter.provider === tool)}>${esc(providerName(tool))}</a>`).join('')}</nav>`
-    : '';
-  // Signed out, the second view would only lead to the sign-in page.
-  const views = viewer
-    ? `<nav class="segments" aria-label="Ranking views"><a href="/rankings?days=${period.days}"${current(isPublic)}>Everyone</a><a href="/me/rankings?days=${period.days}"${current(!isPublic)}>Mine</a></nav>`
-    : '';
-  const tokenColumn = tokenColumnLabel(period.days);
-  const unranked = viewer && positions.every(p => p.rank === null) ? (viewer.is_public ? 'No ranked usage in these periods.' : 'Your profile is private.') : '';
-  let content: string;
-  if (isPublic) {
-    const [{ rank, participants }] = positions;
-    const place = !viewer ? '' : rank === null ? ` · ${unranked}` : ` · You are <strong>#${rank}</strong>`;
-    const scope = filter.provider === null ? '' : ` · ${esc(providerName(filter.provider))}`;
-    content = `${providers}<section class="panel"><div class="panel-head"><h2>Top 100 public profiles${scope}</h2><p class="muted">${profileCount(participants)}${place}</p></div>
-${standings(data, 'GitHub user', tokenColumn, { viewer: viewer?.login ?? null })}</section>`;
-  } else {
-    const tiles = positions.map(({ days, rank, participants }) =>
-      `<div class="tile"><span class="tile-label">${periodLabel(days)}</span><strong>${rank === null ? '—' : `#${rank}`}</strong><span>${rank === null ? 'Unranked · ' : 'of '}${profileCount(participants)}</span></div>`).join('');
-    content = `<h2 class="sr">Your public position</h2><div class="tiles">${tiles}</div>
-${unranked ? `<p class="muted">${unranked}</p>` : ''}
-<section class="panel"><h2>My devices</h2>${standings(data.machines, 'Device', tokenColumn)}</section>
-<section class="panel"><h2>My providers</h2>${standings(data.providers, 'Provider', tokenColumn)}</section>
-<p class="muted">Device scores cover usage attributable to individual machines. Provider scores also include account-wide usage.</p>`;
-  }
-  return layout(`${title} · ${SITE}`, `<div class="page-head"><div><h1>${title}</h1>
-<p>${isPublic ? 'Published profiles, by AI tokens used: input, output, cache reads and cache writes.' : 'Where you stand, and how your own devices and providers compare. Only you can see this page.'}</p></div></div>
-<div class="toolbar"><nav class="segments" aria-label="Ranking periods">${periods}</nav>${views}</div>
-${period.days === 'all' ? '' : `<p class="muted">${period.start} through ${period.end} · Reporting dates through today in UTC.</p>`}
-${content}`, viewer, isPublic ? { origin, description: 'Published developer profiles ranked by AI token usage: all time, the last 7 days and the last 30 days.' } : {});
-}
 
 /** The same steps on every system but the first, so the reader picks theirs once. */
 export function installCommands(origin: string): string {
