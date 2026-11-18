@@ -19,9 +19,16 @@ struct Period {
 #[derive(Deserialize)]
 struct Rankings {
     period: Period,
+    position: Option<PublicPosition>,
     users: Vec<Standing>,
     machines: Vec<Standing>,
     providers: Vec<Standing>,
+}
+
+#[derive(Deserialize)]
+struct PublicPosition {
+    rank: Option<usize>,
+    participants: usize,
 }
 
 pub fn show(days: &str) -> Result<()> {
@@ -32,6 +39,12 @@ pub fn show(days: &str) -> Result<()> {
     match (rankings.period.start, rankings.period.end) {
         (Some(start), Some(end)) => println!("Token rankings   {start} through {end} (UTC)"),
         _ => println!("Token rankings   All time"),
+    }
+    if let Some(position) = rankings.position {
+        match position.rank {
+            Some(rank) => println!("Your public position   #{rank} of {}", position.participants),
+            None => println!("Unranked   {} public profiles with usage", position.participants),
+        }
     }
     for (title, rows) in [
         ("Top public profiles", rankings.users),

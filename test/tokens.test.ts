@@ -3,6 +3,7 @@ import { test } from 'node:test';
 import { buildCards, CARD_LINES, CARD_WIDTH, cardContent } from '../src/shared/render/cards.ts';
 import { renderDashboard } from '../src/shared/render/svg.ts';
 import { computeTokens } from '../src/shared/tokens.ts';
+import { monthlyRecap, providerMix, weeklyUsage } from '../src/shared/insights.ts';
 import type { MachineUsage, PriceTable, ToolTotals } from '../src/shared/types.ts';
 import { displayWidth } from '../src/shared/format.ts';
 import { githubMetrics } from './fixtures.ts';
@@ -116,6 +117,37 @@ test('with logs alone, machines simply add up', () => {
 test('no data at all means no token metrics', () => {
   assert.equal(computeTokens([], PRICES, TZ, NOW, null), null);
   assert.equal(computeTokens([{ id: 'a'.repeat(16), days: {} }], PRICES, TZ, NOW, null), null);
+});
+
+test('weekly change and calendar-month comparisons follow the profile date across New Year', () => {
+  // Already Jan 2 in Seoul. The uploaded Jan 3 row must not influence month-to-date shares.
+  const data: MachineUsage = { id: 'mac', days: {
+    '2026-12-20': { 'pi/m': [100, 0, 0, 0, 1] },
+    '2026-12-31': { 'pi/m': [50, 0, 0, 0, 1] },
+    '2027-01-01': { 'pi/m': [20, 0, 0, 0, 1] },
+    '2027-01-02': { 'codex/m': [80, 0, 0, 0, 1] },
+    '2027-01-03': { 'codex/m': [1000, 0, 0, 0, 1] },
+  } };
+  const tokens = computeTokens([data], {}, TZ, new Date('2027-01-01T16:00:00Z'), null)!;
+  const week = weeklyUsage(tokens);
+  assert.deepEqual([week.total, week.previous, week.changePercent, week.topIncrease], [150, 100, 50, { tool: 'codex', tokens: 80 }]);
+  assert.deepEqual(week.days.map(d => d.total), [0, 0, 0, 0, 50, 20, 80]);
+  assert.deepEqual(providerMix(tokens), { previousMonth: '2026-12', today: '2027-01-02', rows: [
+    { tool: 'codex', now: 80, previous: 0, share: 0.8, priorShare: 0 },
+    { tool: 'pi', now: 20, previous: 150, share: 0.2, priorShare: 1 },
+  ] });
+  const metrics = { ...metricsFor([]), generatedDate: '2027-01-02', tokens };
+  assert.deepEqual(monthlyRecap(metrics), { month: '2026-12', tokens: 150, commits: 5, pulls: 1, reviews: 0 });
+  assert.equal(monthlyRecap({ ...metrics, github: null }).commits, null);
+});
+
+test('undated account totals do not invent weekly growth or monthly activity', () => {
+  const tokens = compute([{ id: 'one', days: {}, totals: { codex: { scope: 'account', total: 12345, asOf: null } } }]);
+  assert.equal(weeklyUsage(tokens).changePercent, null);
+  assert.equal(weeklyUsage(tokens).topIncrease, null);
+  assert.deepEqual(providerMix(tokens).rows, []);
+  assert.equal(monthlyRecap({ ...metricsFor([]), tokens }).tokens, null);
+  assert.deepEqual(tokens.unassigned, { total: 12345, last30: 0, last7: 0 });
 });
 
 test('uncached tokens per commit use the last 30 days of logs', () => {

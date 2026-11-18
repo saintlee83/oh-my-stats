@@ -124,15 +124,29 @@ const datedUsage = `official_days AS (
     FROM covered_logs
   )`;
 
-export async function publicRankings(db: Db, period: RankingPeriod): Promise<Standing[]> {
+export interface PublicPosition {
+  days: RankingPeriod['days'];
+  rank: number | null;
+  participants: number;
+}
+
+export async function publicRankings(db: Db, period: RankingPeriod, viewerId: string | null = null) {
   const { sql, params } = rankingUsage(period);
-  const { results } = await db.prepare(`${sql}
-    SELECT members.login AS label, TOTAL(usage.tokens) AS tokens
-    FROM usage JOIN members ON members.id = usage.user_id
-    GROUP BY members.id HAVING TOTAL(usage.tokens) > 0
-    ORDER BY tokens DESC, label COLLATE NOCASE, members.id LIMIT 100`)
-    .bind(...params).all<Score>();
-  return standings(results);
+  const { results } = await db.prepare(`${sql}, scores AS (
+      SELECT members.id, members.login AS label, TOTAL(usage.tokens) AS tokens
+      FROM usage JOIN members ON members.id = usage.user_id
+      GROUP BY members.id HAVING TOTAL(usage.tokens) > 0
+    ), ranked AS (
+      SELECT *, RANK() OVER (ORDER BY tokens DESC) AS rank, COUNT(*) OVER () AS participants,
+        ROW_NUMBER() OVER (ORDER BY tokens DESC, label COLLATE NOCASE, id) AS row_num FROM scores
+    )
+    SELECT * FROM ranked WHERE row_num <= 100 OR id = ? ORDER BY row_num`)
+    .bind(...params, viewerId).all<Standing & { id: string; participants: number; row_num: number }>();
+  const position: PublicPosition = {
+    days: period.days, rank: results.find(row => row.id === viewerId)?.rank ?? null, participants: results[0]?.participants ?? 0,
+  };
+  const users = results.filter(row => row.row_num <= 100).map(({ rank, label, tokens }) => ({ rank, label, tokens }));
+  return { users, position };
 }
 
 export async function personalRankings(db: Db, userId: string, period: RankingPeriod): Promise<PersonalRankings> {

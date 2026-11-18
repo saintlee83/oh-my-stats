@@ -1,10 +1,11 @@
 import type { Card } from '../shared/render/cards.ts';
 import type { ComponentKey } from '../shared/render/svg.ts';
-import { commas, compact, providerName } from '../shared/format.ts';
+import { commas, compact, percent, providerName } from '../shared/format.ts';
+import { providerMix } from '../shared/insights.ts';
 import type { GitHubProfile, TokenMetrics } from '../shared/metrics.ts';
 import { PROFILE_LIMITS, STATUS_CHOICES, type ManualProfile } from '../shared/profile.ts';
 import type { MachineRow, UserRow } from './db.ts';
-import type { PersonalRankings, RankingPeriod, Standing } from './rankings.ts';
+import type { PersonalRankings, PublicPosition, RankingPeriod, Standing } from './rankings.ts';
 
 /** Server-rendered pages. Every value from a user or machine goes through `esc`. */
 
@@ -60,6 +61,20 @@ const STYLE = `
   .profile img { width: 56px; height: 56px; border-radius: 50%; }
   .profile h1 { margin: 0; }
   .steps { padding-left: 20px; color: var(--ink2); } .steps li { margin-bottom: 12px; }
+  .activity-panels { display: grid; grid-template-columns: repeat(auto-fit, minmax(min(100%, 350px), 1fr)); gap: 16px; margin: 16px 0; }
+  .activity-panels .panel { margin: 0; }
+  .calendar { display: grid; grid-auto-flow: column; grid-auto-columns: 20px; grid-template-rows: repeat(7, 20px); gap: 3px; width: fit-content; }
+  .calendar small { align-self: center; color: var(--muted); font-size: 10px; }
+  button.day { min-height: 0; padding: 0; border-radius: 4px; background: var(--code); }
+  .day[data-level="1"] { background: #aceebb; } .day[data-level="2"] { background: #4ac26b; }
+  .day[data-level="3"] { background: #1a7f37; } .day[data-level="4"] { background: #0a4621; }
+  @media (prefers-color-scheme: dark) {
+    .day[data-level="1"] { background: #1b5334; } .day[data-level="2"] { background: #247a43; }
+    .day[data-level="3"] { background: #3cab60; } .day[data-level="4"] { background: #89e59f; }
+  }
+  .day:focus-visible, .day:hover { outline: 2px solid var(--ink); outline-offset: 1px; }
+  .day-details { background: var(--surface); color: var(--ink); border: 1px solid var(--line); border-radius: 10px; padding: 20px; max-width: 90vw; }
+  .day-details::backdrop { background: #0005; } .day-details ul { padding-inline-start: 20px; }
   @media (max-width: 640px) { h1 { font-size: 24px; } .panel { padding: 16px; } .dash svg { min-width: 720px; max-width: none; } }
 `;
 
@@ -94,7 +109,7 @@ function rankingTable(title: string, column: string, rows: Standing[], tokenColu
     : '<p>No token usage for this period.</p>'}</section>`;
 }
 
-export function rankingsPage(period: RankingPeriod, data: Standing[] | PersonalRankings, viewer: UserRow | null): string {
+export function rankingsPage(period: RankingPeriod, data: Standing[] | PersonalRankings, viewer: UserRow | null, positions: PublicPosition[]): string {
   const isPublic = Array.isArray(data);
   const path = isPublic ? '/rankings' : '/me/rankings';
   const title = isPublic ? 'Public token rankings' : 'My token rankings';
@@ -104,9 +119,16 @@ export function rankingsPage(period: RankingPeriod, data: Standing[] | PersonalR
   const tokenColumn = period.days === 'all' ? 'Lifetime tokens' : `Tokens (${period.days} days)`;
   const tables = isPublic ? rankingTable('Top 100 public profiles', 'GitHub user', data, tokenColumn, true)
     : rankingTable('My devices', 'Device', data.machines, tokenColumn) + rankingTable('My providers', 'Provider', data.providers, tokenColumn);
+  const ranks = positions.map(({ days, rank, participants }) => {
+    const range = days === 'all' ? 'All time' : `Last ${days} days`;
+    const place = !viewer ? '' : rank === null ? 'Unranked · ' : `<strong>#${rank}</strong> of `;
+    return `<p>${range} · ${place}${commas(participants)} ranked public profiles</p>`;
+  }).join('');
   return layout(title, `<h1>${title}</h1>
 <nav class="links" aria-label="Ranking periods and views">${periods}${other}</nav>
 ${period.days === 'all' ? '' : `<p class="muted">${period.start} through ${period.end} · Reporting dates through today in UTC.</p>`}
+<section class="panel"><h2>${viewer ? 'Your public position' : 'Participation'}</h2>${ranks}
+${viewer && positions.every(p => p.rank === null) ? `<p class="muted">${viewer.is_public ? 'No ranked usage in these periods.' : 'Your profile is private.'}</p>` : ''}</section>
 ${tables}${isPublic ? '' : '<p class="muted">Device scores cover usage attributable to individual machines. Provider scores also include account-wide usage.</p>'}`, viewer);
 }
 
@@ -167,6 +189,38 @@ function providerActivity(tokens: TokenMetrics | null): string {
     <tbody>${rows}</tbody></table></div><p class="muted">Response counts and averages use responses recorded by your synced machines.</p></section>`;
 }
 
+function activityPanels(tokens: TokenMetrics | null): string {
+  if (!tokens) return '';
+  const days = tokens.daily;
+  const peak = Math.max(1, ...days.map(day => day.total));
+  const offset = (new Date(days[0].date + 'T00:00:00Z').getUTCDay() + 6) % 7;
+  const labels = ['Mo', 'Tu', 'We', 'Th', 'Fr', 'Sa', 'Su'].map(label => `<small aria-hidden="true">${label}</small>`).join('');
+  const cells = days.map(({ date, total }) => {
+    const level = total ? Math.ceil(Math.sqrt(total / peak) * 4) : 0;
+    const label = `${date} · ${commas(total)} tokens`;
+    return `<button class="day" popovertarget="day-${date}" data-level="${level}" aria-label="${label}" title="${label}"></button>`;
+  }).join('');
+  const details = days.map(({ date, total, byTool }) => {
+    const tools = Object.entries(byTool).filter(([, count]) => count > 0).sort((a, b) => b[1] - a[1]);
+    const list = tools.map(([tool, count]) => `<li>${esc(providerName(tool))} · ${commas(count)}</li>`).join('');
+    return `<section popover class="day-details" id="day-${date}" aria-label="AI usage on ${date}"><h2>${date}</h2>
+      <p>${commas(total)} tokens</p>${list ? `<ul>${list}</ul>` : ''}<button popovertarget="day-${date}" popovertargetaction="hide">Close</button></section>`;
+  }).join('');
+  const mix = providerMix(tokens);
+  const shareLabel = (value: number | null) => value === null ? '—' : percent(value);
+  const rows = mix.rows.map(({ tool, share, priorShare }) => {
+    const delta = share === null || priorShare === null ? null : (share - priorShare) * 100;
+    return `<tr><td>${esc(providerName(tool))}</td><td class="num">${shareLabel(priorShare)}</td><td class="num">${shareLabel(share)}</td>
+      <td class="num">${delta === null ? '—' : `${delta > 0 ? '+' : ''}${delta.toFixed(1)} pp`}</td></tr>`;
+  }).join('');
+  return `<div class="activity-panels"><section class="panel"><h2>AI usage calendar</h2>
+    <p class="muted">${days[0].date} – ${days.at(-1)!.date} · Select a day for its providers.</p>
+    <div class="calendar">${labels}${'<span></span>'.repeat(offset)}${cells}</div>${details}</section>
+    <section class="panel"><h2>Provider share of tokens</h2><p class="muted">Previous month and month to date through ${mix.today}.</p>
+    ${rows ? `<div class="table"><table><thead><tr><th>Provider</th><th class="num">${mix.previousMonth}</th><th class="num">${mix.today.slice(0, 7)}</th><th class="num">Change</th></tr></thead><tbody>${rows}</tbody></table></div>` : '<p>No dated usage in either month.</p>'}
+    </section></div>`;
+}
+
 export function profilePage(user: UserRow, svg: string, tokens: TokenMetrics | null, cards: Card[], parts: Part[], origin: string, viewer: UserRow | null): string {
   const url = `${origin}/u/${encodeURIComponent(user.login)}`;
   const avatar = user.avatar_url ? `<img src="${esc(user.avatar_url)}" alt="">` : '';
@@ -177,6 +231,7 @@ export function profilePage(user: UserRow, svg: string, tokens: TokenMetrics | n
     `@${user.login} on oh-my-stats`,
     `<div class="profile">${avatar}<div><h1>@${esc(user.login)}</h1>${user.name ? `<p>${esc(user.name)}</p>` : ''}</div></div>
 <div class="dash">${svg}</div>
+${activityPanels(tokens)}
 ${providerActivity(tokens)}
 <div class="panel">
   <h2>Add this to your GitHub profile</h2>
@@ -251,7 +306,6 @@ export function dashboardPage(
 ): string {
   const url = `${origin}/u/${encodeURIComponent(user.login)}`;
   const isPublic = user.is_public === 1;
-  const unassigned = tokens ? Math.max(0, tokens.total - tokens.machines.reduce((n, m) => n + m.total, 0)) : 0;
   const empty = `<div class="panel"><h2>Connect your first machine</h2><pre><code>${esc(installSnippet(origin))}</code></pre></div>`;
   return layout(
     'Your dashboard',
@@ -259,6 +313,7 @@ export function dashboardPage(
 <p><a href="/me/rankings">View my device and provider rankings</a></p>
 ${machines.length === 0 ? empty : ''}
 ${svg ? `<div class="dash">${svg}</div>` : ''}
+${activityPanels(tokens)}
 ${providerActivity(tokens)}
 <div class="panel">
   <h2>Profile <span class="badge">${isPublic ? 'Public' : 'Private'}</span></h2>
@@ -274,8 +329,8 @@ ${
   machines.length
     ? `<div class="panel"><h2>Machines</h2><div class="table"><table>
 <thead><tr><th>Name</th><th>Platform</th><th class="num">Tokens · last 7d</th><th class="num">Tokens · last 30d</th><th class="num">Lifetime tokens</th><th>Last sync</th><th></th></tr></thead>
-<tbody>${machineRows(machines, tokens)}</tbody></table></div>
-${unassigned ? `<p>${commas(unassigned)} lifetime tokens have no matching device record.</p>` : ''}
+<tbody>${machineRows(machines, tokens)}${tokens && Object.values(tokens.unassigned).some(n => n > 0) ? `<tr><td colspan="2">No matching device</td>
+  <td class="num">${commas(tokens.unassigned.last7)}</td><td class="num">${commas(tokens.unassigned.last30)}</td><td class="num">${commas(tokens.unassigned.total)}</td><td colspan="2"></td></tr>` : ''}</tbody></table></div>
 <p class="muted">Machines upload once a day, so numbers can be up to a day behind. Run <code>oms sync</code> on a machine to update it now. For providers with an account-wide total, device attribution uses local logs. Account usage with no matching machine record appears only in the account total. Removing a machine deletes its data and signs it out.</p></div>`
     : ''
 }

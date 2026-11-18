@@ -87,6 +87,8 @@ export interface TokenMetrics {
   tools: TokenToolRow[];
   /** Tokens per machine, for its owner. Never rendered publicly. */
   machines: { id: string; total: number; last7: number; last30: number }[];
+  /** Account totals exceeding attributable device usage, reconciled separately for each provider. */
+  unassigned: { total: number; last7: number; last30: number };
   /** Trailing 60 days, oldest first. */
   daily: { date: string; total: number; byTool: Record<string, number> }[];
   monthly: { month: string; total: number; byTool: Record<string, number> }[];

@@ -77,6 +77,7 @@ export function computeTokens(
   const perMachine: TokenMetrics['machines'] = [];
   const toolKnownPerMachine = new Map<string, number>(); // machine-scope totals, summed
   const accountNewer = new Map<string, number>();
+  const accountLogged = new Map<string, { last7: number; last30: number }>();
   const figureTools = new Set<string>();
   let last30Fresh = 0;
 
@@ -173,6 +174,12 @@ export function computeTokens(
         // Account-wide daily totals carry no machine identity. Keep the local
         // log breakdown for the owner even when an account total covers the day.
         if (!covered || figure?.scope === 'account') addMachineDay(date, value);
+        if (figure?.scope === 'account' && window30.has(date)) {
+          const logged = accountLogged.get(tool) ?? { last7: 0, last30: 0 };
+          logged.last30 += value;
+          if (window7.has(date)) logged.last7 += value;
+          accountLogged.set(tool, logged);
+        }
       }
     }
     for (const [tool, figure] of Object.entries(machine.totals ?? {})) {
@@ -195,6 +202,7 @@ export function computeTokens(
     })
     .sort((a, b) => b.total - a.total);
 
+  const unassigned = { total: 0, last7: 0, last30: 0 };
   const toolRows: TokenToolRow[] = [...toolNames]
     .map((tool) => {
       const own = modelRows.filter((row) => row.tool === tool);
@@ -207,6 +215,12 @@ export function computeTokens(
       const asOfs = machines.map((machine) => machine.totals?.[tool]?.asOf).filter((date): date is string => Boolean(date)).sort();
       const recent = dates30.map((date) => days.get(date)?.[tool] ?? 0);
       const weekTotal = (week: number[]) => week.reduce((sum, count) => sum + count, 0);
+      if (account) {
+        const local = accountLogged.get(tool);
+        unassigned.total += Math.max(0, total - known);
+        unassigned.last7 += Math.max(0, weekTotal(recent.slice(-7)) - (local?.last7 ?? 0));
+        unassigned.last30 += Math.max(0, weekTotal(recent) - (local?.last30 ?? 0));
+      }
       const logged = responseUsage.get(tool);
       const scope: TokenToolRow['scope'] = account ? 'account' : figureTools.has(tool) ? 'machine' : 'logs';
       return {
@@ -269,6 +283,7 @@ export function computeTokens(
     models: modelRows,
     tools: toolRows,
     machines: perMachine.sort((a, b) => b.total - a.total),
+    unassigned,
     daily: lastDays(today, 60).map((date) => ({ date, total: dayTotal(date), byTool: { ...days.get(date) } })),
     monthly: [...monthly.values()].sort((a, b) => a.month.localeCompare(b.month)),
     undated: toolRows.reduce((total, row) => total + Math.max(0, row.total - (datedByTool[row.tool] ?? 0)), 0),

@@ -1,4 +1,5 @@
 import type { GitHubMetrics, Metrics } from '../shared/metrics.ts';
+import { weeklyUsage } from '../shared/insights.ts';
 import { manualProfileFromForm, manualProfileFromJson, manualProfileJson, profileOf } from '../shared/profile.ts';
 import { buildCards, cardContent, type Card } from '../shared/render/cards.ts';
 import {
@@ -489,8 +490,8 @@ async function handleApi(request: Request, path: string, deps: Deps): Promise<Re
   if (path === '/v1/rankings' && request.method === 'GET') {
     // Older v1 clients requesting no period expect a seven-day range with start and end dates.
     const period = rankingPeriod(new URL(request.url).searchParams.get('days') ?? '7', now);
-    const [users, personal] = await Promise.all([publicRankings(deps.db, period), personalRankings(deps.db, session.user_id, period)]);
-    return json({ period, users, ...personal });
+    const [board, personal] = await Promise.all([publicRankings(deps.db, period, session.user_id), personalRankings(deps.db, session.user_id, period)]);
+    return json({ period, ...board, ...personal });
   }
 
   if (path === '/v1/usage' && request.method === 'PUT') {
@@ -521,7 +522,10 @@ async function handleApi(request: Request, path: string, deps: Deps): Promise<Re
       public: user.is_public === 1,
       profileUrl: `${new URL(request.url).origin}/u/${encodeURIComponent(user.login)}`,
       machine: session.machine_id,
-      tokens: metrics.tokens ? { total: metrics.tokens.total, tools: metrics.tokens.tools.map(({ tool, total, scope, machines: count, activity }) => ({ tool, total, scope, machines: count, activity })) } : null,
+      tokens: metrics.tokens ? {
+        total: metrics.tokens.total, weekly: weeklyUsage(metrics.tokens), unassigned: metrics.tokens.unassigned,
+        tools: metrics.tokens.tools.map(({ tool, total, scope, machines: count, activity }) => ({ tool, total, scope, machines: count, activity })),
+      } : null,
       github: metrics.github ? { commits: metrics.github.counts.commits, pulls: metrics.github.counts.pulls } : null,
       machines: machines.map((machine) => {
         const usage = totals.get(machine.id);
@@ -580,12 +584,19 @@ async function route(request: Request, deps: Deps): Promise<Response> {
   if (path === '/rankings' || path === '/me/rankings') {
     if (deps.allow && !(await deps.allow('public', `rankings:${clientIp(request)}`))) return tooMany();
     const viewer = await viewerFromCookie(request, deps);
-    const period = rankingPeriod(url.searchParams.get('days'), deps.now());
+    const now = deps.now();
+    const period = rankingPeriod(url.searchParams.get('days'), now);
     if (path === '/me/rankings') {
       if (!viewer) return redirect('/login');
-      return html(rankingsPage(period, await personalRankings(deps.db, viewer.id, period), viewer));
+      const ranges = period.days === 30 ? ['all', '7', '30'] : ['all', '7'];
+      const [personal, ...boards] = await Promise.all([
+        personalRankings(deps.db, viewer.id, period),
+        ...ranges.map(days => publicRankings(deps.db, rankingPeriod(days, now), viewer.id)),
+      ] as const);
+      return html(rankingsPage(period, personal, viewer, boards.map(b => b.position)));
     }
-    return html(rankingsPage(period, await publicRankings(deps.db, period), viewer));
+    const board = await publicRankings(deps.db, period, viewer?.id);
+    return html(rankingsPage(period, board.users, viewer, [board.position]));
   }
 
   const profile = /^\/u\/([A-Za-z0-9-]{1,39})(?:\/(dashboard\.svg|cards\/([a-z]+)\.txt|components\/([a-z]+)\.svg))?$/.exec(path);

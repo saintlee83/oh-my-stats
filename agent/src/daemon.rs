@@ -185,6 +185,17 @@ pub fn print_status() -> Result<()> {
     };
     if let Some(total) = me.pointer("/tokens/total").and_then(Value::as_f64) {
         println!("Tokens        {}", volume(Some(total)));
+        if let Some(week) = me.pointer("/tokens/weekly") {
+            let change = week["changePercent"].as_f64().map_or_else(|| "no prior-week usage".into(), |n| format!("{n:+.1}%"));
+            let days: Vec<f64> = week["days"].as_array().into_iter().flatten().filter_map(|d| d["total"].as_f64()).collect();
+            let peak = days.iter().copied().fold(1.0, f64::max);
+            let bars = ['·', '▁', '▂', '▃', '▄', '▅', '▆', '▇', '█'];
+            let trend: String = days.iter().map(|n| bars[(n / peak * 8.0).ceil() as usize]).collect();
+            println!("Last 7 days   {} tokens  {trend}  ({change})", volume(week["total"].as_f64()));
+            if let Some(tool) = week["topIncrease"]["tool"].as_str() {
+                println!("              Largest increase: {tool} +{} tokens", volume(week["topIncrease"]["tokens"].as_f64()));
+            }
+        }
         for tool in me.pointer("/tokens/tools").and_then(Value::as_array).into_iter().flatten() {
             println!(
                 "  {:<11} {} ({})",
@@ -216,7 +227,12 @@ pub fn print_status() -> Result<()> {
             machine.get("lastSeenAt").and_then(Value::as_str).unwrap_or("?").chars().take(16).collect::<String>()
         );
     }
-    if let Some(total) = me.pointer("/tokens/total").and_then(Value::as_u64) && total > assigned {
+    if let Some(row) = me.pointer("/tokens/unassigned") {
+        let n = |key: &str| row[key].as_u64().unwrap_or_default();
+        if n("last7") > 0 || n("last30") > 0 || n("total") > 0 {
+            println!("  No matching device: 7d {}  30d {}  lifetime {}", n("last7"), n("last30"), n("total"));
+        }
+    } else if let Some(total) = me.pointer("/tokens/total").and_then(Value::as_u64) && total > assigned {
         println!("  {} lifetime tokens have no matching device record.", total - assigned);
     }
     Ok(())

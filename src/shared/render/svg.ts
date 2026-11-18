@@ -1,6 +1,7 @@
 import type { GitHubMetrics, Metrics, ProfileMetrics, ProfileStatus, TokenMetrics } from '../metrics.ts';
 import { clip, commas, compact, costLabel, hours, percent, providerName } from '../format.ts';
 import { WEEKDAYS } from '../time.ts';
+import { monthlyRecap, weeklyUsage } from '../insights.ts';
 
 type Palette = Record<
   'surface' | 'ink' | 'ink2' | 'muted' | 'grid' | 'axis' | 'ramp-low' | 'c1' | 'c2' | 'c3' | 'c4' | 'add' | 'del' | 'h0' | 'h1' | 'h2' | 'h3' | 'h4' | 'h5',
@@ -616,6 +617,40 @@ const contributionsSummary = (github: GitHubMetrics) =>
 
 const tokensSummary = (tokens: TokenMetrics) => `AI token usage: ${compact(tokens.total)} tokens.`;
 
+function weeklySection(tokens: TokenMetrics): Section {
+  const week = weeklyUsage(tokens);
+  const change = week.changePercent === null ? 'No tokens in the prior week'
+    : `${week.changePercent >= 0 ? '+' : ''}${week.changePercent.toFixed(1)}% from the prior week`;
+  let body = text(0, 22, 'Weekly AI usage', 'h1');
+  body += text(0, 68, `${compact(week.total)} tokens`, 'tile-value') + text(0, 91, change, 'note');
+  if (week.topIncrease) body += text(0, 116, `Largest increase · ${providerName(week.topIncrease.tool)} +${compact(week.topIncrease.tokens)}`, 'label');
+  const start = INNER - 320;
+  const peak = Math.max(1, ...week.days.map(day => day.total));
+  week.days.forEach((day, index) => {
+    const x = start + index * 46;
+    const height = day.total ? Math.max(2, 53 * day.total / peak) : 0;
+    body += barUp(x, 85, 30, height, 'c1', `${day.date} · ${commas(day.total)} tokens`);
+    body += text(x + 15, 105, day.date.slice(5), 'axis', 'middle');
+  });
+  return { height: 125, body };
+}
+
+function recapSection(metrics: Metrics): Section {
+  const recap = monthlyRecap(metrics);
+  let body = text(0, 22, `Monthly recap · ${recap.month}`, 'h1');
+  const figures = [['Dated AI tokens', recap.tokens], ['Commits', recap.commits], ['Pull requests', recap.pulls], ['Reviews', recap.reviews]] as const;
+  figures.forEach(([label, value], i) => {
+    const x = i * INNER / figures.length;
+    body += text(x, 70, value === null ? '—' : compact(value), 'tile-value') + text(x, 94, label, 'label');
+  });
+  return { height: 102, body };
+}
+
+function hasMonthlyRecap(metrics: Metrics): boolean {
+  const recap = monthlyRecap(metrics);
+  return [recap.tokens, recap.commits, recap.pulls, recap.reviews].some(value => value !== null);
+}
+
 const listed = (items: string[], empty: string) => (items.length ? `${items.join(', ')}.` : empty);
 
 function profileSummary({ profile }: Metrics): string {
@@ -633,15 +668,24 @@ function profileSummary({ profile }: Metrics): string {
  * so stacked parts line up and their text stays the same size.
  */
 type Component =
-  | { label: string; source: 'profile'; draw(metrics: Metrics): Section; summary(metrics: Metrics): string }
+  | { label: string; source: 'profile' | 'recap'; draw(metrics: Metrics): Section; summary(metrics: Metrics): string }
   | { label: string; source: 'github'; draw(github: GitHubMetrics, timezone: string): Section; summary(github: GitHubMetrics): string }
   | { label: string; source: 'tokens'; draw(tokens: TokenMetrics): Section; summary(tokens: TokenMetrics): string };
 
-export const COMPONENT_KEYS = ['profile', 'contributions', 'rhythm', 'languages', 'coauthors', 'churn', 'tokens', 'history'] as const;
+export const COMPONENT_KEYS = ['profile', 'weekly', 'recap', 'contributions', 'rhythm', 'languages', 'coauthors', 'churn', 'tokens', 'history'] as const;
 export type ComponentKey = (typeof COMPONENT_KEYS)[number];
 
 const COMPONENTS: Record<ComponentKey, Component> = {
   profile: { label: 'Profile', source: 'profile', draw: profileSection, summary: profileSummary },
+  weekly: { label: 'Weekly AI usage', source: 'tokens', draw: weeklySection, summary: tokens => `${commas(weeklyUsage(tokens).total)} tokens in the last seven days.` },
+  recap: {
+    label: 'Monthly recap', source: 'recap', draw: recapSection,
+    summary: metrics => {
+      const { month, tokens, commits, pulls, reviews } = monthlyRecap(metrics);
+      const count = (value: number | null) => value === null ? 'unavailable' : commas(value);
+      return `${month} · Dated AI tokens ${count(tokens)} · Commits ${count(commits)} · Pull requests ${count(pulls)} · Reviews ${count(reviews)}`;
+    },
+  },
   contributions: { label: 'Contributions', source: 'github', draw: (github) => headerSection(github), summary: contributionsSummary },
   rhythm: {
     label: 'Coding rhythm',
@@ -685,21 +729,27 @@ export const isComponentKey = (key: string): key is ComponentKey => Object.hasOw
 
 /** The parts that have data to draw, in dashboard order. */
 export function availableComponents(metrics: Metrics): { key: ComponentKey; label: string }[] {
-  return COMPONENT_KEYS.filter((key) => metrics[COMPONENTS[key].source]).map((key) => ({ key, label: COMPONENTS[key].label }));
+  return COMPONENT_KEYS.filter(key => {
+    const source = COMPONENTS[key].source;
+    return source === 'recap' ? hasMonthlyRecap(metrics) : metrics[source];
+  }).map(key => ({ key, label: COMPONENTS[key].label }));
 }
 
 /** One part of the dashboard. Without its data, it says so rather than leaving a broken image. */
 export function renderComponent(metrics: Metrics, key: ComponentKey, theme: Theme = DEFAULT_THEME): string {
   const component = COMPONENTS[key];
   const heading = `oh-my-stats: ${component.label}`;
-  if (component.source === 'profile') return frame(theme, heading, component.summary(metrics), [component.draw(metrics)], null);
+  if (component.source === 'profile' || (component.source === 'recap' && hasMonthlyRecap(metrics))) {
+    return frame(theme, heading, component.summary(metrics), [component.draw(metrics)], null);
+  }
   if (component.source === 'tokens' && metrics.tokens) {
     return frame(theme, heading, component.summary(metrics.tokens), [component.draw(metrics.tokens)], null);
   }
   if (component.source === 'github' && metrics.github) {
     return frame(theme, heading, component.summary(metrics.github), [component.draw(metrics.github, metrics.timezone)], null);
   }
-  const message = component.source === 'tokens' ? 'No AI token usage yet.' : 'No GitHub stats yet.';
+  const message = component.source === 'tokens' ? 'No AI token usage yet.'
+    : component.source === 'recap' ? 'No records for the previous calendar month.' : 'No GitHub stats yet.';
   return frame(theme, heading, message, [{ height: 36, body: text(0, 14, component.label, 'h1') + text(0, 32, message, 'note') }], null);
 }
 
@@ -707,6 +757,8 @@ export function renderDashboard(metrics: Metrics, theme: Theme = DEFAULT_THEME):
   const sections: Section[] = [profileSection(metrics)];
   const { github, tokens } = metrics;
 
+  if (tokens) sections.push(weeklySection(tokens));
+  if (hasMonthlyRecap(metrics)) sections.push(recapSection(metrics));
   if (github) {
     sections.push(headerSection(github, 'Contributions'), rhythmSection(github, metrics.timezone));
     const panelGap = 48;

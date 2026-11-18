@@ -112,6 +112,8 @@ Or show only the parts you want, in any order. Each part is its own image, as wi
 | Part | Shows |
 |---|---|
 | `profile` | Your name, role, company, location, status and bio, with when you started contributing, lifetime contributions, top languages and AI tokens |
+| `weekly` | Last seven days of AI tokens, change from the preceding seven days, largest provider increase and daily bars |
+| `recap` | Last complete calendar month’s dated AI tokens, commits, pull requests and reviews in one README card |
 | `contributions` | Contributions this year and lifetime, and commits, PRs, reviews and issues by month |
 | `rhythm` | When you contribute, by weekday and hour, and by time of day |
 | `languages` | Top languages by lines added, split by personal, organization, gist and other repos |
@@ -195,6 +197,10 @@ The website and CLI default to **All time**, using the lifetime token total show
 Rankings include input, output, cache reads and cache writes. Profiles with positive usage qualify, and equal totals share a rank (1, 1, 3). Setting a profile to private removes it from the public rankings immediately. Account-wide usage counts once in user and provider scores. A device receives credit for usage attributable to that device.
 
 ## Provider activity
+
+The dashboard and published profiles include a 60-day AI usage calendar. Select a day to see its exact token total and provider breakdown. The provider share table compares the previous calendar month with the current month to date in the profile timezone. The weekly card also appears in `oms status`. A missing comparison period has no percentage change.
+
+Signed-in users can compare lifetime and seven-day public positions on **My rankings**, including ranks below the top 100. Each rank shows the number of public profiles with positive usage in that period. The private device table shows account usage with no matching device for each window.
 
 Your dashboard, public token card and `oms status` compare the most recent seven calendar days (including today) with the preceding seven. Each provider also shows active days, logged responses and average tokens per logged response over 30 days. Weekly volumes use the same daily totals as the chart. Response averages use only tokens and response counts from local logs. The chart groups smaller providers under “Others” when more than four are present. The table lists every provider.
 
