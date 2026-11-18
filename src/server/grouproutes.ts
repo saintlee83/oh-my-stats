@@ -52,8 +52,8 @@ export async function groupGet(db: Db, viewer: UserRow | null, slug: string | nu
   if (!opened) return hidden(viewer);
   const { group, role, inviteCode } = opened;
   if (role === 'invited') {
-    // Joining belongs to an account, so signing in comes first.
-    if (!viewer) return { location: '/login' };
+    // Joining belongs to an account, so signing in comes first, and returns here.
+    if (!viewer) return { location: `/login?next=${encodeURIComponent(`${url.pathname}${url.search}`)}` };
     return { page: invitationPage(group, await memberCount(db, group.id), invite ?? '', viewer), status: 200 };
   }
   const period = rankingPeriod(url.searchParams.get('days'), now, true);

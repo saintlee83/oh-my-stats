@@ -57,8 +57,11 @@ const HOW_WE_COUNT: ReadingPage = {
 <p>Only default branches are walked, which matches how GitHub counts contributions. Line counts read the first 300 files of a commit, and a commit over 20,000 lines is treated as a bulk import.</p>`],
     ['rankings', 'Rankings', `<p>Rankings list published profiles only. Setting a profile to private removes it from them immediately.</p>
 <p>A profile is ranked when it has positive usage in the period. Equal totals share a place and the next place is skipped: 1, 1, 3.</p>
-<p>All time ranks lifetime totals, undated usage included. A period of days, such as the last 7 or 30, ranks dated usage through today’s date in UTC. Your dashboard’s own windows end today in your timezone, so the two can differ by a day.</p>
+<p>All time ranks lifetime totals, undated usage included. A period ranks dated usage: the last 7 or 30 days or this month, through today’s date in UTC, or the whole of last month. Your dashboard’s own windows end today in your timezone, so the two can differ by a day.</p>
 <p>Account-wide usage counts once in a profile’s score. Ranking by one provider counts that tool alone. On My rankings, a device is credited with the usage attributable to it, and only you see that table.</p>
+<p>Sorted by estimated cost, a profile is ranked by what its logged responses in the period would cost at public list prices. Only usage found in logs is priced, so the figure can be lower than the cost on the profile’s own page, and a model without a list price adds no cost.</p>
+<p>The providers board counts, for each tool the agent reads on its own, the published profiles that used it in the period, and their share of all ranked profiles. The models board does the same from logged responses, and lists a model only when it has a public list price. Both compare a period with the stretch right before it, and give a percentage only when that stretch had at least 25 profiles, because a percentage on a small base says little.</p>
+<p>A group’s board ranks its members by the same score as the public rankings.</p>
 <p>Rankings rest on what agents report. The server checks that an upload is well formed and within limits. It cannot check that the usage happened, so read a ranking as what profiles report, not as an audit.</p>`],
     ['freshness', 'How fresh it is', `<p>The agent reads new log lines every 5 minutes and uploads once a day, so numbers can be up to a day behind. A machine that was asleep or offline catches up when it comes back. Run <code>oms sync</code> to update right away.</p>
 <p>GitHub numbers are collected by one machine at a time, when it uploads and the last collection is more than six hours old. With the daily upload, that is once a day.</p>
@@ -107,6 +110,8 @@ const PRIVACY: ReadingPage = {
 <h3>GitHub aggregates</h3>
 <p>One set of numbers per account, worked out on a machine. Among them: commits, pull requests, reviews and issues by month and year, when in the week you commit, lines per language, lines added and removed, streaks, times to merge and review, and counts of stars, followers and organizations. It holds no repository names. With it comes your public GitHub profile: name, bio, company, location and status.</p>
 <p>It also counts who you co-author commits with. AI assistants are named. Bots are too, except a custom bot in a private repo, because its name can include an organization’s. People are named only if they have a GitHub account and co-authored in a public repo, counting those public commits only, or if you list them in the agent’s settings. Everyone else is an anonymous count.</p>
+<h3>Groups</h3>
+<p>For each group you start: its name, its description, whether it is public, its invite code and when it was made. For each group you are in: that you are a member, and since when.</p>
 <h3>Not about you</h3>
 <p>A copy of the public price list, and a note of when one of your machines last took the job of collecting GitHub stats.</p>`],
     ['public', 'What publishing makes public', `<p>Nothing is public until you publish. A private profile and a missing one give the same answer: not found.</p>
@@ -117,7 +122,7 @@ const PRIVACY: ReadingPage = {
     ['cookies', 'Cookies, scripts and trackers', `<p>This site sets two cookies, both only when you sign in on the website. A visitor who never signs in gets none.</p>
 <ul>
 <li><code>oms_session</code> keeps you signed in. It holds a random token, of which the server stores only a hash. It lasts 30 days, and signing out removes it.</li>
-<li><code>oms_state</code> is set when you start signing in and removed when you finish, or after 10 minutes. It lets the server check that GitHub’s answer belongs to the sign-in you started.</li>
+<li><code>oms_state</code> is set when you start signing in and removed when you finish, or after 10 minutes. It lets the server check that GitHub’s answer belongs to the sign-in you started, and, when you came from a group’s invite link, holds that address to return you to.</li>
 </ul>
 <p>Both are kept from scripts (<code>HttpOnly</code>) and travel only over HTTPS. With <code>SameSite=Lax</code>, another site can’t use them in a request of its own. They are sent from elsewhere only when you follow a link here.</p>
 <p>Pages run no scripts. Each page is sent with a content policy that forbids scripts, frames, fonts and requests to other sites, with one exception: images from GitHub’s avatar server. There is no analytics code, no advertising and no tracking pixel.</p>`],
@@ -133,13 +138,16 @@ const PRIVACY: ReadingPage = {
 <p>The server is built to run on Cloudflare Workers with a D1 database. Run that way, Cloudflare carries every request and holds the database, and like any host it sees the IP address a request comes from.</p>
 <p>The server’s own code stores no IP address. To slow down floods, it hands the host’s rate limiter that address, or your account’s id when a signed-in agent calls. When a request fails unexpectedly, it logs the page’s path and the error. This project’s deployment settings also turn on the host’s request logs and traces. What those hold, and for how long, is decided by the host and by whoever runs this server, not by this code.</p>
 <p>The server makes no other outside requests, and sends your data to nobody else.</p>`],
+    ['groups', 'What joining a group shows', `<p>Joining a group shows its members your GitHub username and your token total for each period its board covers, even while your profile is private. It shows no models, no day-by-day history and no machine names.</p>
+<p>A private group is shown to its members only. To anyone else it gives the same answer as a group that doesn’t exist. A public group can be opened by anyone and joined by any signed-in account; people outside it see only the members whose profiles are public.</p>
+<p>A group’s name and description are written by its owner and, for a public group, shown to everyone. When you leave a group, your totals stop showing there at once.</p>`],
     ['caching', 'Caching and unpublishing', `<p>Public pages and images are cached for 5 minutes, by the host and by browsers.</p>
 <p>When you unpublish or delete your account, everything public about you answers “not found” from then on. The server removes your pages, your images and your sitemap entry from the cache at the location that handled the request. Copies at other locations and in browsers can stay visible for up to five minutes.</p>
 <p>Copies that others made are beyond this server’s reach. A search engine’s index, or an image proxy such as the one GitHub uses for READMEs, keeps what it fetched by its own rules.</p>`],
     ['deleting', 'Removing your data', `<h3>A machine</h3>
 <p>On your dashboard, under Machines, choose Remove. Its usage, its lifetime figures and its sign-in are deleted from the database at once, and the agent on it is signed out at its next sync.</p>
 <h3>Your account</h3>
-<p>On your dashboard, under Account, choose “Delete my account and data” and type your GitHub username to confirm. Everything this server holds about the account is deleted at once: usage, lifetime figures, GitHub aggregates, machines, sign-ins and the account itself. This can’t be undone.</p>
+<p>On your dashboard, under Account, choose “Delete my account and data” and type your GitHub username to confirm. Everything this server holds about the account is deleted at once: usage, lifetime figures, GitHub aggregates, machines, sign-ins, your group memberships, the groups you own and the account itself. This can’t be undone.</p>
 <h3>What remains</h3>
 <p>A cached copy of a public page can show the old numbers for up to five minutes. Each machine keeps its local history, so <code>oms login</code> and <code>oms sync</code> bring your usage back. Signing a machine out with <code>oms logout</code> keeps both its local history and what it uploaded.</p>
 <p>This code makes no backups. Whether the host keeps recovery copies of the database, and for how long, is up to the host and to whoever runs this server.</p>`],

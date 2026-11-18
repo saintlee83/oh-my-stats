@@ -227,6 +227,35 @@ test('a group is handed only to those who may see it, and its invite code only t
   for (const invite of [null, '']) assert.equal(await seen(closed, '4', invite), null);
 });
 
+test('signing in from an invite link returns to it, and a sign-in link cannot send anyone elsewhere', async () => {
+  const { context, start, inviteOf } = await world();
+  const path = await start('octo', 'Friday pairing', 'private');
+  const invite = `${path}?invite=${inviteOf(path)}`;
+  /** Signs in through GitHub, having started at `/login` with this query, and says where it ends up. */
+  const landing = async (query: string) => {
+    const started = await context.call(`/login${query}`);
+    const state = new URL(started.headers.get('location') as string).searchParams.get('state');
+    const cookie = (started.headers.get('set-cookie') as string).split(';')[0];
+    const done = await context.call(`/auth/callback?code=good-code&state=${state}`, { headers: { cookie } });
+    assert.equal(done.status, 303, query);
+    assert.ok(done.headers.getSetCookie().some((value) => value.startsWith('oms_session=')), 'signed in either way');
+    return done.headers.get('location');
+  };
+  assert.equal(await landing(`?next=${encodeURIComponent(invite)}`), invite, 'back to the invitation');
+  assert.equal(await landing(''), '/me');
+  for (const next of ['https://evil.example/groups/x', '//evil.example/groups/x', '/\\evil.example/groups/x', '/me', '/login', '/groupsx', 'groups/x', `/groups/${'x'.repeat(300)}`, '%']) {
+    assert.equal(await landing(`?next=${encodeURIComponent(next)}`), '/me', `${next} is not followed`);
+  }
+
+  // The cookie is in the visitor's hands, so a forged one is checked the same way.
+  const started = await context.call('/login');
+  const state = new URL(started.headers.get('location') as string).searchParams.get('state');
+  for (const forged of ['https%3A%2F%2Fevil.example%2Fgroups%2Fx', '%2F%2Fevil.example', '%E0%A4%A']) {
+    const done = await context.call(`/auth/callback?code=good-code&state=${state}`, { headers: { cookie: `oms_state=${state}.${forged}` } });
+    assert.deepEqual([done.status, done.headers.get('location')], [303, '/me'], forged);
+  }
+});
+
 test('an invite link shows a signed-in visitor the name and a join button, and sends a signed-out one to sign in', async () => {
   const { get, post, page, start, count, inviteOf, usage } = await world();
   await usage('octo', { '2026-11-08': 4321 }, false);
@@ -245,7 +274,8 @@ test('an invite link shows a signed-in visitor the name and a join button, and s
   assert.doesNotMatch(html, /@octo|4,321|4\.3k|<table|og:image/, 'who is in it and what they used stay inside');
 
   const signedOut = await get(`${path}?invite=${code}`);
-  assert.deepEqual([signedOut.status, signedOut.headers.get('location'), signedOut.headers.get('cache-control')], [303, '/login', 'no-store']);
+  const back = `/login?next=${encodeURIComponent(`${path}?invite=${code}`)}`;
+  assert.deepEqual([signedOut.status, signedOut.headers.get('location'), signedOut.headers.get('cache-control')], [303, back, 'no-store']);
   assert.equal(await signedOut.text(), '', 'signed out, not even the name is shown');
   for (const who of [null, 'mallory'] as const) {
     assert.deepEqual(await told(await get(`${path}?invite=${code}x`, who)), await told(await get(`${missing}?invite=${code}x`, who)), 'a wrong code opens nothing');

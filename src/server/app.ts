@@ -494,24 +494,42 @@ async function serveProfile(login: string, request: Request, deps: Deps): Promis
 
 // Website sign-in.
 
+/**
+ * Where a sign-in returns to, when it began on a group's page: an invite link opened while
+ * signed out. Only an address on this site and under /groups/ is taken, so a sign-in link
+ * can't be made to send someone elsewhere.
+ */
+function returnPath(value: string | null, origin: string, encoded = false): string | null {
+  try {
+    if (value && encoded) value = decodeURIComponent(value);
+    if (!value || !value.startsWith('/') || value.length > 300) return null;
+    const target = new URL(value, origin);
+    return target.origin === origin && target.pathname.startsWith('/groups/') ? `${target.pathname}${target.search}` : null;
+  } catch {
+    return null;
+  }
+}
+
 async function startLogin(request: Request, deps: Deps): Promise<Response> {
   if (deps.allow && !(await deps.allow('strict', clientIp(request)))) return tooMany();
   if (!deps.githubClientId) return html(errorPage(503, 'GitHub sign-in is not configured on this server.', null), 503);
   const url = new URL(request.url);
   const state = randomToken('');
+  // The state cookie also carries where to return to, so no third cookie is needed.
+  const next = returnPath(url.searchParams.get('next'), url.origin);
   const authorize = new URL('https://github.com/login/oauth/authorize');
   authorize.searchParams.set('client_id', deps.githubClientId);
   authorize.searchParams.set('redirect_uri', `${url.origin}/auth/callback`);
   authorize.searchParams.set('scope', 'read:user');
   authorize.searchParams.set('state', state);
-  return redirect(authorize.toString(), { 'set-cookie': cookie(request, STATE_COOKIE, state, 600) });
+  return redirect(authorize.toString(), { 'set-cookie': cookie(request, STATE_COOKIE, next ? `${state}.${encodeURIComponent(next)}` : state, 600) });
 }
 
 async function finishLogin(request: Request, deps: Deps): Promise<Response> {
   const url = new URL(request.url);
   const code = url.searchParams.get('code');
   const state = url.searchParams.get('state');
-  const expected = readCookie(request, STATE_COOKIE);
+  const [expected, next] = (readCookie(request, STATE_COOKIE) ?? '').split('.');
   if (!code || !state || !expected || !(await safeEqual(state, expected))) {
     return html(errorPage(400, 'That sign-in link expired. Please try again.', null), 400);
   }
@@ -521,7 +539,9 @@ async function finishLogin(request: Request, deps: Deps): Promise<Response> {
   const token = randomToken('omsw_');
   const expires = new Date(now.getTime() + WEB_SESSION_SECONDS * 1000).toISOString();
   await createSession(deps.db, await hashToken(token), user.id, 'web', null, expires, now.toISOString());
-  const headers = new Headers({ location: '/me', 'cache-control': 'no-store' });
+  // The cookie is the browser's to send, so what it says is checked again before it is followed.
+  const location = returnPath(next ?? null, url.origin, true) ?? '/me';
+  const headers = new Headers({ location, 'cache-control': 'no-store' });
   headers.append('set-cookie', cookie(request, SESSION_COOKIE, token, WEB_SESSION_SECONDS));
   headers.append('set-cookie', cookie(request, STATE_COOKIE, '', 0));
   return new Response(null, { status: 303, headers });

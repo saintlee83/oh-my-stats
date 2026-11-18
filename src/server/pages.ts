@@ -86,7 +86,7 @@ ${preview}
 </head>
 <body>
 <a class="skip" href="#main">Skip to content</a>
-<header class="top"><div class="bar"><a class="brand" href="/"><img src="/favicon.svg" alt="" width="26" height="26">${SITE}</a><nav class="links" aria-label="Main navigation"><a href="/rankings">Rankings</a>${account}</nav></div></header>
+<header class="top"><div class="bar"><a class="brand" href="/"><img src="/favicon.svg" alt="" width="26" height="26">${SITE}</a><nav class="links" aria-label="Main navigation"><a href="/rankings">Rankings</a><a href="/groups">Groups</a>${account}</nav></div></header>
 <main id="main"${page.bleed ? ' class="bleed"' : ''}>${body}</main>
 <footer class="bottom"><div class="bar"><p>${SITE} is open source, under the MIT license.</p><nav aria-label="Footer"><a href="/rankings">Rankings</a><a href="/how-we-count">How we count</a><a href="${REPO_URL}#get-started">Install</a><a href="/privacy">Privacy</a><a href="/terms">Terms</a><a href="${REPO_URL}">GitHub</a></nav></div></footer>
 </body>
