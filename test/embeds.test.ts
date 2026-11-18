@@ -257,10 +257,10 @@ test('the year in review shows this year once it has usage, and the latest year 
     return [/>(\d+) in review<\/text>/.exec(await response.text())?.[1], response.headers.get('cache-control')];
   };
   assert.deepEqual(await review(), ['2026', SHARED]);
-  assert.deepEqual(await review('?year=2025'), ['2025', SHARED]);
-  assert.deepEqual(await review('?year=2026'), ['2026', SHARED]);
+  assert.deepEqual(await review('?year=2025'), ['2025', 'no-store'], 'a named year is drawn on request and not kept');
+  assert.deepEqual(await review('?year=2026'), ['2026', 'no-store']);
   for (const query of ['?year=2024', '?year=2027', '?year=1999', '?year=2999']) {
-    assert.deepEqual(await review(query), ['2026', 'no-store'], `${query} has no usage, so it gets the default and is not kept under its own address`);
+    assert.deepEqual(await review(query), ['2026', 'no-store'], `${query} has no usage, so it gets the default`);
   }
   for (const query of ['?year=', '?year=abcd', '?year=20255', '?year=25', '?year=2025.0', '?year=-2025', '?year=0x7E9', '?year=%202025', '?Year=2025']) {
     assert.deepEqual(await review(query), ['2026', SHARED], `${query} is not a year, so it is the default`);
@@ -271,7 +271,7 @@ test('the year in review shows this year once it has usage, and the latest year 
   assert.deepEqual(await review(), ['2026', SHARED], 'nothing in 2027 yet');
   await context.call('/v1/usage', api(token, 'PUT', upload(MACHINE_A, '2027-01-01')));
   assert.deepEqual(await review(), ['2027', SHARED]);
-  assert.deepEqual(await review('?year=2026'), ['2026', SHARED], 'a year stays on show by its name');
+  assert.deepEqual(await review('?year=2026'), ['2026', 'no-store'], 'a year stays on show by its name');
 });
 
 test('the review picks the year asked for only when it has usage', () => {
@@ -391,8 +391,7 @@ test('each image has one cached copy per choice it offers, however its address i
     ['/u/octo/card.svg?graph=1'],
     ['/u/octo/card.svg?graph=1&theme=tokyo-night', '/u/octo/card.svg?theme=TokyoNight&x=y&graph=1'],
     ['/u/octo/components/year.svg', '/u/octo/components/year.svg?year=abcd', '/u/octo/components/year.svg?year=20261', '/u/octo/components/year.svg?v=3&graph=1'],
-    ['/u/octo/components/year.svg?year=2025', '/u/octo/components/year.svg?x=1&year=2025', '/u/OCTO/components/year.svg?year=2025&year=2026'],
-    ['/u/octo/components/year.svg?year=2025&theme=tokyo-night', '/u/octo/components/year.svg?theme=tokyonight&year=2025'],
+    ['/u/octo/components/year.svg?theme=tokyo-night', '/u/OCTO/components/year.svg?x=1&theme=TokyoNight'],
   ];
   for (const [index, [first, ...others]] of groups.entries()) {
     const body = await (await context.call(first)).text();
@@ -401,26 +400,23 @@ test('each image has one cached copy per choice it offers, however its address i
     assert.equal(db.sql.length, reads, `${first}: other spellings come from its copy`);
     assert.equal(cache.store.size, index + 1, first);
   }
-  // A year with no review draws the default one, and leaves no copy of it under its own address.
-  assert.equal((await context.call('/u/octo/components/year.svg?year=2024')).status, 200);
+  // A named year is drawn each time, with or without usage in it, and leaves no copy.
+  for (const query of ['?year=2025', '?year=2026', '?year=2024', '?year=2025&theme=tokyo-night']) {
+    assert.equal((await context.call(`/u/octo/components/year.svg${query}`)).status, 200, query);
+  }
   assert.deepEqual([...cache.store.keys()].sort(), [
     'badge.svg', 'badge.svg?metric=rank', 'card.svg', 'card.svg?graph=1', 'card.svg?graph=1&theme=tokyo-night',
-    'components/year.svg', 'components/year.svg?theme=tokyo-night&year=2025', 'components/year.svg?year=2025',
+    'components/year.svg', 'components/year.svg?theme=tokyo-night',
   ].map((image) => `${ORIGIN}/u/octo/${image}`));
 });
 
-test('making a profile private removes every copy of the badge, the card and each year in review', async () => {
+test('making a profile private removes every copy of the badge, the card and the year in review', async () => {
   const cache = fakeCache();
   const { context, token } = await publishedWithGitHub({ cache });
-  // The profile is in Seoul, already in the last year a review is kept for: the one after this one in UTC.
-  context.setTime('2026-12-31T16:00:00Z');
-  const years = [2020, 2021, 2022, 2023, 2024, 2025, 2026, 2027];
-  const days = Object.fromEntries(years.map((year) => [`${year}-01-01`, { 'claude/claude-opus-5-5': [1, 2, 3, 4, 5] }]));
-  assert.equal((await context.call('/v1/usage', api(token, 'PUT', { ...upload(MACHINE_A), days }))).status, 200);
   const paths = [
     ...BADGE_METRICS.map((metric) => `/u/octo/badge.svg?metric=${metric}`),
     ...THEME_NAMES.flatMap((theme) => [`/u/octo/card.svg?theme=${theme}`, `/u/octo/card.svg?theme=${theme}&graph=1`]),
-    ...THEME_NAMES.flatMap((theme) => [`/u/octo/components/year.svg?theme=${theme}`, ...years.map((year) => `/u/octo/components/year.svg?theme=${theme}&year=${year}`)]),
+    ...THEME_NAMES.map((theme) => `/u/octo/components/year.svg?theme=${theme}`),
   ];
   for (const path of paths) {
     const response = await context.call(path);
@@ -430,48 +426,45 @@ test('making a profile private removes every copy of the badge, the card and eac
   assert.equal(cache.store.size, paths.length, 'every one of them is a copy of its own');
   await context.call('/v1/me', api(token, 'PATCH', { public: false }));
   assert.deepEqual([...cache.store.keys()], [], 'none is left');
-  for (const path of paths) assert.equal((await context.call(path)).status, 404, path);
+  for (const path of [...paths, '/u/octo/components/year.svg?year=2026']) assert.equal((await context.call(path)).status, 404, path);
 });
 
-test('a review of a year that could not be removed from the cache later is drawn, but never kept there', async () => {
-  const cache = fakeCache();
-  const { context, token } = await published({ cache });
-  // A tool's own daily figures can carry any date, unlike a logged day.
-  const totals = { codex: { scope: 'account', total: 900, asOf: '2026-11-08', daily: { '2019-05-05': 400, '2031-01-01': 500 } } };
-  await context.call('/v1/usage', api(token, 'PUT', { ...upload(MACHINE_A), totals }));
-  for (const year of [2019, 2031]) {
-    const response = await context.call(`/u/octo/components/year.svg?year=${year}`);
-    assert.ok((await response.text()).includes(`>${year} in review</text>`), 'it has usage, so it is the year drawn');
-    assert.equal(response.headers.get('cache-control'), 'no-store', `${year} is outside the years a review is kept for`);
-  }
-  assert.equal(cache.store.size, 0);
-  assert.equal((await context.call('/u/octo/components/year.svg')).headers.get('cache-control'), SHARED);
-  assert.equal((await context.call('/u/octo/components/year.svg?year=2026')).headers.get('cache-control'), SHARED);
-  assert.equal(cache.store.size, 2);
-});
-
-test('a cache that allows only 50 calls still lets a profile go private, and loses the likeliest copies first', async (t) => {
+test('going private takes few enough cache calls for the smallest plan, and still succeeds if one fails', async (t) => {
   const cache = fakeCache();
   let calls = 0;
-  const limited = {
+  let failing = false;
+  const counted = {
     ...cache,
     delete: async (request: Request) => {
-      if (++calls > 50) throw new Error('Too many subrequests.');
+      calls += 1;
+      if (failing && request.url.endsWith('/badge.svg')) throw new Error('Too many subrequests.');
       return cache.delete(request);
     },
   };
-  const { context, token } = await published({ cache: limited });
-  await context.call('/v1/usage', api(token, 'PUT', upload(MACHINE_A, '2020-06-01')));
-  const kept = ['/u/octo', '/u/octo/dashboard.svg', '/u/octo/badge.svg?metric=rank', '/u/octo/card.svg?graph=1&theme=tokyo-night',
-    '/u/octo/cards/tokens.txt', '/u/octo/components/tokens.svg', '/u/octo/components/year.svg', '/u/octo/components/year.svg?year=2026'];
-  for (const path of [...kept, '/u/octo/components/year.svg?year=2020']) assert.equal((await context.call(path)).headers.get('cache-control'), SHARED, path);
-  const logged = t.mock.method(console, 'error', () => {});
+  const { context, token } = await publishedWithGitHub({ cache: counted });
+  const everything = async () => {
+    const paths = ['/u/octo', '/u/octo/dashboard.svg', '/u/octo/og.png', '/u/octo/badge.svg', '/u/octo/badge.svg?metric=rank', '/u/octo/card.svg?graph=1&theme=tokyo-night',
+      '/u/octo/components/tokens.svg', '/u/octo/components/year.svg', '/sitemap.xml', '/'];
+    for (const path of paths) assert.equal((await context.call(path)).status, 200, path);
+    assert.equal((await context.call('/u/octo/cards/tokens.txt')).headers.get('cache-control'), 'no-store', 'a text card is not kept, so it needs no removing');
+  };
 
+  await everything();
+  assert.ok(cache.store.size >= 10);
+  assert.equal((await context.call('/v1/me', api(token, 'PATCH', { public: false }))).status, 200);
+  assert.deepEqual([...cache.store.keys()], [], 'every copy that was kept is gone');
+  // A request on the free plan may make 50 calls to the cache and the database together.
+  assert.ok(calls <= 40, `${calls} cache calls leave too little room for the database`);
+
+  await context.call('/v1/me', api(token, 'PATCH', { public: true }));
+  await everything();
+  failing = true;
+  const logged = t.mock.method(console, 'error', () => {});
   const response = await context.call('/v1/me', api(token, 'PATCH', { public: false }));
-  assert.equal(response.status, 200, 'the profile is private already, so a full cache call budget is not an error');
-  assert.deepEqual([...cache.store.keys()], [`${ORIGIN}/u/octo/components/year.svg?year=2020`], 'only a review of a long past year is left to expire');
+  assert.equal(response.status, 200, 'the profile is private already, so a copy that would not go is not an error');
+  assert.deepEqual([...cache.store.keys()], [`${ORIGIN}/u/octo/badge.svg`], 'only that copy is left, to expire');
   assert.match(String(logged.mock.calls[0]?.arguments[0]), /profile cache purge incomplete/);
-  assert.equal((await context.call('/u/octo/components/year.svg?year=2021')).status, 404, 'and nothing is drawn for it again');
+  assert.equal((await context.call('/u/octo/badge.svg?metric=cost')).status, 404, 'and nothing new is drawn for it');
 });
 
 test('the badge, the card and the year in review never show machine names or ids', async () => {

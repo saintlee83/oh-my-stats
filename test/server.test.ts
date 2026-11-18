@@ -413,17 +413,18 @@ test('making a profile private removes it from the cache', async () => {
     '/u/octo',
     '/u/octo/dashboard.svg',
     '/u/octo/dashboard.svg?theme=tokyo-night',
-    '/u/octo/cards/tokens.txt',
     '/u/octo/components/tokens.svg',
     '/u/octo/components/tokens.svg?theme=tokyonight',
   ];
-  for (const path of paths) {
+  // A text card is drawn each time it is asked for, so there is no copy of it to remove.
+  const uncached = '/u/octo/cards/tokens.txt';
+  for (const path of [...paths, uncached]) {
     assert.equal((await context.call(path)).status, 200, path);
   }
   assert.equal(cache.store.size, paths.length);
   await context.call('/v1/me', api(token, 'PATCH', { public: false }));
   assert.equal(cache.store.size, 0);
-  for (const path of paths) {
+  for (const path of [...paths, uncached]) {
     assert.equal((await context.call(path)).status, 404, path);
   }
 });

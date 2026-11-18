@@ -266,17 +266,6 @@ const yearAsked = (query: URLSearchParams) => {
   return /^[12]\d{3}$/.test(value) ? Number(value) : null;
 };
 
-/** Uploads are refused for days before this year, so no real review reaches further back. */
-const FIRST_REVIEW_YEAR = 2020;
-
-/**
- * The years whose review is kept in the cache under its own address, through next year,
- * which a profile ahead of UTC reaches first. The list is short and known without reading
- * a profile, so making one private can remove every copy.
- */
-const reviewYears = (now: Date) =>
-  Array.from({ length: now.getUTCFullYear() + 2 - FIRST_REVIEW_YEAR }, (_, index) => FIRST_REVIEW_YEAR + index);
-
 /**
  * Query strings and letter case can't be used to get around the cache. An image keeps only
  * the choices it offers, each written one way and in one order, so there is one copy per
@@ -351,9 +340,12 @@ async function landingBoard(origin: string, deps: Deps): Promise<LandingBoard> {
 /**
  * Removes a profile from this location's cache. Other locations let it expire, so a page
  * made private can stay visible there for up to five minutes.
- * A request may make only so many cache calls, 50 on Cloudflare's free plan. So the copies
- * most likely to exist go first, and one that can't be removed is left to expire like those
- * elsewhere, rather than failing the request that already made the profile private.
+ * A request may make only so many calls to the cache and the database together, 50 on
+ * Cloudflare's free plan, and this list is most of them. So only what is kept under an
+ * address known without reading the profile is cached at all: text cards and a review of
+ * a named year are drawn on request instead. If a copy still can't be removed, it is left
+ * to expire like those elsewhere, rather than failing the request that already made the
+ * profile private.
  */
 async function purgeProfile(request: Request, deps: Deps, login: string): Promise<void> {
   const { cache } = deps;
@@ -369,8 +361,6 @@ async function purgeProfile(request: Request, deps: Deps, login: string): Promis
     ...BADGE_METRICS.map((metric) => badgeAddress(`${base}/badge.svg`, metric)),
     ...THEME_NAMES.flatMap((theme) => [false, true].map((graph) => cardAddress(`${base}/card.svg`, theme, graph))),
     ...images.flatMap((image) => THEME_NAMES.map((theme) => themed(image, theme))),
-    ...CARD_KEYS.map((key) => `${base}/cards/${key}.txt`),
-    ...reviewYears(deps.now()).reverse().flatMap((year) => THEME_NAMES.map((theme) => reviewAddress(`${base}/components/year.svg`, theme, year))),
   ];
   const removals = await Promise.allSettled(urls.map(async (url) => cache.delete(new Request(url))));
   const failed = removals.filter((removal) => removal.status === 'rejected').length;
@@ -421,10 +411,9 @@ async function serveComponentSvg(login: string, key: string, theme: Theme, origi
   if (!user) return svgNotFound();
   const { metrics } = await buildMetrics(user, deps);
   const drawn = key === 'profile' ? await withAvatar(metrics, user, origin, deps) : metrics;
-  // A year without a review gets the default one instead. That copy isn't kept under the
-  // year's address, and neither is a year purgeProfile wouldn't know to remove.
-  const kept = year === null || (reviewYear(metrics, year) === year && reviewYears(deps.now()).includes(year));
-  return svg(renderComponent(drawn, key, theme, year), kept && availableComponents(metrics).some((item) => item.key === key));
+  // A review of a named year is drawn each time: one copy per year a person could name
+  // would be more than making a profile private could remove.
+  return svg(renderComponent(drawn, key, theme, year), year === null && availableComponents(metrics).some((item) => item.key === key));
 }
 
 /** The place on the lifetime public board, which the profile page shows too. */
@@ -456,8 +445,9 @@ async function serveCard(login: string, key: string, deps: Deps): Promise<Respon
   const { metrics } = await buildMetrics(user, deps);
   const card = buildCards(metrics).find((item: Card) => item.key === key);
   if (!card) return notFound();
+  // Text cards are read by people now and then, not embedded anywhere, so they aren't kept.
   return new Response(cardContent(card, metrics.generatedDate), {
-    headers: { 'content-type': 'text/plain; charset=utf-8', 'cache-control': hasData(metrics) ? PUBLIC_CACHE : 'no-store', 'x-content-type-options': 'nosniff' },
+    headers: { 'content-type': 'text/plain; charset=utf-8', 'cache-control': 'no-store', 'x-content-type-options': 'nosniff' },
   });
 }
 
