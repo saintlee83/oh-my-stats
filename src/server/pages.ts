@@ -84,13 +84,13 @@ function layout(title: string, body: string, viewer: UserRow | null): string {
 `;
 }
 
-function rankingTable(title: string, column: string, rows: Standing[], profiles = false): string {
+function rankingTable(title: string, column: string, rows: Standing[], tokenColumn: string, profiles = false): string {
   const body = rows.map(row => {
     const label = profiles ? `<a href="/u/${esc(encodeURIComponent(row.label))}">@${esc(row.label)}</a>` : esc(row.label);
     return `<tr><td>${row.rank}</td><td>${label}</td><td class="num">${commas(row.tokens)}</td></tr>`;
   }).join('');
   return `<section class="panel"><h2>${title}</h2>${rows.length
-    ? `<div class="table"><table><thead><tr><th>Rank</th><th>${column}</th><th class="num">Tokens</th></tr></thead><tbody>${body}</tbody></table></div>`
+    ? `<div class="table"><table><thead><tr><th>Rank</th><th>${column}</th><th class="num">${tokenColumn}</th></tr></thead><tbody>${body}</tbody></table></div>`
     : '<p>No token usage for this period.</p>'}</section>`;
 }
 
@@ -98,13 +98,15 @@ export function rankingsPage(period: RankingPeriod, data: Standing[] | PersonalR
   const isPublic = Array.isArray(data);
   const path = isPublic ? '/rankings' : '/me/rankings';
   const title = isPublic ? 'Public token rankings' : 'My token rankings';
-  const periods = [7, 30].map(days => `<a href="${path}?days=${days}"${period.days === days ? ' aria-current="page"' : ''}>Last ${days} days</a>`).join('');
+  const periods = (['all', 7, 30] as const).map(days =>
+    `<a href="${path}?days=${days}"${period.days === days ? ' aria-current="page"' : ''}>${days === 'all' ? 'All time' : `Last ${days} days`}</a>`).join('');
   const other = isPublic ? (viewer ? `<a href="/me/rankings?days=${period.days}">My rankings</a>` : '') : `<a href="/rankings?days=${period.days}">Public rankings</a>`;
-  const tables = isPublic ? rankingTable('Top 100 public profiles', 'GitHub user', data, true)
-    : rankingTable('My devices', 'Device', data.machines) + rankingTable('My providers', 'Provider', data.providers);
+  const tokenColumn = period.days === 'all' ? 'Lifetime tokens' : `Tokens (${period.days} days)`;
+  const tables = isPublic ? rankingTable('Top 100 public profiles', 'GitHub user', data, tokenColumn, true)
+    : rankingTable('My devices', 'Device', data.machines, tokenColumn) + rankingTable('My providers', 'Provider', data.providers, tokenColumn);
   return layout(title, `<h1>${title}</h1>
 <nav class="links" aria-label="Ranking periods and views">${periods}${other}</nav>
-<p class="muted">${period.start} through ${period.end} · Reporting dates through today in UTC.</p>
+${period.days === 'all' ? '' : `<p class="muted">${period.start} through ${period.end} · Reporting dates through today in UTC.</p>`}
 ${tables}${isPublic ? '' : '<p class="muted">Device scores cover usage attributable to individual machines. Provider scores also include account-wide usage.</p>'}`, viewer);
 }
 

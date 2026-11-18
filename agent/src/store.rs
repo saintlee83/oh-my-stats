@@ -228,6 +228,17 @@ impl Store {
         Ok(())
     }
 
+    /// One foreground command checks for a release per day, even when several start together.
+    pub fn claim_update_check(&self, now: i64) -> Result<bool> {
+        let changed = self.conn.execute(
+            "INSERT INTO kv (key, value) VALUES ('updates:checked_at', ?1)
+             ON CONFLICT (key) DO UPDATE SET value = excluded.value
+             WHERE CAST(kv.value AS INTEGER) <= ?2 OR CAST(kv.value AS INTEGER) > ?1",
+            params![now, now - 86_400],
+        )?;
+        Ok(changed > 0)
+    }
+
     pub fn churn_for(&self, oid: &str) -> Result<Option<String>> {
         Ok(self.conn.query_row("SELECT data FROM churn WHERE oid = ?1", [oid], |row| row.get(0)).optional()?)
     }

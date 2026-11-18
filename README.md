@@ -76,6 +76,8 @@ Repeat this on each computer. On Windows, `oms service install` adds the agent t
 
 To update, run the install command again. If the agent runs in the background, it restarts on the new version. Set `OMS_VERSION` to install a particular release, such as `v0.1.0`, or `OMS_INSTALL_DIR` to put `oms` somewhere else.
 
+When you run `oms status`, `oms sync`, or `oms rankings` in a terminal, the agent checks GitHub for a newer stable release up to once a day. If one is available, it shows the update command for the current installation. Set `OMS_NO_UPDATE_CHECK=1` to turn off these notices and checks.
+
 Every file in a release has build provenance from GitHub Actions. To check a download, run `gh attestation verify <file> --repo saintlee83/oh-my-stats`.
 
 ### Build from source
@@ -134,7 +136,7 @@ Images follow the viewer's light or dark mode. By default they use GitHub's colo
 oms login                 Sign this machine in with GitHub
 oms logout                Sign this machine out, keeping its local history
 oms status                Show sign-in, totals and machines
-oms rankings               Show the public, device and provider token rankings (7 days)
+oms rankings               Show the public, device and provider rankings by lifetime tokens
 oms rankings --days 30     Compare the last 30 reporting dates
 oms sync                  Read new logs and upload what changed, right now
 oms sync --github         Also collect GitHub stats now
@@ -188,7 +190,9 @@ A machine's id comes from its hardware, so reinstalling doesn't register it twic
 
 Open **Rankings** (`/rankings`) to see the top 100 published profiles by token usage. **My rankings** (`/me/rankings`) shows your devices and providers, including when your profile is private. A signed-in agent can show all three tables with `oms rankings`.
 
-Choose the last 7 or 30 reporting dates. Each range ends on today's UTC date and uses the dates attached to uploaded usage. It includes input, output, cache reads and cache writes. Profiles with positive usage qualify, and equal totals share a rank (1, 1, 3). Setting a profile to private removes it from the public rankings immediately. Account-wide usage counts once in user and provider scores. A device receives credit for usage attributable to that device.
+The website and CLI default to **All time**, using the lifetime token total shown by `oms status`. Choose **Last 7 days** or **Last 30 days** (CLI `--days 7` or `--days 30`) to rank dated usage through today's UTC date. API clients can request lifetime totals with `GET /v1/rankings?days=all`. Omitting `days` on the v1 API keeps its seven-day default.
+
+Rankings include input, output, cache reads and cache writes. Profiles with positive usage qualify, and equal totals share a rank (1, 1, 3). Setting a profile to private removes it from the public rankings immediately. Account-wide usage counts once in user and provider scores. A device receives credit for usage attributable to that device.
 
 ## Provider activity
 

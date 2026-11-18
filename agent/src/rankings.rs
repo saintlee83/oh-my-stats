@@ -12,8 +12,8 @@ struct Standing {
 
 #[derive(Deserialize)]
 struct Period {
-    start: String,
-    end: String,
+    start: Option<String>,
+    end: Option<String>,
 }
 
 #[derive(Deserialize)]
@@ -29,10 +29,10 @@ pub fn show(days: &str) -> Result<()> {
     let response = api.get(&format!("/v1/rankings?days={days}"))?;
     let rankings: Rankings =
         serde_json::from_value(response).context("Invalid rankings response")?;
-    println!(
-        "Token rankings   {} through {} (UTC)",
-        rankings.period.start, rankings.period.end
-    );
+    match (rankings.period.start, rankings.period.end) {
+        (Some(start), Some(end)) => println!("Token rankings   {start} through {end} (UTC)"),
+        _ => println!("Token rankings   All time"),
+    }
     for (title, rows) in [
         ("Top public profiles", rankings.users),
         ("My devices", rankings.machines),

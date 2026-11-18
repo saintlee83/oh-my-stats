@@ -1075,6 +1075,12 @@ test('rankings reconcile tool figures, respect visibility, and keep device and p
   assert.deepEqual(week.users, [row(1, 'alpha', 123), row(1, 'octo', 123), row(3, 'beta', 21)]);
   assert.deepEqual(week.machines, [row(1, 'office-laptop', 44), row(2, 'studio-mac', 11)]);
   assert.deepEqual(week.providers, [row(1, 'Codex', 95), row(2, 'Claude Code', 22), row(3, 'Pi', 6)]);
+  const lifetime = await get(a, '?days=all');
+  const me = await (await context.call('/v1/me', api(a, 'GET'))).json() as { tokens: { total: number } };
+  assert.deepEqual(lifetime.period, { days: 'all', start: null, end: null });
+  assert.deepEqual(lifetime.users, [row(1, 'octo', me.tokens.total), row(2, 'alpha', 123), row(3, 'beta', 21)]);
+  assert.deepEqual(lifetime.providers, [row(1, 'Pi', 1045), row(2, 'Codex', 1009), row(3, 'Claude Code', 22)]);
+  assert.deepEqual(lifetime.machines, [row(1, 'office-laptop', 1083), row(2, 'studio-mac', 11)]);
   const month = await get(a, '?days=30');
   assert.deepEqual(month.users[0], row(1, 'octo', 163));
   assert.deepEqual(month.providers[1], row(2, 'Pi', 46));
@@ -1084,6 +1090,9 @@ test('rankings reconcile tool figures, respect visibility, and keep device and p
   const board = await context.call('/rankings');
   assert.equal(board.headers.get('cache-control'), 'no-store');
   const html = await board.text();
+  assert.match(html, /aria-current="page">All time/);
+  assert.match(html, /Lifetime tokens/);
+  assert.match(html, />2,076</);
   assert.match(html, /href="\/u\/octo"/);
   assert.doesNotMatch(html, /office-laptop|studio-mac|beta-device|secret-user/);
   const signedOut = await context.call('/me/rankings');
@@ -1091,12 +1100,43 @@ test('rankings reconcile tool figures, respect visibility, and keep device and p
   const cookie = await webLogin(context);
   const privatePage = await context.call('/me/rankings?days=30', { headers: { cookie } });
   assert.equal(privatePage.headers.get('cache-control'), 'no-store');
-  assert.match(await privatePage.text(), /office-laptop[\s\S]+studio-mac[\s\S]+My providers/);
+  const privateHtml = await privatePage.text();
+  assert.match(privateHtml, /Tokens \(30 days\)/);
+  assert.match(privateHtml, /office-laptop[\s\S]+studio-mac[\s\S]+My providers/);
+  assert.match(await (await context.call('/me/rankings', { headers: { cookie } })).text(), />1,083</);
   await context.call('/v1/me', api(a, 'PATCH', { public: false }));
   assert.doesNotMatch(await (await context.call('/rankings')).text(), /href="\/u\/octo"/);
   assert.deepEqual((await get(a)).machines, week.machines, 'private owners keep their own rankings');
   await context.call('/me/machines/' + MACHINE_B + '/delete', webPost(cookie, ''));
   assert.deepEqual((await get(a)).machines, [row(1, 'office-laptop', 44)]);
+});
+
+test('a profile can rank on lifetime figures even when it has no recent usage', async () => {
+  const context = app();
+  const token = await signIn(context);
+  const uploadResult = await context.call('/v1/usage', api(token, 'PUT', {
+    ...upload(MACHINE_A),
+    days: {
+      '2024-06-01': { 'claude/a': [9, 0, 1, 0, 1] },
+      '2024-06-02': { 'claude/b': [1, 2, 3, 4, 1] },
+    },
+    totals: {
+      claude: { scope: 'machine', total: 20, asOf: '2024-06-01', models: { a: [1, 0, 0, 0], b: [3, 5, 4, 3] } },
+      codex: { scope: 'account', total: 99, asOf: null },
+    },
+  }));
+  assert.equal(uploadResult.status, 200);
+  await context.call('/v1/me', api(token, 'PATCH', { public: true }));
+  const me = await (await context.call('/v1/me', api(token, 'GET'))).json() as { tokens: { total: number } };
+  const lifetime = await (await context.call('/v1/rankings?days=all', api(token, 'GET'))).json();
+  assert.equal(me.tokens.total, 134);
+  assert.deepEqual(lifetime, {
+    period: { days: 'all', start: null, end: null },
+    users: [{ rank: 1, label: 'octo', tokens: me.tokens.total }],
+    providers: [{ rank: 1, label: 'Codex', tokens: 99 }, { rank: 2, label: 'Claude Code', tokens: 35 }],
+    machines: [{ rank: 1, label: SECRET_NAME, tokens: 35 }],
+  });
+  assert.match(await (await context.call('/rankings?days=30')).text(), /No token usage for this period/);
 });
 
 test('empty ranking pages, invalid periods, and access limits', async () => {
@@ -1128,11 +1168,14 @@ test('public rankings limit tied profiles deterministically and use the latest c
   const { publicRankings, rankingPeriod } = await import('../src/server/rankings.ts');
   const { computeTokens } = await import('../src/shared/tokens.ts');
   const { loadUsage } = await import('../src/server/db.ts');
-  const period = rankingPeriod(null, context.deps.now());
+  const period = rankingPeriod('7', context.deps.now());
   const board = await publicRankings(db, period);
   const dashboard = computeTokens(await loadUsage(db, '1'), {}, 'UTC', context.deps.now(), null)!;
   assert.deepEqual(board[0], { rank: 1, label: 'member-001', tokens: 100 });
   assert.equal(board[0].tokens, dashboard.tools[0].activity.last7);
   assert.equal(board.length, 100);
   assert.deepEqual(board.at(-1), { rank: 2, label: 'member-100', tokens: 25 });
+  const lifetime = await publicRankings(db, rankingPeriod(null, context.deps.now()));
+  assert.equal(lifetime[0].tokens, dashboard.total);
+  assert.deepEqual(lifetime.slice(1), board.slice(1));
 });

@@ -487,7 +487,8 @@ async function handleApi(request: Request, path: string, deps: Deps): Promise<Re
   const kind = request.method === 'GET' ? 'public' : 'strict';
   if (deps.allow && !(await deps.allow(kind, `agent:${session.user_id}`))) return json({ error: 'Too many requests. Try again in a minute.' }, 429);
   if (path === '/v1/rankings' && request.method === 'GET') {
-    const period = rankingPeriod(new URL(request.url).searchParams.get('days'), now);
+    // Older v1 clients requesting no period expect a seven-day range with start and end dates.
+    const period = rankingPeriod(new URL(request.url).searchParams.get('days') ?? '7', now);
     const [users, personal] = await Promise.all([publicRankings(deps.db, period), personalRankings(deps.db, session.user_id, period)]);
     return json({ period, users, ...personal });
   }

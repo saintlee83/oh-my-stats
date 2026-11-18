@@ -12,6 +12,7 @@ mod service;
 mod store;
 mod sync;
 mod totals;
+mod updates;
 
 use anyhow::Result;
 use clap::{Parser, Subcommand};
@@ -48,8 +49,8 @@ enum Commands {
     /// Show the public token leaderboard and your own device and provider rankings
     #[command(visible_alias = "ranking")]
     Rankings {
-        /// Number of reporting dates ending today in UTC
-        #[arg(long, default_value = "7", value_parser = ["7", "30"])]
+        /// Rank lifetime tokens (all) or the last 7 or 30 reporting dates in UTC
+        #[arg(long, default_value = "all", value_parser = ["all", "7", "30"])]
         days: String,
     },
     /// Read new logs and upload what changed, right now
@@ -116,7 +117,9 @@ fn preview() -> Result<()> {
 }
 
 fn main() -> Result<()> {
-    match Cli::parse().command {
+    let command = Cli::parse().command;
+    let check_updates = matches!(command, Commands::Status | Commands::Rankings { .. } | Commands::Sync { .. });
+    let result = match command {
         Commands::Login { server, name, gh } => login::login(server.as_deref(), name.as_deref(), gh),
         Commands::Logout => login::logout(),
         Commands::Status => daemon::print_status(),
@@ -131,5 +134,9 @@ fn main() -> Result<()> {
         Commands::Publish => set_public(true),
         Commands::Unpublish => set_public(false),
         Commands::Preview => preview(),
+    };
+    if check_updates {
+        updates::notify();
     }
+    result
 }
