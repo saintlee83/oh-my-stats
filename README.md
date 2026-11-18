@@ -198,7 +198,7 @@ Rankings include input, output, cache reads and cache writes. Profiles with posi
 
 ## Provider activity
 
-The dashboard and published profiles include a 60-day AI usage calendar. Select a day to see its exact token total and provider breakdown. The provider share table compares the previous calendar month with the current month to date in the profile timezone. The weekly card also appears in `oms status`. A missing comparison period has no percentage change.
+The dashboard and published profiles include an AI usage calendar of the last 53 weeks, which can switch to each calendar year with usage, up to the newest four. In the last 53 weeks, select a day to see its exact token total and provider breakdown. **Usage by period** shows tokens, active days, the most used provider and the busiest day for your lifetime, the last 30 and 7 days, this month and last month. Lifetime includes tokens from before a tool's daily records begin. They have no date, so the calendar and the other periods leave them out. **Token mix** splits tokens into input, output, cache reads and cache writes, and covers only tokens with a known breakdown. The provider share table compares the previous calendar month with the current month to date in the profile timezone. The weekly card also appears in `oms status`. A missing comparison period has no percentage change.
 
 Signed-in users can compare lifetime and seven-day public positions on **My rankings**, including ranks below the top 100. Each rank shows the number of public profiles with positive usage in that period. The private device table shows account usage with no matching device for each window.
 

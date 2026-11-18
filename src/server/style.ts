@@ -172,8 +172,6 @@ const SOURCE = `
   /* Activity */
   .activity-panels { display: grid; grid-template-columns: repeat(auto-fit, minmax(min(100%, 350px), 1fr)); gap: 16px; margin: 16px 0; }
   .activity-panels .panel { margin: 0; }
-  .calendar { display: grid; grid-auto-flow: column; grid-auto-columns: 20px; grid-template-rows: repeat(7, 20px); gap: 3px; width: fit-content; max-width: 100%; overflow-x: auto; padding: 3px; margin: -3px; }
-  .calendar small { align-self: center; color: var(--muted); font-size: 10px; }
   button.day { min-height: 0; padding: 0; border: 0; border-radius: 4px; background: var(--line-soft); }
   .day[data-level="1"] { background: var(--g1); }
   .day[data-level="2"] { background: var(--g2); }
@@ -241,6 +239,58 @@ const SOURCE = `
   /* Rankings boards */
 
   /* Profile and dashboard */
+  /* The name keeps room for its rank beside the 64px picture and its gap. The buttons drop below when none is left. */
+  .profile { flex-wrap: wrap; }
+  .profile > div:first-of-type { flex: 1 1 min(340px, calc(100% - 80px)); }
+  .profile > .actions { flex: 0 1 auto; margin-left: 0; }
+  a.sr:focus { position: static; width: auto; height: auto; margin-left: 4px; clip-path: none; }
+  /* Panes switched without scripts: the nth radio marks the nth label as chosen and shows the nth pane. */
+  .panes { position: relative; }
+  .panes > input { position: absolute; opacity: 0; pointer-events: none; }
+  .panes .panel-head { align-items: center; gap: 10px 16px; }
+  .panes .segments { flex-wrap: wrap; }
+  .segments label { display: grid; padding: 5px 12px; border-radius: 7px; font-size: 14px; font-weight: 500; color: var(--ink2); white-space: nowrap; cursor: pointer; }
+  /* Keeps the width of the chosen label's heavier text, so choosing one moves nothing. */
+  .segments label::after { content: attr(data-label); height: 0; overflow: hidden; visibility: hidden; font-weight: 600; }
+  .segments label:hover { color: var(--ink); }
+  .panes > input:nth-of-type(1):checked ~ .panel-head label:nth-of-type(1), .panes > input:nth-of-type(2):checked ~ .panel-head label:nth-of-type(2), .panes > input:nth-of-type(3):checked ~ .panel-head label:nth-of-type(3),
+  .panes > input:nth-of-type(4):checked ~ .panel-head label:nth-of-type(4), .panes > input:nth-of-type(5):checked ~ .panel-head label:nth-of-type(5) { background: var(--surface); color: var(--ink); font-weight: 600; box-shadow: 0 0 0 1px var(--line); }
+  .panes > input:nth-of-type(1):focus-visible ~ .panel-head label:nth-of-type(1), .panes > input:nth-of-type(2):focus-visible ~ .panel-head label:nth-of-type(2), .panes > input:nth-of-type(3):focus-visible ~ .panel-head label:nth-of-type(3),
+  .panes > input:nth-of-type(4):focus-visible ~ .panel-head label:nth-of-type(4), .panes > input:nth-of-type(5):focus-visible ~ .panel-head label:nth-of-type(5) { outline: 2px solid var(--focus); outline-offset: 2px; }
+  .panes > .pane { display: none; }
+  .panes > input:nth-of-type(1):checked ~ .pane:nth-of-type(1), .panes > input:nth-of-type(2):checked ~ .pane:nth-of-type(2), .panes > input:nth-of-type(3):checked ~ .pane:nth-of-type(3),
+  .panes > input:nth-of-type(4):checked ~ .pane:nth-of-type(4), .panes > input:nth-of-type(5):checked ~ .pane:nth-of-type(5) { display: block; }
+  .panes > .pane > p:last-child { margin-bottom: 0; }
+  /* A year of days. A narrow screen scrolls it sideways, and the last 12 months start at their newest week. */
+  .weeks-scroll { overflow-x: auto; padding: 3px 3px 3px 0; margin: -3px -3px -3px 0; }
+  .weeks-scroll.newest { direction: rtl; }
+  .weeks-fit { width: fit-content; margin-right: auto; direction: ltr; }
+  .weeks { display: grid; grid-auto-flow: column; grid-template-columns: 24px; grid-auto-columns: 14px; grid-template-rows: 16px repeat(7, 14px); gap: 3px; }
+  .weeks small, .scale small { font-size: 11px; line-height: 14px; color: var(--muted); white-space: nowrap; }
+  /* The weekday names stay in view while the weeks scroll under them. */
+  .weeks > :nth-child(-n+8) { position: sticky; left: 0; z-index: 1; background: var(--surface); }
+  span.day { background: var(--line-soft); }
+  .weeks .day, .scale .day { border-radius: 3px; }
+  .scale { display: flex; align-items: center; justify-content: flex-end; gap: 3px; margin: 10px 0 0; pointer-events: none; }
+  .scale .day { width: 14px; height: 14px; }
+  .scale small { margin: 0 3px; }
+  .figures { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 12px; margin: 0 0 12px; }
+  .figure { display: grid; align-content: start; gap: 2px; min-width: 0; padding: 14px 16px; border: 1px solid var(--line-soft); border-radius: 10px; background: var(--raised); font-size: 13px; color: var(--muted); }
+  .figure > span:first-child { font-weight: 600; color: var(--ink2); }
+  .figure strong { font-size: 22px; line-height: 1.25; letter-spacing: -0.01em; color: var(--ink); overflow-wrap: anywhere; }
+  /* The dashboard image's first four series colors, in its order, checked the same way against each surface. */
+  .mix { --input: #2a78d6; --output: #eb6834; --cache-read: #1baf7a; --cache-write: #eda100; }
+  @media (prefers-color-scheme: dark) { .mix { --input: #3987e5; --output: #d95926; --cache-read: #199e70; --cache-write: #c98500; } }
+  .mix-bar { display: flex; gap: 2px; height: 8px; margin: 4px 0 8px; }
+  .mix-bar span { min-width: 3px; border-radius: 4px; }
+  .mix td i { display: inline-block; width: 10px; height: 10px; margin-right: 8px; border-radius: 3px; }
+  /* Two tiles to a row once four are too narrow for a date, and one where two are. */
+  @media (max-width: 760px) { .figures { grid-template-columns: repeat(auto-fit, minmax(max(140px, calc(50% - 6px)), 1fr)); } }
+  @media (max-width: 640px) {
+    .figures { gap: 8px; }
+    .figure { padding: 12px; }
+    .figure strong { font-size: 19px; }
+  }
 
   /* Groups */
 
