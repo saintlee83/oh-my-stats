@@ -16,6 +16,7 @@ const MAX_METRICS_ITEMS = 500;
 const MAX_METRICS_TEXT = 200;
 const MAX_METRICS_DEPTH = 8;
 const TOOL = /^[a-z][a-z0-9_-]{0,31}$/;
+export const isToolName = (value: string) => TOOL.test(value);
 const MODEL = /^[A-Za-z0-9][A-Za-z0-9._:@+\-/]{0,119}$/;
 const MACHINE_ID = /^[a-f0-9]{16,64}$/;
 const MAX_TOKENS = 1e15;

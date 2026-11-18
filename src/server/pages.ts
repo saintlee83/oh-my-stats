@@ -1,11 +1,12 @@
 import type { Card } from '../shared/render/cards.ts';
 import type { ComponentKey } from '../shared/render/svg.ts';
-import { commas, compact, percent, providerName } from '../shared/format.ts';
+import { commas, compact, percent, PROVIDERS, providerName } from '../shared/format.ts';
 import { providerMix } from '../shared/insights.ts';
 import type { GitHubProfile, TokenMetrics } from '../shared/metrics.ts';
 import { PROFILE_LIMITS, STATUS_CHOICES, type ManualProfile } from '../shared/profile.ts';
 import type { MachineRow, UserRow } from './db.ts';
-import type { PersonalRankings, PublicPosition, RankingPeriod, Standing } from './rankings.ts';
+import type { PersonalRankings, ProviderUsage, PublicPosition, RankingPeriod, Standing } from './rankings.ts';
+import { STYLE } from './style.ts';
 
 /** Server-rendered pages. Every value from a user or machine goes through `esc`. */
 
@@ -13,153 +14,259 @@ export function esc(value: unknown): string {
   return String(value).replace(/[&<>"']/g, (char) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' })[char] as string);
 }
 
-/** GitHub's light and dark colors, following the system setting, to match the dashboard's default theme. */
-const STYLE = `
-  :root { color-scheme: light dark; --bg:#ffffff; --surface:#ffffff; --ink:#1f2328; --ink2:#424a53; --muted:#656d76; --line:#d0d7de; --link:#0969da;
-    --button:#f6f8fa; --primary:#1f883d; --primary-ink:#ffffff; --danger:#d1242f; --code:#f6f8fa; --code-inline:rgba(175,184,193,0.2); }
-  @media (prefers-color-scheme: dark) { :root { --bg:#0d1117; --surface:#0d1117; --ink:#e6edf3; --ink2:#c9d1d9; --muted:#8b949e; --line:#30363d; --link:#4493f8;
-    --button:#21262d; --primary:#238636; --danger:#f85149; --code:#161b22; --code-inline:rgba(110,118,129,0.4); } }
-  * { box-sizing: border-box; }
-  body { margin: 0; background: var(--bg); color: var(--ink); font: 15px/1.55 -apple-system, BlinkMacSystemFont, "Segoe UI", "Noto Sans", Helvetica, Arial, sans-serif; }
-  a { color: var(--link); }
-  header.top { display: flex; align-items: center; justify-content: space-between; gap: 16px; max-width: 1032px; margin: 0 auto; padding: 16px; }
-  nav.links { display: flex; align-items: center; flex-wrap: wrap; gap: 14px; }
-  nav.links [aria-current=page] { font-weight: 650; color: var(--ink); }
-  .brand { font-weight: 650; color: var(--ink); text-decoration: none; }
-  main { max-width: 1032px; margin: 0 auto; padding: 8px 16px 64px; }
-  h1 { font-size: 28px; line-height: 1.2; margin: 24px 0 8px; }
-  h2 { font-size: 17px; margin: 0 0 12px; }
-  p { margin: 0 0 12px; color: var(--ink2); }
-  .panel { background: var(--surface); border: 1px solid var(--line); border-radius: 12px; padding: 20px; margin: 16px 0; overflow: hidden; }
-  .dash { overflow-x: auto; margin: 16px 0; }
-  .dash svg { display: block; max-width: 100%; height: auto; }
-  pre, code { font: 13px/1.5 ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; }
-  pre { background: var(--code); border-radius: 6px; padding: 12px 14px; overflow-x: auto; margin: 8px 0 12px; }
-  code { background: var(--code-inline); border-radius: 6px; padding: 1px 5px; }
-  pre code { background: none; padding: 0; }
-  button, .button { font: inherit; font-weight: 600; cursor: pointer; border: 1px solid var(--line); background: var(--button); color: var(--ink); border-radius: 6px; padding: 7px 12px; text-decoration: none; display: inline-block; min-height: 36px; }
-  .primary { background: var(--primary); border-color: var(--primary); color: var(--primary-ink); }
-  .danger { color: var(--danger); }
-  input[type=text] { font: inherit; color: inherit; background: var(--bg); border: 1px solid var(--line); border-radius: 6px; padding: 6px 10px; min-height: 36px; width: 100%; max-width: 240px; }
-  form.inline { display: inline-flex; gap: 8px; align-items: center; flex-wrap: wrap; margin: 0; }
-  .fields { display: grid; grid-template-columns: repeat(auto-fit, minmax(220px, 1fr)); gap: 12px 16px; margin: 16px 0; }
-  .fields label { display: grid; gap: 6px; font-size: 13px; font-weight: 600; color: var(--ink2); }
-  .fields .wide { grid-column: 1 / -1; }
-  .fields input[type=text], .fields textarea, .fields select { max-width: none; width: 100%; font: inherit; font-weight: 400; color: var(--ink); background: var(--bg); border: 1px solid var(--line); border-radius: 6px; padding: 6px 10px; min-height: 36px; }
-  .fields textarea { resize: vertical; }
-  details.confirm summary { cursor: pointer; font-weight: 600; width: fit-content; padding: 6px 0; }
-  details.confirm form { margin-top: 8px; }
-  .table { width: 100%; overflow-x: auto; }
-  table { width: 100%; border-collapse: collapse; font-variant-numeric: tabular-nums; }
-  th, td { text-align: left; padding: 10px 12px 10px 0; border-bottom: 1px solid var(--line); vertical-align: middle; white-space: nowrap; }
-  th { font-size: 13px; font-weight: 500; color: var(--muted); }
-  tr:last-child td { border-bottom: 0; }
-  .num { text-align: right; }
-  .muted { color: var(--muted); font-size: 13px; }
-  .badge { display: inline-block; font-size: 12px; font-weight: 600; padding: 2px 8px; border-radius: 999px; border: 1px solid var(--line); color: var(--ink2); }
-  .profile { display: flex; align-items: center; gap: 14px; margin: 16px 0; }
-  .profile img { width: 56px; height: 56px; border-radius: 50%; }
-  .profile h1 { margin: 0; }
-  .steps { padding-left: 20px; color: var(--ink2); } .steps li { margin-bottom: 12px; }
-  .activity-panels { display: grid; grid-template-columns: repeat(auto-fit, minmax(min(100%, 350px), 1fr)); gap: 16px; margin: 16px 0; }
-  .activity-panels .panel { margin: 0; }
-  .calendar { display: grid; grid-auto-flow: column; grid-auto-columns: 20px; grid-template-rows: repeat(7, 20px); gap: 3px; width: fit-content; }
-  .calendar small { align-self: center; color: var(--muted); font-size: 10px; }
-  button.day { min-height: 0; padding: 0; border-radius: 4px; background: var(--code); }
-  .day[data-level="1"] { background: #aceebb; } .day[data-level="2"] { background: #4ac26b; }
-  .day[data-level="3"] { background: #1a7f37; } .day[data-level="4"] { background: #0a4621; }
-  @media (prefers-color-scheme: dark) {
-    .day[data-level="1"] { background: #1b5334; } .day[data-level="2"] { background: #247a43; }
-    .day[data-level="3"] { background: #3cab60; } .day[data-level="4"] { background: #89e59f; }
-  }
-  .day:focus-visible, .day:hover { outline: 2px solid var(--ink); outline-offset: 1px; }
-  .day-details { background: var(--surface); color: var(--ink); border: 1px solid var(--line); border-radius: 10px; padding: 20px; max-width: 90vw; }
-  .day-details::backdrop { background: #0005; } .day-details ul { padding-inline-start: 20px; }
-  @media (max-width: 640px) { h1 { font-size: 24px; } .panel { padding: 16px; } .dash svg { min-width: 720px; max-width: none; } }
-`;
+export const REPO_URL = 'https://github.com/saintlee83/oh-my-stats';
+const HOSTED_ORIGIN = 'https://ohmystats.dev';
+const SITE = 'oh-my-stats';
+const DESCRIPTION = 'Your AI tokens and GitHub contributions in one place, from every machine, with private work included.';
+const AVATARS = 'https://avatars.githubusercontent.com';
 
-function layout(title: string, body: string, viewer: UserRow | null): string {
-  const nav = viewer
-    ? `<a class="button" href="/me">@${esc(viewer.login)}</a>`
-    : '<a class="button" href="/login">Sign in with GitHub</a>';
+const GITHUB_MARK =
+  '<svg viewBox="0 0 16 16" aria-hidden="true"><path d="M8 0c4.42 0 8 3.58 8 8a8.013 8.013 0 0 1-5.45 7.59c-.4.08-.55-.17-.55-.38 0-.27.01-1.13.01-2.2 0-.75-.25-1.23-.54-1.48 1.78-.2 3.65-.88 3.65-3.95 0-.88-.31-1.59-.82-2.15.08-.2.36-1.02-.08-2.12 0 0-.67-.22-2.2.82-.64-.18-1.32-.27-2-.27-.68 0-1.36.09-2 .27-1.53-1.03-2.2-.82-2.2-.82-.44 1.1-.16 1.92-.08 2.12-.51.56-.82 1.28-.82 2.15 0 3.06 1.86 3.75 3.64 3.95-.23.2-.44.55-.51 1.07-.46.21-1.61.55-2.33-.66-.15-.24-.6-.83-1.23-.82-.67.01-.27.38.01.53.34.19.73.9.82 1.13.16.45.68 1.31 2.69.94 0 .67.01 1.3.01 1.49 0 .21-.15.45-.55.38A7.995 7.995 0 0 1 0 8c0-4.42 3.58-8 8-8Z"/></svg>';
+
+/** A GitHub avatar at twice the size it's drawn, for sharp screens. The page may load images from nowhere else. */
+function avatar(url: string | null, size: number): string {
+  if (!url) return '';
+  try {
+    const sized = new URL(url);
+    if (sized.protocol !== 'https:' || sized.origin !== AVATARS) return '';
+    sized.searchParams.set('s', String(size * 2));
+    return `<img src="${esc(sized)}" alt="" width="${size}" height="${size}">`;
+  } catch {
+    return '';
+  }
+}
+
+function layout(title: string, body: string, viewer: UserRow | null, page: { description?: string; bleed?: boolean } = {}): string {
+  const description = esc(page.description ?? DESCRIPTION);
+  const account = viewer
+    ? `<a class="button" href="/me">${avatar(viewer.avatar_url, 20)}@${esc(viewer.login)}</a>`
+    : '<a class="button" href="/login">Sign in</a>';
   return `<!doctype html>
 <html lang="en">
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>${esc(title)}</title>
+<meta name="description" content="${description}">
+<meta property="og:site_name" content="${SITE}">
+<meta property="og:type" content="website">
+<meta property="og:title" content="${esc(title)}">
+<meta property="og:description" content="${description}">
+<meta name="twitter:card" content="summary">
+<meta name="theme-color" content="#ffffff" media="(prefers-color-scheme: light)">
+<meta name="theme-color" content="#0d1117" media="(prefers-color-scheme: dark)">
 <link rel="icon" href="/favicon.svg" type="image/svg+xml">
 <style>${STYLE}</style>
 </head>
 <body>
-<header class="top"><a class="brand" href="/">oh-my-stats</a><nav class="links" aria-label="Main navigation"><a href="/rankings">Rankings</a>${nav}</nav></header>
-<main>${body}</main>
+<a class="skip" href="#main">Skip to content</a>
+<header class="top"><div class="bar"><a class="brand" href="/"><img src="/favicon.svg" alt="" width="26" height="26">${SITE}</a><nav class="links" aria-label="Main navigation"><a href="/rankings">Rankings</a>${account}</nav></div></header>
+<main id="main"${page.bleed ? ' class="bleed"' : ''}>${body}</main>
+<footer class="bottom"><div class="bar"><p>${SITE} is open source, under the MIT license.</p><nav aria-label="Footer"><a href="/rankings">Rankings</a><a href="${REPO_URL}#get-started">Install</a><a href="${REPO_URL}#what-leaves-your-machine">Privacy</a><a href="${REPO_URL}">GitHub</a></nav></div></footer>
 </body>
 </html>
 `;
 }
 
-function rankingTable(title: string, column: string, rows: Standing[], tokenColumn: string, profiles = false): string {
-  const body = rows.map(row => {
-    const label = profiles ? `<a href="/u/${esc(encodeURIComponent(row.label))}">@${esc(row.label)}</a>` : esc(row.label);
-    return `<tr><td>${row.rank}</td><td>${label}</td><td class="num">${commas(row.tokens)}</td></tr>`;
+/**
+ * A ranked list. Totals span orders of magnitude, so each row has the short figure to
+ * scan, the exact one beneath it, and a bar comparing it with the leader.
+ */
+function standings(rows: Standing[], column: string, tokenColumn: string, profiles: { viewer: string | null } | null = null): string {
+  if (!rows.length) return '<p>No token usage for this period.</p>';
+  const most = rows[0].tokens;
+  const body = rows.map((row) => {
+    const mine = profiles?.viewer?.toLowerCase() === row.label.toLowerCase();
+    const login = esc(encodeURIComponent(row.label));
+    const who = profiles
+      ? `<a href="/u/${login}"><img src="${AVATARS}/${login}?s=56" alt="" width="28" height="28" loading="lazy">@${esc(row.label)}</a>${mine ? '<span class="badge">You</span>' : ''}`
+      : esc(row.label);
+    const exact = commas(row.tokens);
+    const short = compact(row.tokens);
+    return `<tr${mine ? ' class="me"' : ''}><td class="rank"><span class="place"${profiles && row.rank <= 3 ? ` data-place="${row.rank}"` : ''}>${row.rank}</span></td><td class="who">${who}</td>
+<td class="meter" aria-hidden="true"><span style="--share:${((100 * row.tokens) / most).toFixed(1)}%"></span></td>
+<td class="num"><strong>${short}</strong>${short === exact ? '' : `<small>${exact}</small>`}</td></tr>`;
   }).join('');
-  return `<section class="panel"><h2>${title}</h2>${rows.length
-    ? `<div class="table"><table><thead><tr><th>Rank</th><th>${column}</th><th class="num">${tokenColumn}</th></tr></thead><tbody>${body}</tbody></table></div>`
-    : '<p>No token usage for this period.</p>'}</section>`;
+  return `<div class="table"><table class="standings"><thead><tr><th class="rank">Rank</th><th>${column}</th><td class="meter" aria-hidden="true"></td><th class="num">${tokenColumn}</th></tr></thead><tbody>${body}</tbody></table></div>`;
 }
 
-export function rankingsPage(period: RankingPeriod, data: Standing[] | PersonalRankings, viewer: UserRow | null, positions: PublicPosition[]): string {
+const periodLabel = (days: RankingPeriod['days']) => (days === 'all' ? 'All time' : `Last ${days} days`);
+
+const profileCount = (count: number) => `${commas(count)} ranked public ${count === 1 ? 'profile' : 'profiles'}`;
+
+/** Which provider the public board ranks by, and the providers its profiles use. */
+export interface ProviderFilter {
+  provider: string | null;
+  providers: ProviderUsage[];
+}
+
+export function rankingsPage(
+  period: RankingPeriod,
+  data: Standing[] | PersonalRankings,
+  viewer: UserRow | null,
+  positions: PublicPosition[],
+  filter: ProviderFilter = { provider: null, providers: [] },
+): string {
   const isPublic = Array.isArray(data);
   const path = isPublic ? '/rankings' : '/me/rankings';
   const title = isPublic ? 'Public token rankings' : 'My token rankings';
-  const periods = (['all', 7, 30] as const).map(days =>
-    `<a href="${path}?days=${days}"${period.days === days ? ' aria-current="page"' : ''}>${days === 'all' ? 'All time' : `Last ${days} days`}</a>`).join('');
-  const other = isPublic ? (viewer ? `<a href="/me/rankings?days=${period.days}">My rankings</a>` : '') : `<a href="/rankings?days=${period.days}">Public rankings</a>`;
+  const current = (active: boolean) => (active ? ' aria-current="page"' : '');
+  const board = (days: RankingPeriod['days'], provider: string | null) =>
+    `${path}?days=${days}${provider === null ? '' : `&amp;provider=${esc(encodeURIComponent(provider))}`}`;
+  const periods = (['all', 7, 30] as const).map(days => `<a href="${board(days, filter.provider)}"${current(period.days === days)}>${periodLabel(days)}</a>`).join('');
+  // Provider IDs are chosen by whoever uploads them, so only the known ones are offered to everyone.
+  const offered = filter.providers.map(({ tool }) => tool).filter(tool => PROVIDERS.has(tool));
+  if (filter.provider !== null && !offered.includes(filter.provider)) offered.push(filter.provider);
+  const providers = offered.length > 1 || filter.provider !== null
+    ? `<nav class="filters" aria-label="Providers"><a href="${board(period.days, null)}"${current(filter.provider === null)}>All providers</a>${offered
+      .map(tool => `<a href="${board(period.days, tool)}"${current(filter.provider === tool)}>${esc(providerName(tool))}</a>`).join('')}</nav>`
+    : '';
+  // Signed out, the second view would only lead to the sign-in page.
+  const views = viewer
+    ? `<nav class="segments" aria-label="Ranking views"><a href="/rankings?days=${period.days}"${current(isPublic)}>Everyone</a><a href="/me/rankings?days=${period.days}"${current(!isPublic)}>Mine</a></nav>`
+    : '';
   const tokenColumn = period.days === 'all' ? 'Lifetime tokens' : `Tokens (${period.days} days)`;
-  const tables = isPublic ? rankingTable('Top 100 public profiles', 'GitHub user', data, tokenColumn, true)
-    : rankingTable('My devices', 'Device', data.machines, tokenColumn) + rankingTable('My providers', 'Provider', data.providers, tokenColumn);
-  const ranks = positions.map(({ days, rank, participants }) => {
-    const range = days === 'all' ? 'All time' : `Last ${days} days`;
-    const place = !viewer ? '' : rank === null ? 'Unranked · ' : `<strong>#${rank}</strong> of `;
-    return `<p>${range} · ${place}${commas(participants)} ranked public profiles</p>`;
-  }).join('');
-  return layout(title, `<h1>${title}</h1>
-<nav class="links" aria-label="Ranking periods and views">${periods}${other}</nav>
+  const unranked = viewer && positions.every(p => p.rank === null) ? (viewer.is_public ? 'No ranked usage in these periods.' : 'Your profile is private.') : '';
+  let content: string;
+  if (isPublic) {
+    const [{ rank, participants }] = positions;
+    const place = !viewer ? '' : rank === null ? ` · ${unranked}` : ` · You are <strong>#${rank}</strong>`;
+    const scope = filter.provider === null ? '' : ` · ${esc(providerName(filter.provider))}`;
+    content = `${providers}<section class="panel"><div class="panel-head"><h2>Top 100 public profiles${scope}</h2><p class="muted">${profileCount(participants)}${place}</p></div>
+${standings(data, 'GitHub user', tokenColumn, { viewer: viewer?.login ?? null })}</section>`;
+  } else {
+    const tiles = positions.map(({ days, rank, participants }) =>
+      `<div class="tile"><span class="tile-label">${periodLabel(days)}</span><strong>${rank === null ? '—' : `#${rank}`}</strong><span>${rank === null ? 'Unranked · ' : 'of '}${profileCount(participants)}</span></div>`).join('');
+    content = `<h2 class="sr">Your public position</h2><div class="tiles">${tiles}</div>
+${unranked ? `<p class="muted">${unranked}</p>` : ''}
+<section class="panel"><h2>My devices</h2>${standings(data.machines, 'Device', tokenColumn)}</section>
+<section class="panel"><h2>My providers</h2>${standings(data.providers, 'Provider', tokenColumn)}</section>
+<p class="muted">Device scores cover usage attributable to individual machines. Provider scores also include account-wide usage.</p>`;
+  }
+  return layout(`${title} · ${SITE}`, `<div class="page-head"><div><h1>${title}</h1>
+<p>${isPublic ? 'Published profiles, by AI tokens used: input, output, cache reads and cache writes.' : 'Where you stand, and how your own devices and providers compare. Only you can see this page.'}</p></div></div>
+<div class="toolbar"><nav class="segments" aria-label="Ranking periods">${periods}</nav>${views}</div>
 ${period.days === 'all' ? '' : `<p class="muted">${period.start} through ${period.end} · Reporting dates through today in UTC.</p>`}
-<section class="panel"><h2>${viewer ? 'Your public position' : 'Participation'}</h2>${ranks}
-${viewer && positions.every(p => p.rank === null) ? `<p class="muted">${viewer.is_public ? 'No ranked usage in these periods.' : 'Your profile is private.'}</p>` : ''}</section>
-${tables}${isPublic ? '' : '<p class="muted">Device scores cover usage attributable to individual machines. Provider scores also include account-wide usage.</p>'}`, viewer);
+${content}`, viewer, isPublic ? { description: 'Published developer profiles ranked by AI token usage: all time, the last 7 days and the last 30 days.' } : {});
 }
 
-const HOSTED_ORIGIN = 'https://ohmystats.dev';
+/** The same steps on every system but the first, so the reader picks theirs once. */
+function installCommands(origin: string): string {
+  const login = `oms login${origin === HOSTED_ORIGIN ? '' : ` --server ${origin}`}`;
+  const pane = (install: string) => `<pre><code>${esc(`${install}\n${login}\noms service install`)}</code></pre>`;
+  return `<div class="terminal" role="group" aria-label="Install commands">
+<input type="radio" name="os" id="os-unix" checked><label for="os-unix">macOS and Linux</label>
+<input type="radio" name="os" id="os-windows"><label for="os-windows">Windows</label>
+${pane(`curl -fsSL ${origin}/install.sh | sh`)}${pane(`irm ${origin}/install.ps1 | iex`)}
+</div>`;
+}
 
-const installSnippet = (origin: string) => `# Install the agent on macOS or Linux
-curl -fsSL ${origin}/install.sh | sh
-# or on Windows, in PowerShell
-irm ${origin}/install.ps1 | iex
+/**
+ * The logo's motif behind the landing page's heading: contribution squares that rise like
+ * bar charts toward both edges, leaving the middle clear for the words. Each bar is one
+ * shape filled with a pattern of squares, so the whole drawing stays small.
+ */
+const HERO_ART = (() => {
+  const columns = 64;
+  const rows = 7;
+  const pitch = 26;
+  const cell = 20;
+  const width = columns * pitch - (pitch - cell);
+  const height = rows * pitch - (pitch - cell);
+  const wobble = [0.3, -0.6, 0.1, 0.7, -0.3, 0.5, -0.7, 0.2];
+  const bars: string[] = ['', '', '', '', ''];
+  let newest = { size: 0, column: 0 };
+  for (let column = 0; column < columns; column++) {
+    const fromCenter = Math.abs(column - (columns - 1) / 2) / ((columns - 1) / 2);
+    if (fromCenter < 0.4) continue;
+    const x = column * pitch;
+    const size = Math.max(0, Math.min(rows, Math.round(((fromCenter - 0.4) / 0.6) ** 0.9 * 6.2 + wobble[(column * 5) % wobble.length])));
+    if (size === 0) continue;
+    // The newest square is on the right, as it is in the logo, where the drawing is at full strength.
+    if (column > columns * 0.8 && column < columns * 0.88 && size >= newest.size) newest = { size, column };
+    const top = (rows - size) * pitch;
+    bars[Math.ceil((size / rows) * 4)] += `M${x} ${top}h${cell}v${height - top}h-${cell}z`;
+  }
+  const pattern = (id: string, color: string) =>
+    `<pattern id="oms-${id}" width="${pitch}" height="${pitch}" patternUnits="userSpaceOnUse"><rect width="${cell}" height="${cell}" rx="5" fill="var(--${color})"/></pattern>`;
+  const levels = [1, 2, 3, 4].map(level => `<path d="${bars[level]}" fill="url(#oms-g${level})"/>`).join('');
+  const lit = `<rect x="${newest.column * pitch}" y="${(rows - newest.size) * pitch}" width="${cell}" height="${cell}" rx="5" fill="var(--spark)"/>`;
+  return `<svg class="hero-art" width="${width}" height="${height}" viewBox="0 0 ${width} ${height}" aria-hidden="true"><defs>${[1, 2, 3, 4].map(level => pattern(`g${level}`, `g${level}`)).join('')}</defs>${levels}${lit}</svg>`;
+})();
 
-# Sign in on each machine, then let it run in the background
-oms login${origin === HOSTED_ORIGIN ? '' : ` --server ${origin}`}
-oms service install`;
+const FEATURES: [icon: string, title: string, text: string][] = [
+  ['<circle cx="12" cy="12" r="8.5"/><path d="M12 7.5V12l3 2"/>', 'Always recording',
+    'A background agent records usage as you work and keeps its own record, so your history survives when AI tools delete their logs.'],
+  ['<rect x="2.5" y="5" width="13" height="9.5" rx="1.5"/><path d="M1 18h12"/><rect x="16.5" y="8.5" width="5" height="10.5" rx="1.2"/>', 'Every machine, counted once',
+    'Sign in on each computer. Per-machine logs are added together, and an account-wide total is counted a single time.'],
+  ['<circle cx="12" cy="12" r="3.5"/><path d="M2.5 12h6M15.5 12h6"/>', 'Private work included',
+    'GitHub’s contribution API hides private work, so commits are counted by walking each repository, on your own machine.'],
+  ['<rect x="5" y="10.5" width="14" height="9.5" rx="2"/><path d="M8.5 10.5V8a3.5 3.5 0 0 1 7 0v2.5"/>', 'Private by default',
+    'Your profile stays hidden until you publish it. Machine names are never public.'],
+  ['<path d="M8.5 7.5 4 12l4.5 4.5M15.5 7.5 20 12l-4.5 4.5"/>', 'Made for your README',
+    'Embed the whole dashboard, or only the parts you want, as images that follow light and dark mode.'],
+  ['<path d="M5 20v-8M12 20V4M19 20v-5"/>', 'Rankings',
+    'See where you stand among published profiles, and compare your own devices and providers.'],
+];
 
-export function landingPage(origin: string, viewer: UserRow | null): string {
-  return layout(
-    'oh-my-stats',
-    `<h1>Your real developer stats, from every machine.</h1>
-<p>Sign in with GitHub, run a small agent on each computer, and see your AI tokens and contributions in one place, with private work included.</p>
-<div class="panel">
-  <h2>Get started</h2>
-  <pre><code>${esc(installSnippet(origin))}</code></pre>
-  ${viewer ? '<a class="button primary" href="/me">Go to your dashboard</a>' : '<a class="button primary" href="/login">Sign in with GitHub</a>'}
-  <p class="muted" style="margin-top:12px">The agent records usage continuously and uploads once a day. Run <code>oms sync</code> to update right away.</p>
-</div>
-<div class="panel">
-  <h2>What leaves your machine</h2>
-  <p>Only totals: tokens per day and model, and aggregated GitHub numbers, plus your public GitHub profile. Prompts, code, commit messages, file paths and private repository names stay on your computer.</p>
-  <p>Your profile is private until you choose to publish it. Machine names are never public.</p>
-</div>`,
+const UPLOADED = [
+  'Tokens per day and model', 'Lifetime totals per tool and model', 'Aggregated GitHub numbers, such as commits per month and lines per language',
+  'Your public GitHub profile: name, bio, company, location and status', 'Each machine’s name and platform, shown only to you', 'Your timezone',
+];
+const KEPT = ['Prompts, responses and code', 'Commit messages and file paths', 'Private repository and organization names', 'The token that reads your repositories'];
+
+/** What the landing page shows of the public rankings. */
+export interface LandingBoard {
+  leaders: Standing[];
+  participants: number;
+}
+
+export function landingPage(origin: string, viewer: UserRow | null, board: LandingBoard = { leaders: [], participants: 0 }): string {
+  const start = viewer
+    ? '<a class="button primary lg" href="/me">Go to your dashboard</a>'
+    : `<a class="button primary lg" href="/login">${GITHUB_MARK}Sign in with GitHub</a>`;
+  const list = (items: string[]) => `<ul>${items.map(item => `<li>${item}</li>`).join('')}</ul>`;
+  const [leader] = board.leaders;
+  const login = leader ? esc(encodeURIComponent(leader.label)) : '';
+  const showcase = leader
+    ? `<section class="section wrap">
+<div class="section-head"><h2>A dashboard built from real work</h2><p>Live from the rankings: <a href="/u/${login}">@${esc(leader.label)}</a>, first by lifetime AI tokens.</p></div>
+<a class="showcase" href="/u/${login}"><img src="/u/${login}/dashboard.svg" alt="The developer dashboard of @${esc(leader.label)}" loading="lazy"></a>
+</section>`
+    : '';
+  const leaders = leader
+    ? `<section class="section wrap">
+<div class="section-head"><h2>Top of the rankings</h2><p>${profileCount(board.participants)}, by lifetime AI tokens. Publish your profile to appear here.</p></div>
+<div class="panel">${standings(board.leaders, 'GitHub user', 'Lifetime tokens', { viewer: viewer?.login ?? null })}</div>
+<p><a href="/rankings">See all rankings</a></p>
+</section>`
+    : '';
+  return layout(`${SITE} · Your real developer stats, from every machine`, `<section class="hero">${HERO_ART}<div class="wrap">
+<p class="eyebrow">Open source · macOS, Linux and Windows</p>
+<h1>Your real developer stats,<br> from every machine.</h1>
+<p class="lead">Sign in with GitHub, run a small agent on each computer, and see your AI tokens and contributions in one place, with private work included.</p>
+<div class="actions">${start}<a class="button lg" href="/rankings">See the rankings</a></div>
+${installCommands(origin)}
+<p class="muted">The agent records usage continuously and uploads once a day. Run <code>oms sync</code> to update right away.</p>
+</div></section>
+${showcase}
+<section class="section wrap">
+<div class="section-head"><h2>Numbers you can stand behind</h2><p>Collected on your machines, combined on the server, and shown only where you choose.</p></div>
+<div class="grid">${FEATURES.map(([icon, title, text]) => `<div class="feature"><div class="icon"><svg viewBox="0 0 24 24" aria-hidden="true">${icon}</svg></div><h3>${title}</h3><p>${text}</p></div>`).join('')}</div>
+</section>
+<section class="section wrap">
+<div class="section-head"><h2>Reads the tools you already use</h2><p>The agent finds these histories on its own. Any other tool can be added with a JSONL export.</p></div>
+<ul class="chips">${[...PROVIDERS.values()].map(name => `<li>${esc(name)}</li>`).join('')}</ul>
+</section>
+<section class="section wrap">
+<div class="section-head"><h2>What leaves your machine</h2><p>Only totals. Run <code>oms preview</code> to see exactly what would be uploaded, without sending anything.</p></div>
+<div class="grid"><div class="panel ledger"><h3>Uploaded</h3>${list(UPLOADED)}</div><div class="panel ledger kept"><h3>Stays on your machine</h3>${list(KEPT)}</div></div>
+</section>
+${leaders}
+<div class="wrap"><section class="cta"><h2>Start counting</h2><p>Install the agent, sign in with GitHub, and run <code>oms sync</code> to see your first numbers.</p>
+<div class="actions">${start}<a class="button lg" href="${REPO_URL}#get-started">Read the guide</a></div></section></div>`,
     viewer,
+    { bleed: true },
   );
 }
 
@@ -221,15 +328,28 @@ function activityPanels(tokens: TokenMetrics | null): string {
     </section></div>`;
 }
 
-export function profilePage(user: UserRow, svg: string, tokens: TokenMetrics | null, cards: Card[], parts: Part[], origin: string, viewer: UserRow | null): string {
+export function profilePage(
+  user: UserRow,
+  svg: string,
+  tokens: TokenMetrics | null,
+  cards: Card[],
+  parts: Part[],
+  origin: string,
+  viewer: UserRow | null,
+  position: PublicPosition | null = null,
+): string {
   const url = `${origin}/u/${encodeURIComponent(user.login)}`;
-  const avatar = user.avatar_url ? `<img src="${esc(user.avatar_url)}" alt="">` : '';
+  const login = esc(encodeURIComponent(user.login));
+  const standing = position?.rank
+    ? `<p><a class="badge" href="/rankings">#${position.rank} of ${profileCount(position.participants)}, by lifetime AI tokens</a></p>`
+    : '';
   const cardLinks = cards
-    .map((card) => `<li><a href="/u/${esc(encodeURIComponent(user.login))}/cards/${esc(card.key)}.txt">${esc(card.title)}</a></li>`)
+    .map((card) => `<li><a href="/u/${login}/cards/${esc(card.key)}.txt">${esc(card.title)}</a></li>`)
     .join('');
   return layout(
-    `@${user.login} on oh-my-stats`,
-    `<div class="profile">${avatar}<div><h1>@${esc(user.login)}</h1>${user.name ? `<p>${esc(user.name)}</p>` : ''}</div></div>
+    `@${user.login} on ${SITE}`,
+    `<div class="profile">${avatar(user.avatar_url, 64)}<div><h1>@${esc(user.login)}</h1>${user.name ? `<p>${esc(user.name)}</p>` : ''}${standing}</div>
+<div class="actions">${viewer?.id === user.id ? '<a class="button" href="/me#profile-header">Edit profile</a>' : ''}<a class="button" href="https://github.com/${login}" rel="noopener">${GITHUB_MARK}GitHub</a></div></div>
 <div class="dash">${svg}</div>
 ${activityPanels(tokens)}
 ${providerActivity(tokens)}
@@ -239,6 +359,7 @@ ${providerActivity(tokens)}
   ${cards.length ? `<h2>Text cards</h2><ul>${cardLinks}</ul>` : ''}
 </div>`,
     viewer,
+    { description: `The developer stats of @${user.login}: AI tokens and GitHub contributions, counted across every machine.` },
   );
 }
 
@@ -306,17 +427,17 @@ export function dashboardPage(
 ): string {
   const url = `${origin}/u/${encodeURIComponent(user.login)}`;
   const isPublic = user.is_public === 1;
-  const empty = `<div class="panel"><h2>Connect your first machine</h2><pre><code>${esc(installSnippet(origin))}</code></pre></div>`;
+  const empty = `<div class="panel"><h2>Connect your first machine</h2><p>Run this on each computer. The agent records usage continuously and uploads once a day.</p>${installCommands(origin)}</div>`;
   return layout(
-    'Your dashboard',
-    `<h1>Your dashboard</h1>
-<p><a href="/me/rankings">View my device and provider rankings</a></p>
+    `Your dashboard · ${SITE}`,
+    `<div class="page-head"><div><h1>Your dashboard</h1><p>Signed in as @${esc(user.login)}. ${isPublic ? 'Your profile is public.' : 'Only you can see these numbers.'}</p></div>
+<div class="actions"><a class="button" href="/me/rankings">My rankings</a>${isPublic ? `<a class="button" href="${esc(url)}">Public profile</a>` : ''}</div></div>
 ${machines.length === 0 ? empty : ''}
 ${svg ? `<div class="dash">${svg}</div>` : ''}
 ${activityPanels(tokens)}
 ${providerActivity(tokens)}
 <div class="panel">
-  <h2>Profile <span class="badge">${isPublic ? 'Public' : 'Private'}</span></h2>
+  <h2>Profile <span class="badge${isPublic ? ' live' : ''}">${isPublic ? 'Public' : 'Private'}</span></h2>
   ${
     isPublic
       ? `<p>Anyone can see your profile at <a href="${esc(url)}">${esc(url)}</a>.</p>${embedCode(url, parts)}`
@@ -353,5 +474,6 @@ ${
 }
 
 export function errorPage(status: number, message: string, viewer: UserRow | null): string {
-  return layout(`${status}`, `<h1>${esc(message)}</h1><p><a href="/">Back to the home page</a></p>`, viewer);
+  return layout(`${status} · ${SITE}`, `<div class="notice"><p class="code">${status}</p><h1>${esc(message)}</h1>
+<div class="actions"><a class="button" href="/">Back to the home page</a></div></div>`, viewer);
 }

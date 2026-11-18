@@ -1,7 +1,7 @@
 import { providerName } from '../shared/format.ts';
 import { lastDays } from '../shared/time.ts';
 import type { Db } from './db.ts';
-import { BadRequest } from './wire.ts';
+import { BadRequest, isToolName } from './wire.ts';
 
 export type RankingPeriod =
   | { days: 'all'; start: null; end: null }
@@ -13,6 +13,13 @@ export function rankingPeriod(value: string | null, now: Date): RankingPeriod {
   const days = value === '30' ? 30 : 7;
   const end = now.toISOString().slice(0, 10);
   return { days, start: lastDays(end, days)[0], end };
+}
+
+/** A provider to rank by, from a page address. None ranks by every provider together. */
+export function rankingProvider(value: string | null): string | null {
+  if (value === null || value === '') return null;
+  if (!isToolName(value)) throw new BadRequest('Choose a provider by its ID, such as codex.');
+  return value;
 }
 
 export interface Standing {
@@ -130,23 +137,45 @@ export interface PublicPosition {
   participants: number;
 }
 
-export async function publicRankings(db: Db, period: RankingPeriod, viewerId: string | null = null) {
+/** A provider's usage across every public profile, and how many of them use it. */
+export interface ProviderUsage {
+  tool: string;
+  tokens: number;
+  profiles: number;
+}
+
+/**
+ * The public board, by every provider together or by one. Either way it also lists the
+ * providers that public profiles use, from the same read of the usage records.
+ */
+export async function publicRankings(db: Db, period: RankingPeriod, viewerId: string | null = null, provider: string | null = null) {
   const { sql, params } = rankingUsage(period);
-  const { results } = await db.prepare(`${sql}, scores AS (
-      SELECT members.id, members.login AS label, TOTAL(usage.tokens) AS tokens
-      FROM usage JOIN members ON members.id = usage.user_id
-      GROUP BY members.id HAVING TOTAL(usage.tokens) > 0
+  // Usage is never negative, so leaving out a profile's unused providers changes no total.
+  const { results } = await db.prepare(`${sql}, by_provider AS (
+      SELECT user_id, tool, TOTAL(tokens) AS tokens FROM usage GROUP BY user_id, tool HAVING TOTAL(tokens) > 0
+    ), scores AS (
+      SELECT members.id, members.login AS label, TOTAL(by_provider.tokens) AS tokens
+      FROM by_provider JOIN members ON members.id = by_provider.user_id
+      ${provider === null ? '' : 'WHERE by_provider.tool = ?'}
+      GROUP BY members.id
     ), ranked AS (
       SELECT *, RANK() OVER (ORDER BY tokens DESC) AS rank, COUNT(*) OVER () AS participants,
         ROW_NUMBER() OVER (ORDER BY tokens DESC, label COLLATE NOCASE, id) AS row_num FROM scores
     )
-    SELECT * FROM ranked WHERE row_num <= 100 OR id = ? ORDER BY row_num`)
-    .bind(...params, viewerId).all<Standing & { id: string; participants: number; row_num: number }>();
+    SELECT 'profile' AS kind, id, label, tokens, rank, participants, row_num FROM ranked WHERE row_num <= 100 OR id = ?
+    UNION ALL
+    SELECT 'provider', NULL, tool, TOTAL(tokens), 0, COUNT(*), 0 FROM by_provider GROUP BY tool
+    ORDER BY kind, row_num, tokens DESC, label`)
+    .bind(...params, ...(provider === null ? [] : [provider]), viewerId)
+    .all<Standing & { kind: 'profile' | 'provider'; id: string | null; participants: number; row_num: number }>();
+  const profiles = results.filter(row => row.kind === 'profile');
   const position: PublicPosition = {
-    days: period.days, rank: results.find(row => row.id === viewerId)?.rank ?? null, participants: results[0]?.participants ?? 0,
+    days: period.days, rank: profiles.find(row => row.id === viewerId)?.rank ?? null, participants: profiles[0]?.participants ?? 0,
   };
-  const users = results.filter(row => row.row_num <= 100).map(({ rank, label, tokens }) => ({ rank, label, tokens }));
-  return { users, position };
+  const users = profiles.filter(row => row.row_num <= 100).map(({ rank, label, tokens }) => ({ rank, label, tokens }));
+  const providers: ProviderUsage[] = results.filter(row => row.kind === 'provider')
+    .map(({ label, tokens, participants }) => ({ tool: label, tokens, profiles: participants }));
+  return { users, position, providers };
 }
 
 export async function personalRankings(db: Db, userId: string, period: RankingPeriod): Promise<PersonalRankings> {

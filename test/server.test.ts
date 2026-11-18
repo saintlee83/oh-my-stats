@@ -1032,6 +1032,75 @@ test('the owner can compare device periods and see lifetime usage with no matchi
   }
 });
 
+test('the landing page shows the top of the public rankings, without ranking everyone on each visit', async () => {
+  const db = countingDb();
+  const context = app({ db, cache: fakeCache() });
+  const empty = await (await context.call('/')).text();
+  assert.doesNotMatch(empty, /Top of the rankings|dashboard\.svg/, 'a new server has nobody to show');
+
+  const token = await signIn(context);
+  await context.call('/v1/usage', api(token, 'PUT', upload(MACHINE_A)));
+  assert.doesNotMatch(await (await context.call('/')).text(), /href="\/u\/octo"/, 'a private profile is never shown');
+  await context.call('/v1/me', api(token, 'PATCH', { public: true }));
+
+  const rankingReads = () => db.sql.filter((sql) => sql.includes('WITH members')).length;
+  const landing = await context.call('/');
+  assert.equal(landing.headers.get('cache-control'), 'no-store');
+  const text = await landing.text();
+  assert.match(text, /<img src="\/u\/octo\/dashboard\.svg" alt="The developer dashboard of @octo"/);
+  assert.match(text, /1 ranked public profile, by lifetime AI tokens/);
+  assert.match(text, /<a href="\/u\/octo"><img src="https:\/\/avatars\.githubusercontent\.com\/octo\?s=56"[^>]*>@octo<\/a>/);
+  assert.match(text, /<strong>10<\/strong><\/td>/);
+  assert.ok(!text.includes(SECRET_NAME) && !text.includes(MACHINE_A));
+
+  const reads = rankingReads();
+  await context.call('/');
+  await context.call('/', { headers: { cookie: await webLogin(context) } });
+  assert.equal(rankingReads(), reads, 'the board is kept, not worked out again');
+
+  await context.call('/v1/me', api(token, 'PATCH', { public: false }));
+  assert.doesNotMatch(await (await context.call('/')).text(), /\/u\/octo/, 'going private takes the profile off the landing page at once');
+});
+
+test('pages load nothing the content policy would block, and share one frame', async () => {
+  const { context } = await published();
+  const session = await webLogin(context);
+  const pages = ['/', '/rankings', '/rankings?days=7', '/u/octo', '/nope'];
+  const signedIn = ['/', '/me', '/me/rankings', '/rankings', '/u/octo'];
+  for (const [path, init] of [...pages.map((path) => [path, {}] as const), ...signedIn.map((path) => [path, { headers: { cookie: session } }] as const)]) {
+    const response = await context.call(path, init);
+    const text = await response.text();
+    const policy = response.headers.get('content-security-policy') ?? '';
+    assert.match(policy, /default-src 'none'/, path);
+    // A drawing may point at its own patterns. Anything else named by address would be fetched.
+    assert.doesNotMatch(text, /<script|<link rel="stylesheet"|@import|url\((?!#)|<iframe/i, `${path} needs only what the policy allows`);
+    for (const [, source] of text.matchAll(/<img src="([^"]+)"/g)) {
+      assert.match(source, /^(\/(?!\/)|https:\/\/avatars\.githubusercontent\.com\/)/, `${path} loads ${source}`);
+    }
+    assert.match(text, /<a class="skip" href="#main">Skip to content<\/a>[\s\S]*<main id="main"/, path);
+    assert.match(text, /<meta name="description" content="[^"]{40,}">/, path);
+    assert.match(text, /<footer class="bottom">[\s\S]*href="https:\/\/github\.com\/saintlee83\/oh-my-stats"/, path);
+    assert.equal(text.match(/<h1[ >]/g)?.length, 1, `${path} has one main heading`);
+  }
+  const missing = await context.call('/nope');
+  assert.match(await missing.text(), /<p class="code">404<\/p><h1>Page not found\.<\/h1>/);
+  const own = await (await context.call('/u/octo', { headers: { cookie: session } })).text();
+  assert.match(own, /href="\/me#profile-header">Edit profile<\/a>/, 'the owner can go and edit their header');
+  assert.doesNotMatch(await (await context.call('/u/octo')).text(), /Edit profile/);
+});
+
+test('install commands are shown per system, each with the same next steps', async () => {
+  const context = app();
+  const session = await webLogin(context);
+  for (const page of [await context.call('/'), await context.call('/me', { headers: { cookie: session } })]) {
+    const text = await page.text();
+    assert.match(text, /<pre><code>curl -fsSL https:\/\/stats\.example\/install\.sh \| sh\noms login --server https:\/\/stats\.example\noms service install<\/code><\/pre>/);
+    assert.match(text, /<pre><code>irm https:\/\/stats\.example\/install\.ps1 \| iex\noms login --server https:\/\/stats\.example\noms service install<\/code><\/pre>/);
+    assert.equal(text.match(/type="radio" name="os"/g)?.length, 2);
+    assert.equal(text.match(/type="radio" name="os"[^>]* checked/g)?.length, 1, 'one system is shown to start with');
+  }
+});
+
 test('rankings reconcile tool figures, respect visibility, and keep device and provider ranks personal', async () => {
   const context = app({}, {
     'gh-token': octo, 'web-token': octo,
@@ -1095,6 +1164,9 @@ test('rankings reconcile tool figures, respect visibility, and keep device and p
   assert.match(html, />2,076</);
   assert.match(html, /href="\/u\/octo"/);
   assert.doesNotMatch(html, /office-laptop|studio-mac|beta-device|secret-user/);
+  assert.match(html, /3 ranked public profiles<\/p>/, 'signed out, the board names nobody');
+  assert.match(html, /<tr><td class="rank"><span class="place" data-place="1">1<\/span><\/td><td class="who"><a href="\/u\/octo"><img src="https:\/\/avatars\.githubusercontent\.com\/octo\?s=56"/);
+  assert.doesNotMatch(html, /class="me"|Ranking views/);
   const signedOut = await context.call('/me/rankings');
   assert.equal(signedOut.headers.get('location'), '/login');
   const cookie = await webLogin(context);
@@ -1102,12 +1174,20 @@ test('rankings reconcile tool figures, respect visibility, and keep device and p
   assert.equal(privatePage.headers.get('cache-control'), 'no-store');
   const privateHtml = await privatePage.text();
   assert.match(privateHtml, /Tokens \(30 days\)/);
-  assert.match(privateHtml, /All time · <strong>#1<\/strong> of 3 ranked public profiles/);
-  assert.match(privateHtml, /Last 7 days · <strong>#1<\/strong> of 3 ranked public profiles/);
+  assert.match(privateHtml, /All time<\/span><strong>#1<\/strong><span>of 3 ranked public profiles/);
+  assert.match(privateHtml, /Last 7 days<\/span><strong>#1<\/strong><span>of 3 ranked public profiles/);
   assert.match(privateHtml, /office-laptop[\s\S]+studio-mac[\s\S]+My providers/);
+  assert.doesNotMatch(privateHtml, /<span class="place" data-place|avatars\.githubusercontent\.com\/office/, 'devices and providers get no medals or avatars');
+  assert.match(privateHtml, /<a href="\/rankings\?days=30">Everyone<\/a><a href="\/me\/rankings\?days=30" aria-current="page">Mine<\/a>/);
+  const own = await (await context.call('/rankings?days=7', { headers: { cookie } })).text();
+  assert.match(own, /3 ranked public profiles · You are <strong>#1<\/strong>/);
+  assert.match(own, /<tr class="me">[\s\S]*?@octo<\/a><span class="badge">You<\/span>/, 'the viewer finds their own row');
+  assert.equal(own.match(/class="me"/g)?.length, 1);
   assert.match(await (await context.call('/me/rankings', { headers: { cookie } })).text(), />1,083</);
   await context.call('/v1/me', api(a, 'PATCH', { public: false }));
   assert.doesNotMatch(await (await context.call('/rankings')).text(), /href="\/u\/octo"/);
+  assert.match(await (await context.call('/rankings', { headers: { cookie } })).text(), /2 ranked public profiles · Your profile is private\./);
+  assert.match(await (await context.call('/me/rankings', { headers: { cookie } })).text(), /<strong>—<\/strong><span>Unranked · 2 ranked public profiles[\s\S]*Your profile is private\./);
   assert.deepEqual((await get(a)).machines, week.machines, 'private owners keep their own rankings');
   await context.call('/me/machines/' + MACHINE_B + '/delete', webPost(cookie, ''));
   assert.deepEqual((await get(a)).machines, [row(1, 'office-laptop', 44)]);
@@ -1138,6 +1218,59 @@ test('weekly card, day drilldown and provider shares agree across private and pu
   assert.match(recap, /Dated AI tokens/);
   const me = await (await context.call('/v1/me', api(token, 'GET'))).json() as { tokens: { weekly: { total: number } } };
   assert.equal(me.tokens.weekly.total, 200);
+});
+
+test('the public board ranks one provider at a time, with the scores each profile sees for itself', async () => {
+  const context = app({}, { 'gh-token': octo, 'web-token': octo, alpha: { id: 2, login: 'alpha' }, beta: { id: 3, login: 'beta' } });
+  const personal: Record<string, { label: string; tokens: number }[]> = {};
+  for (const [githubToken, login, day] of [
+    ['gh-token', 'octo', { 'codex/m': [300, 0, 0, 0, 1], 'claude/m': [50, 0, 0, 0, 1], 'local-ai/m': [7, 0, 0, 0, 1] }],
+    ['alpha', 'alpha', { 'codex/m': [500, 0, 0, 0, 1], 'pi/m': [20, 0, 0, 0, 1] }],
+    ['beta', 'beta', { 'claude/m': [80, 0, 0, 0, 1] }],
+  ] as const) {
+    const response = await context.call('/v1/auth/token', api(null, 'POST', { githubToken, machine: machine(MACHINE_A) }));
+    const { token } = await response.json() as { token: string };
+    assert.equal((await context.call('/v1/usage', api(token, 'PUT', { ...upload(MACHINE_A), days: { '2026-11-09': day } }))).status, 200);
+    await context.call('/v1/me', api(token, 'PATCH', { public: true }));
+    personal[login] = (await (await context.call('/v1/rankings?days=all', api(token, 'GET'))).json() as { providers: { label: string; tokens: number }[] }).providers;
+  }
+  const { publicRankings, rankingPeriod } = await import('../src/server/rankings.ts');
+  const lifetime = rankingPeriod('all', context.deps.now());
+  const own = (login: string, provider: string) => personal[login].find((row) => row.label === provider)!.tokens;
+
+  const everything = await publicRankings(context.deps.db, lifetime);
+  assert.deepEqual(everything.users.map((row) => [row.label, row.tokens]), [['alpha', 520], ['octo', 357], ['beta', 80]]);
+  assert.deepEqual(everything.providers, [
+    { tool: 'codex', tokens: 800, profiles: 2 }, { tool: 'claude', tokens: 130, profiles: 2 },
+    { tool: 'pi', tokens: 20, profiles: 1 }, { tool: 'local-ai', tokens: 7, profiles: 1 },
+  ]);
+  const codex = await publicRankings(context.deps.db, lifetime, '1', 'codex');
+  assert.deepEqual(codex.users, [{ rank: 1, label: 'alpha', tokens: own('alpha', 'Codex') }, { rank: 2, label: 'octo', tokens: own('octo', 'Codex') }]);
+  assert.deepEqual(codex.position, { days: 'all', rank: 2, participants: 2 });
+  assert.deepEqual(codex.providers, everything.providers, 'the providers on offer do not depend on the one chosen');
+  const week = await publicRankings(context.deps.db, rankingPeriod('7', context.deps.now()), '3', 'claude');
+  assert.deepEqual(week.users, [{ rank: 1, label: 'beta', tokens: 80 }, { rank: 2, label: 'octo', tokens: 50 }]);
+  assert.deepEqual(week.position, { days: 7, rank: 1, participants: 2 });
+
+  const all = await (await context.call('/rankings')).text();
+  assert.match(all, /<nav class="filters" aria-label="Providers"><a href="\/rankings\?days=all" aria-current="page">All providers<\/a><a href="\/rankings\?days=all&amp;provider=codex">Codex<\/a><a href="\/rankings\?days=all&amp;provider=claude">Claude Code<\/a><a href="\/rankings\?days=all&amp;provider=pi">Pi<\/a><\/nav>/);
+  assert.doesNotMatch(all, /local-ai/, 'a provider ID someone made up is not offered to everyone');
+  const board = await (await context.call('/rankings?days=7&provider=codex')).text();
+  assert.match(board, /<a href="\/rankings\?days=7&amp;provider=codex" aria-current="page">Codex<\/a>/);
+  assert.match(board, /<a href="\/rankings\?days=30&amp;provider=codex">Last 30 days<\/a>/, 'changing the period keeps the provider');
+  assert.match(board, /Top 100 public profiles · Codex<\/h2><p class="muted">2 ranked public profiles<\/p>/);
+  assert.match(board, /@alpha<\/a>[\s\S]*<strong>500<\/strong>[\s\S]*@octo<\/a>[\s\S]*<strong>300<\/strong>/);
+  assert.doesNotMatch(board, /@beta/);
+  const custom = await (await context.call('/rankings?provider=local-ai')).text();
+  assert.match(custom, /aria-current="page">local-ai<\/a>[\s\S]*@octo<\/a>[\s\S]*<strong>7<\/strong>/, 'it can still be asked for by address');
+  const unused = await context.call('/rankings?provider=amp');
+  assert.match(await unused.text(), /aria-current="page">Amp<\/a>[\s\S]*0 ranked public profiles[\s\S]*No token usage for this period/);
+  for (const bad of ['Codex', 'codex%20', '<b>', 'a'.repeat(33)]) assert.equal((await context.call(`/rankings?provider=${bad}`)).status, 400, bad);
+  const cookie = await webLogin(context);
+  assert.match(await (await context.call('/rankings?provider=pi', { headers: { cookie } })).text(), /1 ranked public profile · No ranked usage in these periods\./);
+
+  const profile = await (await context.call('/u/octo')).text();
+  assert.match(profile, /<a class="badge" href="\/rankings">#2 of 3 ranked public profiles, by lifetime AI tokens<\/a>/);
 });
 
 test('a profile can rank on lifetime figures even when it has no recent usage', async () => {

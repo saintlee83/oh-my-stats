@@ -52,8 +52,8 @@ import {
   type SessionRow,
   type UserRow,
 } from './db.ts';
-import { dashboardPage, errorPage, landingPage, profilePage, rankingsPage } from './pages.ts';
-import { personalRankings, publicRankings, rankingPeriod } from './rankings.ts';
+import { dashboardPage, errorPage, landingPage, profilePage, rankingsPage, REPO_URL, type LandingBoard } from './pages.ts';
+import { personalRankings, publicRankings, rankingPeriod, rankingProvider } from './rankings.ts';
 import { loadPrices } from './prices.ts';
 import { LOGO_SVG } from './logo.ts';
 import { BadRequest, cleanMachineName, parseGitHubMetrics, parseMachine, parseUsageUpload } from './wire.ts';
@@ -90,7 +90,7 @@ const MAX_GITHUB_BYTES = 256_000;
 const PUBLIC_CACHE = 'public, max-age=300';
 const CARD_KEYS = ['contributions', 'rhythm', 'languages', 'churn', 'tokens', 'coauthors', 'pulse'];
 /** Each release ships its own install scripts, so a script always matches the files it downloads. */
-export const LATEST_RELEASE = 'https://github.com/saintlee83/oh-my-stats/releases/latest/download';
+export const LATEST_RELEASE = `${REPO_URL}/releases/latest/download`;
 const INSTALL_SCRIPTS = new Set(['/install.sh', '/install.ps1']);
 
 const HTML_CSP =
@@ -271,6 +271,27 @@ async function cachedPublic(request: Request, deps: Deps, render: () => Promise<
   return response;
 }
 
+const LANDING_LEADERS = 5;
+/** Where a location keeps what the landing page shows of the rankings. No page is served from here. */
+const landingBoardKey = (origin: string) => new Request(`${origin}/cache/landing-board`);
+
+/**
+ * The top of the public rankings, for the landing page. Ranking every profile is too much
+ * work for the most visited page, so each location keeps the answer as long as a public page.
+ */
+async function landingBoard(origin: string, deps: Deps): Promise<LandingBoard> {
+  const key = landingBoardKey(origin);
+  const kept = await deps.cache?.match(key);
+  if (kept) return kept.json();
+  const { users, position } = await publicRankings(deps.db, rankingPeriod('all', deps.now()));
+  const board: LandingBoard = { leaders: users.slice(0, LANDING_LEADERS), participants: position.participants };
+  // An empty board isn't kept, so the first published profile shows at once.
+  if (deps.cache && board.leaders.length) {
+    deps.waitUntil(deps.cache.put(key, new Response(JSON.stringify(board), { headers: { 'content-type': 'application/json', 'cache-control': PUBLIC_CACHE } })));
+  }
+  return board;
+}
+
 /**
  * Removes a profile from this location's cache. Other locations let it expire, so a page
  * made private can stay visible there for up to five minutes.
@@ -282,6 +303,7 @@ async function purgeProfile(request: Request, deps: Deps, login: string): Promis
   const images = [`${base}/dashboard.svg`, ...COMPONENT_KEYS.map((key) => `${base}/components/${key}.svg`)];
   const urls = [
     base,
+    landingBoardKey(new URL(request.url).origin).url,
     ...CARD_KEYS.map((key) => `${base}/cards/${key}.txt`),
     ...images.flatMap((image) => THEME_NAMES.map((theme) => themed(image, theme))),
   ];
@@ -350,11 +372,11 @@ async function serveCard(login: string, key: string, deps: Deps): Promise<Respon
 async function renderProfile(login: string, request: Request, deps: Deps, viewer: UserRow | null): Promise<Response> {
   const user = await publicProfile(login, deps);
   if (!user) return html(errorPage(404, 'This profile is private or does not exist.', viewer), 404);
-  const { metrics } = await buildMetrics(user, deps);
+  const [{ metrics }, { position }] = await Promise.all([buildMetrics(user, deps), publicRankings(deps.db, rankingPeriod('all', deps.now()), user.id)]);
   const origin = new URL(request.url).origin;
   // The page names whoever is signed in, so only signed-out visits share a cached copy.
   const shared = !viewer && hasData(metrics);
-  const page = profilePage(user, renderDashboard(await withAvatar(metrics, user, origin, deps)), metrics.tokens, buildCards(metrics), availableComponents(metrics), origin, viewer);
+  const page = profilePage(user, renderDashboard(await withAvatar(metrics, user, origin, deps)), metrics.tokens, buildCards(metrics), availableComponents(metrics), origin, viewer, position);
   return html(page, 200, shared ? { 'cache-control': PUBLIC_CACHE } : {});
 }
 
@@ -490,8 +512,8 @@ async function handleApi(request: Request, path: string, deps: Deps): Promise<Re
   if (path === '/v1/rankings' && request.method === 'GET') {
     // Older v1 clients requesting no period expect a seven-day range with start and end dates.
     const period = rankingPeriod(new URL(request.url).searchParams.get('days') ?? '7', now);
-    const [board, personal] = await Promise.all([publicRankings(deps.db, period, session.user_id), personalRankings(deps.db, session.user_id, period)]);
-    return json({ period, ...board, ...personal });
+    const [{ users, position }, personal] = await Promise.all([publicRankings(deps.db, period, session.user_id), personalRankings(deps.db, session.user_id, period)]);
+    return json({ period, users, position, ...personal });
   }
 
   if (path === '/v1/usage' && request.method === 'PUT') {
@@ -577,7 +599,10 @@ async function route(request: Request, deps: Deps): Promise<Response> {
   if (path === '/favicon.ico') return new Response(null, { status: 301, headers: { location: '/favicon.svg', 'cache-control': 'public, max-age=86400' } });
   // `curl -fsSL https://ohmystats.dev/install.sh | sh` and `irm .../install.ps1 | iex` both follow this.
   if (INSTALL_SCRIPTS.has(path)) return new Response(null, { status: 302, headers: { location: `${LATEST_RELEASE}${path}`, 'cache-control': PUBLIC_CACHE } });
-  if (path === '/') return html(landingPage(url.origin, await viewerFromCookie(request, deps)));
+  if (path === '/') {
+    const [viewer, board] = await Promise.all([viewerFromCookie(request, deps), landingBoard(url.origin, deps)]);
+    return html(landingPage(url.origin, viewer, board));
+  }
   if (path === '/login') return startLogin(request, deps);
   if (path === '/auth/callback') return finishLogin(request, deps);
   if (path === '/me') return serveMe(request, deps);
@@ -595,8 +620,9 @@ async function route(request: Request, deps: Deps): Promise<Response> {
       ] as const);
       return html(rankingsPage(period, personal, viewer, boards.map(b => b.position)));
     }
-    const board = await publicRankings(deps.db, period, viewer?.id);
-    return html(rankingsPage(period, board.users, viewer, [board.position]));
+    const provider = rankingProvider(url.searchParams.get('provider'));
+    const board = await publicRankings(deps.db, period, viewer?.id, provider);
+    return html(rankingsPage(period, board.users, viewer, [board.position], { provider, providers: board.providers }));
   }
 
   const profile = /^\/u\/([A-Za-z0-9-]{1,39})(?:\/(dashboard\.svg|cards\/([a-z]+)\.txt|components\/([a-z]+)\.svg))?$/.exec(path);
