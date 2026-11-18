@@ -17,8 +17,23 @@ pub type Log<'a> = &'a (dyn Fn(&str) + Sync);
 
 /// A token that can read private repositories stays on this machine: it is only used here,
 /// and only the aggregated result is uploaded.
+fn configured_github_token(config: &Config) -> Option<String> {
+    std::env::var("OMS_GITHUB_TOKEN").ok().filter(|token| !token.is_empty()).or_else(|| config.github_token.clone().filter(|token| !token.is_empty()))
+}
+
 fn local_github_token(config: &Config) -> Option<String> {
-    std::env::var("OMS_GITHUB_TOKEN").ok().filter(|token| !token.is_empty()).or_else(|| config.github_token.clone()).or_else(gh_cli_token)
+    configured_github_token(config).or_else(gh_cli_token)
+}
+
+pub fn print_setup_hint(config: &Config) {
+    println!("\nGitHub repository stats are optional. Set them up on one machine.");
+    if configured_github_token(config).is_some() {
+        println!("Run `oms sync --github` to collect stats with your configured GitHub token.");
+    } else {
+        println!("Check `gh auth status`. If signed out, run `gh auth login` with the same GitHub account.");
+        println!("Run `oms sync --github`. If it reports missing scopes for your GitHub CLI login, run `gh auth refresh -s repo,read:org` and retry.");
+        println!("Without GitHub CLI, you can set OMS_GITHUB_TOKEN for the sync instead.");
+    }
 }
 
 /// Told to the server with each upload, so a machine without access isn't asked to collect.

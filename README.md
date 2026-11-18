@@ -80,6 +80,16 @@ When you run `oms status`, `oms sync`, or `oms rankings` in a terminal, the agen
 
 Every file in a release has build provenance from GitHub Actions. To check a download, run `gh attestation verify <file> --repo saintlee83/oh-my-stats`.
 
+### Include GitHub activity (optional)
+
+`oms login` is enough to track AI tokens. To include commits, pull requests and reviews, set up GitHub CLI on **one computer**. That computer collects GitHub activity for your whole account. [Install GitHub CLI](https://cli.github.com/)
+
+1. Run `gh auth status`. If you are signed out, run `gh auth login` and choose the same GitHub account you used for `oms login`.
+2. Run `oms sync --github` to collect your GitHub stats now.
+3. If the sync reports that your GitHub CLI login is missing `repo` or `read:org`, run `gh auth refresh -s repo,read:org`, approve the request, and repeat the sync. `repo` includes read and write access to public and private repositories you can access. OMS uses it to read activity. `read:org` allows reading organization and team membership. [GitHub's scope reference](https://docs.github.com/en/apps/oauth-apps/building-oauth-apps/scopes-for-oauth-apps)
+
+If you already supply a repository access token through `OMS_GITHUB_TOKEN`, run `oms sync --github` directly. The agent uses the credential on this computer and uploads aggregated statistics.
+
 ### Build from source
 
 Prebuilt agents cover macOS, Linux and Windows on x86_64 and ARM64. Elsewhere, or to run your own changes, build with [Rust](https://rustup.rs). On Windows, let rustup install the Visual Studio build tools when it offers.
@@ -90,8 +100,6 @@ cargo install --path oh-my-stats/agent
 ```
 
 The agent reads new log lines every 5 minutes and uploads once a day, so your numbers can be up to a day behind. A machine that was asleep or offline catches up when it comes back. Run `oms sync` to update right away, or change `uploadIntervalMinutes`.
-
-GitHub stats need read access to your repositories, and that access stays on your machine. The agent uses your [GitHub CLI](https://cli.github.com) login if you have one, after `gh auth refresh -s repo,read:org`. Otherwise, set `OMS_GITHUB_TOKEN` to a token with the `repo` and `read:org` scopes. Only one computer needs this: GitHub stats are collected once per account, by a computer that has access.
 
 ## Show it on your GitHub profile
 
