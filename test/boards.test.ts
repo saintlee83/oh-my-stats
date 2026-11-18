@@ -331,7 +331,7 @@ test('the providers board lists the known tools, and writes each change plainly'
   assert.match(html, /<span class="place">1<\/span><\/td><td class="who"><a href="\/rankings\?days=7&amp;provider=codex">Codex<\/a>/, 'a provider leads to the profiles that use it');
   assert.deepEqual([...html.matchAll(/<span class="place">(\d+)<\/span>/g)].map(([, rank]) => Number(rank)), [1, 2, 3, 4, 5, 5]);
   assert.doesNotMatch(html, /local-ai|Cline CLI|cline-cli|Gemini CLI|\/u\/| data-place=/, 'no unknown provider, nothing only a private profile used, no provider without usage, no profiles, no medals');
-  assert.match(html, /Adoption is their share of all 40 ranked public profiles\. Change is the difference in active profiles from 2026-10-27 through 2026-11-02\. It comes with a percentage when the provider had at least 25 active profiles then\. Only the tools the agent reads on its own are listed/);
+  assert.match(html, /Adoption is their share of all 40 ranked public profiles\. Change is the difference in active profiles from 2026-10-27 through 2026-11-02\. It comes with a percentage when the provider had at least 25 active profiles then\. Only the tools <code>oms<\/code> reads on its own are listed/);
 
   const lifetime = await (await context.call('/rankings/providers')).text();
   assert.match(lifetime, /<a href="\/rankings\/providers\?days=all" aria-current="page">All time<\/a>/);

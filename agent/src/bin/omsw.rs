@@ -41,6 +41,6 @@ fn main() {
 
 #[cfg(not(windows))]
 fn main() {
-    eprintln!("omsw runs the agent in the background on Windows. Use `oms service install` instead.");
+    eprintln!("omsw runs oms in the background on Windows. Use `oms service install` instead.");
     std::process::exit(2);
 }

@@ -53,7 +53,7 @@ fn take_lock(path: &Path) -> Result<()> {
     if let Ok(pid) = fs::read_to_string(path) {
         let pid = pid.trim();
         if pid != std::process::id().to_string() && pid_alive(pid) {
-            bail!("The agent is already running (pid {pid}).");
+            bail!("Another `oms daemon` is already running (pid {pid}).");
         }
     }
     fs::write(path, std::process::id().to_string())?;

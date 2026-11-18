@@ -11,9 +11,9 @@
 
 <p align="center">
   <a href="https://github.com/saintlee83/oh-my-stats/actions/workflows/ci.yml"><img src="https://github.com/saintlee83/oh-my-stats/actions/workflows/ci.yml/badge.svg" alt="CI"></a>
-  <a href="https://github.com/saintlee83/oh-my-stats/releases/latest"><img src="https://img.shields.io/github/v/release/saintlee83/oh-my-stats?label=agent" alt="Latest release of the agent"></a>
+  <a href="https://github.com/saintlee83/oh-my-stats/releases/latest"><img src="https://img.shields.io/github/v/release/saintlee83/oh-my-stats?label=oms" alt="Latest release of oms"></a>
   <a href="LICENSE"><img src="https://img.shields.io/badge/license-MIT-blue" alt="MIT license"></a>
-  <img src="https://img.shields.io/badge/agent-macOS%20%C2%B7%20Linux%20%C2%B7%20Windows-555" alt="Agent runs on macOS, Linux and Windows">
+  <img src="https://img.shields.io/badge/oms-macOS%20%C2%B7%20Linux%20%C2%B7%20Windows-555" alt="oms runs on macOS, Linux and Windows">
   <a href="https://ohmystats.dev"><img src="https://img.shields.io/badge/site-ohmystats.dev-2f81f7" alt="ohmystats.dev"></a>
 </p>
 
@@ -34,9 +34,9 @@
   </a>
 </p>
 
-Sign in with GitHub, run a small agent on each computer, and see the result on your dashboard or your GitHub profile.
+Sign in with GitHub, run `oms` on each computer, and see the result on your dashboard or your GitHub profile.
 
-- **Continuous:** a background agent records usage as you work, and keeps its own record, so history survives when AI tools delete their logs. It uploads once a day, and `oms sync` uploads right away.
+- **Continuous:** `oms` records usage in the background as you work, and keeps its own record, so history survives when AI tools delete their logs. It uploads once a day, and `oms sync` uploads right away.
 - **Multi-machine:** every computer signs in to the same account, and their numbers are combined correctly.
 - **Your tools:** Claude Code, Codex, Gemini CLI and [twelve more](#automatically-collected-histories) are read on their own, and any other tool can report through a [JSONL file](#add-a-provider-with-jsonl).
 - **Real numbers:** GitHub's contribution API hides private work, so commits are counted by walking each repository instead.
@@ -49,16 +49,16 @@ Sign in with GitHub, run a small agent on each computer, and see the result on y
 ```mermaid
 flowchart LR
   subgraph computer ["Each computer"]
-    logs["Local AI tool usage logs"] --> agent["oms agent<br/>Rust, local SQLite"]
-    repos["Your GitHub repositories<br/>read with a local token"] --> agent
+    logs["Local AI tool usage logs"] --> oms["oms<br/>Rust, local SQLite"]
+    repos["Your GitHub repositories<br/>read with a local token"] --> oms
   end
-  agent -- "totals only" --> server["Server<br/>Cloudflare Workers + D1"]
+  oms -- "totals only" --> server["Server<br/>Cloudflare Workers + D1"]
   server --> views["Dashboard, profile, rankings,<br/>groups and README images"]
 ```
 
 ## Get started
 
-Install the agent on macOS or Linux:
+Install `oms` on macOS or Linux:
 
 ```sh
 curl -fsSL https://ohmystats.dev/install.sh | sh
@@ -79,9 +79,9 @@ oms service install   # keep tracking in the background
 oms publish           # optional: make your profile public
 ```
 
-Repeat this on each computer. On Windows, `oms service install` adds the agent to your startup apps, so it needs no administrator rights.
+Repeat this on each computer. On Windows, `oms service install` adds `oms` to your startup apps, so it needs no administrator rights.
 
-The agent reads new log lines every 5 minutes and uploads once a day, so your numbers can be up to a day behind. A machine that was asleep or offline catches up when it comes back. Run `oms sync` to update right away, or change `uploadIntervalMinutes`.
+`oms` reads new log lines every 5 minutes and uploads once a day, so your numbers can be up to a day behind. A machine that was asleep or offline catches up when it comes back. Run `oms sync` to update right away, or change `uploadIntervalMinutes`.
 
 Every file in a release has build provenance from GitHub Actions. To check a download, run `gh attestation verify <file> --repo saintlee83/oh-my-stats`.
 
@@ -93,19 +93,19 @@ Every file in a release has build provenance from GitHub Actions. To check a dow
 2. Run `oms sync --github` to collect your GitHub stats now.
 3. If the sync reports that your GitHub CLI login is missing `repo` or `read:org`, run `gh auth refresh -s repo,read:org`, approve the request, and repeat the sync. `repo` includes read and write access to public and private repositories you can access. OMS uses it to read activity. `read:org` allows reading organization and team membership. [GitHub's scope reference](https://docs.github.com/en/apps/oauth-apps/building-oauth-apps/scopes-for-oauth-apps)
 
-If you already supply a repository access token through `OMS_GITHUB_TOKEN`, run `oms sync --github` directly. The agent uses the credential on this computer and uploads aggregated statistics.
+If you already supply a repository access token through `OMS_GITHUB_TOKEN`, run `oms sync --github` directly. `oms` uses the credential on this computer and uploads aggregated statistics.
 
-### Update the agent
+### Update `oms`
 
-Run `oms update`. It asks GitHub for the newest stable release. If that is newer than yours, it downloads the release's own install script, checks it against the release's checksums, and runs it, so the new `oms` goes where the old one is. If the agent runs in the background, it restarts on the new version. On Windows the installer stops the running `oms` to replace it, and finishes on its own. `oms update --check` only says whether a newer release exists.
+Run `oms update`. It asks GitHub for the newest stable release. If that is newer than yours, it downloads the release's own install script, checks it against the release's checksums, and runs it, so the new `oms` goes where the old one is. If `oms` runs in the background, it restarts on the new version. On Windows the installer stops the running `oms` to replace it, and finishes on its own. `oms update --check` only says whether a newer release exists.
 
 `oms update` arrived in 0.3.1. On an earlier version, run the install command again, which does the same. With the install command, set `OMS_VERSION` to install a particular release, such as `v0.1.0`, or `OMS_INSTALL_DIR` to put `oms` somewhere else.
 
-When you run `oms status`, `oms sync`, or `oms rankings` in a terminal, the agent checks GitHub for a newer stable release up to once a day. If one is available, it says so and names the command to run: `oms update`. Set `OMS_NO_UPDATE_CHECK=1` to turn off these notices and checks.
+When you run `oms status`, `oms sync`, or `oms rankings` in a terminal, `oms` checks GitHub for a newer stable release up to once a day. If one is available, it says so and names the command to run: `oms update`. Set `OMS_NO_UPDATE_CHECK=1` to turn off these notices and checks.
 
 ### Build from source
 
-Prebuilt agents cover macOS, Linux and Windows on x86_64 and ARM64. Elsewhere, or to run your own changes, build with [Rust](https://rustup.rs). On Windows, let rustup install the Visual Studio build tools when it offers.
+Prebuilt releases cover macOS, Linux and Windows on x86_64 and ARM64. Elsewhere, or to run your own changes, build with [Rust](https://rustup.rs). On Windows, let rustup install the Visual Studio build tools when it offers.
 
 ```sh
 git clone https://github.com/saintlee83/oh-my-stats
@@ -146,7 +146,7 @@ Or show only the parts you want, in any order. Each part is its own image, as wi
 
 Your profile page lists the embed code for every part that has data. A part without data yet shows a short note instead of a broken image.
 
-The `profile` part, which also opens the dashboard, comes from your GitHub profile. To change what it says, fill in **Profile header** on your dashboard at [ohmystats.dev/me](https://ohmystats.dev/me): a job title, a company, a status such as *Open to work* or *Hiring*, and more. Any field you leave empty keeps using your GitHub profile, which the agent reads once a day.
+The `profile` part, which also opens the dashboard, comes from your GitHub profile. To change what it says, fill in **Profile header** on your dashboard at [ohmystats.dev/me](https://ohmystats.dev/me): a job title, a company, a status such as *Open to work* or *Hiring*, and more. Any field you leave empty keeps using your GitHub profile, which `oms` reads once a day.
 
 The `year` part shows the current year, in your timezone, once it has usage, and the latest year with usage until then. To keep showing one year after it ends, name it. A year without usage shows the default instead:
 
@@ -224,7 +224,7 @@ Run `oms preview` to see the next usage request, or an ordered JSON array when c
 
 The site's [privacy page](https://ohmystats.dev/privacy) covers the rest: what the server stores, the two cookies it sets, who else is involved, and how to delete your data. Its [terms](https://ohmystats.dev/terms) cover using the hosted service.
 
-**Sign-in:** the server only ever receives a token that proves who you are. It comes from a GitHub App with no permissions, so it can't read your repositories. The server uses it once and doesn't store it, and only accepts tokens issued to its own app. It stores a hash of its own session tokens. The agent refuses to send a GitHub token with more access than that. A machine's sign-in expires after 180 days without an upload, and signing in again replaces it.
+**Sign-in:** the server only ever receives a token that proves who you are. It comes from a GitHub App with no permissions, so it can't read your repositories. The server uses it once and doesn't store it, and only accepts tokens issued to its own app. It stores a hash of its own session tokens. `oms` refuses to send a GitHub token with more access than that. A machine's sign-in expires after 180 days without an upload, and signing in again replaces it.
 
 **Publishing:** a private profile looks the same as one that doesn't exist. Publishing shows your totals per model and per day, and lists you in the public rankings. It also lists your profile in the site's `sitemap.xml`, where search engines look for pages. Where a link to your profile is shared, its preview image shows your login, lifetime AI tokens, rank, contributions this year and a calendar of the last 53 weeks of AI usage. Machine names are never public. Public pages are cached for 5 minutes, so after you unpublish, a copy can stay visible for up to that long.
 
@@ -260,7 +260,7 @@ A machine's id comes from its hardware, so reinstalling doesn't register it twic
 
 Every board covers all time, the last 7 or 30 days, this month or last month. The rest of this section says how each one counts.
 
-Open **Rankings** (`/rankings`) to see published profiles by token usage, 100 to a page (`?page=2`). Each row shows the profile's name and login, the short figure, the exact one, and a bar comparing it with the first row on the page. Above the table are the number of ranked profiles and the tokens they used together. Choose a provider to rank by that tool alone, such as `/rankings?provider=codex`. The home page shows the first five profiles and the dashboard of the one ranked first, and a public profile shows its lifetime rank. **My rankings** (`/me/rankings`) shows your devices and providers, including when your profile is private. A signed-in agent can show all three tables with `oms rankings`.
+Open **Rankings** (`/rankings`) to see published profiles by token usage, 100 to a page (`?page=2`). Each row shows the profile's name and login, the short figure, the exact one, and a bar comparing it with the first row on the page. Above the table are the number of ranked profiles and the tokens they used together. Choose a provider to rank by that tool alone, such as `/rankings?provider=codex`. The home page shows the first five profiles and the dashboard of the one ranked first, and a public profile shows its lifetime rank. **My rankings** (`/me/rankings`) shows your devices and providers, including when your profile is private. On a signed-in computer, `oms rankings` shows all three tables.
 
 The website and CLI default to **All time**, using the lifetime token total shown by `oms status`. Choose **Last 7 days** or **Last 30 days** (CLI `--days 7` or `--days 30`) to rank dated usage through today's UTC date. The website also has **This month**, from the first of the month through today, and **Last month**, the whole calendar month before (`?days=month` and `?days=last-month`), both in UTC. API clients can request lifetime totals with `GET /v1/rankings?days=all`. Omitting `days` on the v1 API keeps its seven-day default, and the API takes all time, 7 days and 30 days only.
 
@@ -268,7 +268,7 @@ Rankings include input, output, cache reads and cache writes. Profiles with posi
 
 **By estimated cost** (`/rankings?sort=cost`) ranks the same profiles by what their logged responses in the period would cost at public API list prices, and shows the tokens of those responses beside the cost. It is an estimate, not what anyone paid, because subscription plans pay differently. It prices only usage found in logs, so it is lower than the cost on a profile's own page when a tool reports more usage than its logs hold. A model without a list price adds tokens but no cost, a profile with no priced usage is not ranked, and equal costs share a rank.
 
-Two more boards sit beside the profiles and take the same periods. **Providers** (`/rankings/providers`) ranks the tools the agent reads on its own by how many published profiles used each one in the period, then by tokens. It shows active profiles, adoption (their share of all ranked profiles), tokens, and the change in active profiles from the period before: as many days, or the whole month before. The change reads `+3`, `−2` or `new`, with a percentage only when the period before had at least 25 active profiles. All time has no change. **Models** (`/rankings/models`) ranks up to 100 models by how many published profiles logged usage of each one. It shows the provider most of a model's tokens came through, active profiles, adoption among the profiles with logged usage, tokens, cost at list prices and the same change. Provider IDs and model names are chosen by whoever uploads them, so a provider ID the agent does not know is never listed, a model is listed only when it has a public list price, and a dated model name counts as the model it is priced as. Every board counts published profiles only.
+Two more boards sit beside the profiles and take the same periods. **Providers** (`/rankings/providers`) ranks the tools `oms` reads on its own by how many published profiles used each one in the period, then by tokens. It shows active profiles, adoption (their share of all ranked profiles), tokens, and the change in active profiles from the period before: as many days, or the whole month before. The change reads `+3`, `−2` or `new`, with a percentage only when the period before had at least 25 active profiles. All time has no change. **Models** (`/rankings/models`) ranks up to 100 models by how many published profiles logged usage of each one. It shows the provider most of a model's tokens came through, active profiles, adoption among the profiles with logged usage, tokens, cost at list prices and the same change. Provider IDs and model names are chosen by whoever uploads them, so a provider ID `oms` does not know is never listed, a model is listed only when it has a public list price, and a dated model name counts as the model it is priced as. Every board counts published profiles only.
 
 ## Groups
 
@@ -291,11 +291,11 @@ Signed-in users can compare lifetime and seven-day public positions on **My rank
 
 Your dashboard, public token card and `oms status` compare the most recent seven calendar days (including today) with the preceding seven. Each provider also shows active days, logged responses and average tokens per logged response over 30 days. Weekly volumes use the same daily totals as the chart. Response averages use only tokens and response counts from local logs. The chart groups smaller providers under “Others” when more than four are present. The table lists every provider.
 
-Gemini CLI sessions under `~/.gemini/tmp/<project>/chats/session-*.jsonl` and older `session-*.json` files are discovered automatically. Cached input is counted once, tool-prompt tokens contribute to input, and thinking tokens contribute to output. Repeated message records count once by message ID. Gemini and imported usage cover the machines running the agent. [Gemini CLI recording format](https://github.com/google-gemini/gemini-cli/blob/main/packages/core/src/services/chatRecordingTypes.ts)
+Gemini CLI sessions under `~/.gemini/tmp/<project>/chats/session-*.jsonl` and older `session-*.json` files are discovered automatically. Cached input is counted once, tool-prompt tokens contribute to input, and thinking tokens contribute to output. Repeated message records count once by message ID. Gemini and imported usage cover the machines running `oms`. [Gemini CLI recording format](https://github.com/google-gemini/gemini-cli/blob/main/packages/core/src/services/chatRecordingTypes.ts)
 
 ### Automatically collected histories
 
-Besides Claude Code, Claude Desktop agent sessions, Codex and Gemini CLI, the agent discovers these histories on the machine where you run `oms`. An existing history is included on the first scan. Run `oms preview` to inspect its daily totals.
+Besides Claude Code, Claude Desktop agent sessions, Codex and Gemini CLI, `oms` discovers these histories on the machine it runs on. An existing history is included on the first scan. Run `oms preview` to inspect its daily totals.
 
 | Provider ID | Default local source | Usage record |
 |---|---|---|
@@ -356,18 +356,18 @@ The server is a single Cloudflare Worker with a D1 database, and has no runtime 
    npx wrangler deploy
    ```
 
-Then point agents at it with `oms login --server https://your-server`.
+Then sign each computer in to it with `oms login --server https://your-server`.
 
 To update a server, apply any new migrations before deploying: `npx wrangler d1 migrations apply DB --remote`, then `npx wrangler deploy`. A page that needs a table the database doesn't have yet fails until they are applied.
 
 ## Known limits
 
-- **Claude Code has no account-wide figure** for individual plans in its docs, so a machine without the agent isn't counted. Its statistics file isn't a public format, so a future version could change it. If it does, the agent keeps the last known total and uses logs.
+- **Claude Code has no account-wide figure** for individual plans in its docs, so a machine without `oms` isn't counted. Its statistics file isn't a public format, so a future version could change it. If it does, `oms` keeps the last known total and uses logs.
 - **Codex's account total** assumes all your machines use one Codex account.
-- **AI tools:** The agent reads Claude Code, Claude Desktop agent sessions, Codex, Gemini CLI and the twelve histories listed above. Other providers can export usage events in JSONL.
+- **AI tools:** `oms` reads Claude Code, Claude Desktop agent sessions, Codex, Gemini CLI and the twelve histories listed above. Other providers can export usage events in JSONL.
 - **Default branches only.** Commits still on other branches aren't walked, which matches how GitHub counts contributions. Your GitHub graph can show more than can be itemized, for example work in repositories that were later deleted.
 - **Churn reads the first 300 files of a commit**, and treats a commit over 20,000 lines as a bulk import. Change this with `maxCommitLines` in `~/.oh-my-stats/config.json`.
-- **On Windows**, Windows can't replace a running program. The install script and `oms update` stop the agent and start it again for you, but with `cargo install`, run `oms service uninstall` first and `oms service install` afterwards. The agent's folder is kept private by your user folder's permissions, rather than by its own.
+- **On Windows**, Windows can't replace a running program. The install script and `oms update` stop `oms` and start it again for you, but with `cargo install`, run `oms service uninstall` first and `oms service install` afterwards. The folder where `oms` keeps its state is kept private by your user folder's permissions, rather than by its own.
 - **Releases aren't signed by Apple or Microsoft.** The install scripts aren't affected, but a file downloaded with a browser can be blocked by Gatekeeper on macOS or flagged by SmartScreen on Windows.
 - **Uploads are capped** at 20,000 changed rows per account per day. Anything over that goes through the next day. An account can have 50 machines.
 - **Rate limits are approximate.** They use Cloudflare's rate limiting, which counts per location and can briefly let requests through above the limit.
@@ -393,7 +393,7 @@ Environment variables:
 
 | Variable | Meaning |
 |---|---|
-| `OMS_HOME` | Where the agent keeps its state, instead of `~/.oh-my-stats` |
+| `OMS_HOME` | Where `oms` keeps its state, instead of `~/.oh-my-stats` |
 | `OMS_SERVER` | The server `oms login` signs in to, when `--server` isn't given |
 | `OMS_TIMEZONE` | An IANA zone, used instead of `timezone` above |
 | `OMS_GITHUB_TOKEN` | A token that can read your repositories, for collecting GitHub activity without GitHub CLI. It is used on this machine and never uploaded |
@@ -417,7 +417,7 @@ cargo run -- login --server http://localhost:8787 --gh
 cargo run -- sync
 ```
 
-`oms login` replaces the sign-in kept in the agent's folder, so `OMS_HOME` gives the development agent a folder of its own. With `ALLOW_ANY_GITHUB_TOKEN=true` in `.dev.vars`, a local server accepts your GitHub CLI login, so you don't need a GitHub App to develop. The server ignores this setting anywhere but this computer, and the agent only uses `--gh` with a server on this computer.
+`oms login` replaces the sign-in kept in `~/.oh-my-stats`, so `OMS_HOME` gives the development build a folder of its own. With `ALLOW_ANY_GITHUB_TOKEN=true` in `.dev.vars`, a local server accepts your GitHub CLI login, so you don't need a GitHub App to develop. The server ignores this setting anywhere but this computer, and `oms` only uses `--gh` with a server on this computer.
 
 [CONTRIBUTING.md](CONTRIBUTING.md) has the rest: how the code is laid out, what a change needs before it is merged, how to add an AI tool, a page, a README image or a table, and how a release is made.
 

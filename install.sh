@@ -1,11 +1,11 @@
 #!/bin/sh
-# Installs the oh-my-stats agent, `oms`, on macOS or Linux.
+# Installs `oms`, the oh-my-stats program, on macOS or Linux.
 #
 #   curl -fsSL https://ohmystats.dev/install.sh | sh
 #
 # It downloads the latest release from GitHub, checks it against the release's checksums,
-# and puts `oms` in ~/.local/bin. Run it again to update: a background agent that's already
-# set up restarts on the new version.
+# and puts `oms` in ~/.local/bin. Run it again to update: if `oms` already runs in the
+# background, it restarts on the new version.
 #
 #   OMS_VERSION       a release to install instead of the latest, such as v0.1.0
 #   OMS_INSTALL_DIR   where to put `oms`, instead of ~/.local/bin
@@ -34,7 +34,7 @@ esac
 case $(uname -m) in
   x86_64 | amd64) arch=x86_64 ;;
   arm64 | aarch64) arch=aarch64 ;;
-  *) fail "there's no prebuilt agent for $(uname -m). Build it from source: https://github.com/$repo#build-from-source" ;;
+  *) fail "there's no prebuilt oms for $(uname -m). Build it from source: https://github.com/$repo#build-from-source" ;;
 esac
 
 # A terminal running under Rosetta reports x86_64 on Apple silicon, where the native build is better.
@@ -62,7 +62,7 @@ download() {
   elif command -v wget >/dev/null 2>&1; then
     wget -q -O "$2" "$1"
   else
-    fail "curl or wget is needed to download the agent"
+    fail "curl or wget is needed to download oms"
   fi
 }
 
@@ -92,7 +92,7 @@ fi
 
 tar -xzf "$tmp/$archive" -C "$tmp" oms
 
-# Moving the new file into place, rather than writing over the old one, leaves an agent
+# Moving the new file into place, rather than writing over the old one, leaves an `oms`
 # that's running undisturbed until it restarts.
 mkdir -p "$install_dir"
 oms=$install_dir/oms
@@ -102,7 +102,7 @@ chmod 755 "$staged"
 mv -f "$staged" "$oms"
 staged=
 
-installed=$("$oms" --version) || fail "the agent was installed to $oms, but it didn't run"
+installed=$("$oms" --version) || fail "oms was installed to $oms, but it didn't run"
 say "Installed $installed to $oms"
 
 case ":$PATH:" in
@@ -122,12 +122,12 @@ case ":$PATH:" in
     ;;
 esac
 
-# An agent that already runs in the background moves to the new version.
+# If oms already runs in the background, it moves to the new version.
 if [ -f "$HOME/Library/LaunchAgents/dev.oh-my-stats.agent.plist" ] || [ -f "$HOME/.config/systemd/user/oh-my-stats.service" ]; then
   if "$oms" service install >/dev/null; then
-    say "" "The background agent restarted on the new version."
+    say "" "The background service restarted on the new version."
   else
-    say "" "Couldn't restart the background agent. Run: $cmd service install"
+    say "" "Couldn't restart the background service. Run: $cmd service install"
   fi
 elif [ -z "${OMS_UPDATING:-}" ]; then
   say "" "Next, sign this machine in and keep it tracking:" "" \

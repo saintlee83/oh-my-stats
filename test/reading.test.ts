@@ -81,7 +81,7 @@ test('how we count says what each number is and where it stops being reliable', 
     'It cannot check that the usage happened',
     '20,000 changed rows per account per day',
   ]) assert.ok(page.includes(fact), fact);
-  assert.ok(page.includes(`The agent finds ${PROVIDERS.size} tools on its own`));
+  assert.ok(page.includes(`<code>oms</code> finds ${PROVIDERS.size} tools on its own`));
   for (const name of PROVIDERS.values()) assert.ok(page.includes(name), name);
   assert.doesNotMatch(page, /Last updated/, 'only the two pages kept as a record carry a date');
 });
@@ -266,8 +266,8 @@ test('the landing page explains how it works in three steps and answers question
 test('the figures strip counts profiles and their tokens only once three are ranked', async () => {
   const context = app({}, PEOPLE);
   const strip = async () => (/<ul class="tally wrap">(.*?)<\/ul>/s.exec(await text(context, '/')) ?? [])[1];
-  const tools = `<li><strong>${PROVIDERS.size}</strong> <span>AI tools the agent reads on its own</span></li>`;
-  assert.equal(await strip(), tools, 'a new server still says what the agent reads');
+  const tools = `<li><strong>${PROVIDERS.size}</strong> <span>AI tools read automatically</span></li>`;
+  assert.equal(await strip(), tools, 'a new server still says how many tools are read');
 
   await join(context, 'gh-token', true);
   await join(context, 'alpha', true);

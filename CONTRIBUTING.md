@@ -14,8 +14,8 @@ Thank you for helping. This guide covers how the code is laid out, how to run it
 
 ## What to work on
 
-- **Bugs.** [Open an issue](https://github.com/saintlee83/oh-my-stats/issues) with what you ran, what you expected and what happened. Include `oms --version` and your operating system. When a number is wrong, the output of `oms preview` shows what the agent counted, and holds only totals. Take out anything you would rather not share.
-- **A tool that isn't read yet.** The agent reads fifteen AI tools on its own. Adding one is the most common contribution, and [has its own steps below](#add-an-ai-tool).
+- **Bugs.** [Open an issue](https://github.com/saintlee83/oh-my-stats/issues) with what you ran, what you expected and what happened. Include `oms --version` and your operating system. When a number is wrong, the output of `oms preview` shows what `oms` counted, and holds only totals. Take out anything you would rather not share.
+- **A tool that isn't read yet.** `oms` reads fifteen AI tools on its own. Adding one is the most common contribution, and [has its own steps below](#add-an-ai-tool).
 - **Something larger**, such as a new page, a new board or a change to what is uploaded. Open an issue first, so the idea can be discussed before you write it.
 
 A small fix can go straight to a pull request.
@@ -24,10 +24,10 @@ Some changes are declined whatever their merit, because the project promises oth
 
 ## How the code is laid out
 
-There are two programs. The agent runs on each computer, and the server is one Cloudflare Worker.
+There are two programs. `oms` runs on each computer, and the server is one Cloudflare Worker. In the code, `oms` is called the agent, after the folder it lives in.
 
 ```
-agent/                    The agent, `oms`, in Rust
+agent/                    `oms`, in Rust
   src/main.rs             The commands
   src/scan.rs             Finds each tool's logs and reads what is new
   src/parse.rs            Claude Code and Codex logs, and the usage event every reader produces
@@ -48,7 +48,7 @@ src/server/               Routes, pages, queries and sign-in
   rankings.ts, boards.ts  The queries behind the boards, and board-pages.ts draws them
   groups.ts, grouppages.ts, grouproutes.ts
   reading.ts              How we count, privacy, terms, robots.txt and the sitemap
-  wire.ts                 Checks everything an agent sends
+  wire.ts                 Checks everything `oms` sends
   db.ts                   The queries, over the small part of D1 the app uses
 src/shared/               Code with no server in it: numbers, time, and drawing
   render/                 The SVG dashboard, its parts, the card, the badge and the preview PNG
@@ -66,9 +66,9 @@ You need:
 
 - [Node.js](https://nodejs.org) 22.18 or newer, and [pnpm](https://pnpm.io) 10. CI uses Node 24.
 - [Rust](https://rustup.rs), the current stable release. On Windows, let rustup install the Visual Studio build tools when it offers.
-- [GitHub CLI](https://cli.github.com), signed in, to sign the agent in to a server on your computer.
+- [GitHub CLI](https://cli.github.com), signed in, to sign `oms` in to a server on your computer.
 
-You only need the first to work on the server, and the second to work on the agent.
+You only need the first to work on the server, and the second to work on `oms`.
 
 Run the server:
 
@@ -81,7 +81,7 @@ pnpm dev             # http://localhost:8787
 
 `.dev.vars` sets `ALLOW_ANY_GITHUB_TOKEN=true`, so the local server accepts your GitHub CLI login and you don't need a GitHub App. The server ignores that setting for any request that doesn't come from this computer.
 
-Then point an agent at it, from a second terminal:
+Then sign a development build of `oms` in to it, from a second terminal:
 
 ```sh
 cd agent
@@ -91,7 +91,7 @@ cargo run -- sync
 cargo run -- publish
 ```
 
-Set `OMS_HOME` first. `oms login` replaces the sign-in kept in the agent's folder, so without it, the `oms` you use every day would start sending to your local server. In PowerShell, that line is `$env:OMS_HOME = "$HOME\.oh-my-stats-dev"`. The development agent still reads your real AI tool logs, which is what gives the local pages something to show. The first `sync` reads your whole history, and if GitHub CLI is signed in it also walks your repositories for GitHub activity, so it can take several minutes.
+Set `OMS_HOME` first. `oms login` replaces the sign-in kept in `~/.oh-my-stats`, so without it, the `oms` you use every day would start sending to your local server. In PowerShell, that line is `$env:OMS_HOME = "$HOME\.oh-my-stats-dev"`. The development build still reads your real AI tool logs, which is what gives the local pages something to show. The first `sync` reads your whole history, and if GitHub CLI is signed in it also walks your repositories for GitHub activity, so it can take several minutes.
 
 Now open http://localhost:8787. Signing in on the website needs a GitHub App, so without one you work with the public pages: `/u/<your login>` once you have run `publish`, `/rankings`, and the images under `/u/<your login>/`. To see the pages behind sign-in, such as your dashboard at `/me`, create an app as [Run your own server](README.md#run-your-own-server) describes, with `http://localhost:8787/auth/callback` as its callback URL, and put its client ID and secret in `.dev.vars`.
 
@@ -105,7 +105,7 @@ pnpm test
 cd agent && cargo test --locked
 ```
 
-CI runs the server checks on Linux, and the agent's tests on Linux, macOS and Windows. A pull request that changes an install script, the release workflow or the agent's `Cargo.toml` or `Cargo.lock` also builds all six release targets and installs the build with the script.
+CI runs the server checks on Linux, and the tests of `oms` on Linux, macOS and Windows. A pull request that changes an install script, the release workflow, `agent/Cargo.toml` or `agent/Cargo.lock` also builds all six release targets and installs the build with the script.
 
 A pull request should have:
 
@@ -132,7 +132,7 @@ These are what the project promises its users. A change that breaks one is a bug
 - **No runtime dependencies.** The Worker is plain TypeScript. Pages and images are built as strings. `package.json` has development tools only.
 - **Pages run no scripts.** The content security policy is `default-src 'none'` with inline styles, the site's own images and GitHub avatars. Menus, tabs and dialogs are made with CSS and HTML alone. Pages load no fonts and nothing from another site.
 - **Everything shown is escaped.** Names, descriptions and model names come from users and from uploads. Put them in a page through `esc` in `src/server/pages.ts`, and in an image through `esc` in `src/shared/render/svg.ts`.
-- **Everything an agent sends is checked** in `src/server/wire.ts`, with a limit on its size. Model and provider names end up on public pages.
+- **Everything `oms` sends is checked** in `src/server/wire.ts`, with a limit on its size. Model and provider names end up on public pages.
 - **A private profile answers exactly like a missing one**, on every address. So does a private group, to everyone but its members. Machine names are never public.
 - **Going private takes effect at once.** Public pages are cached for 5 minutes, and `purgeProfile` in `app.ts` removes a profile's cached copies when it is unpublished. A new cached address under `/u/<login>` has to be added to that list. One request may make 50 calls to the cache and the database together on Cloudflare's free plan, so a test keeps the list at 40 or fewer. When there is no room, serve the new address uncached.
 - **Queries go through the `Db` interface** in `db.ts`: `prepare`, `bind`, `run`, `all`, `first` and `batch`. That is the part of D1 the tests can run on plain SQLite.
@@ -141,7 +141,7 @@ These are what the project promises its users. A change that breaks one is a bug
 
 ### Add an AI tool
 
-A tool whose usage you can export needs no code at all: see [Add a provider with JSONL](README.md#add-a-provider-with-jsonl). To have the agent read a tool's own files:
+A tool whose usage you can export needs no code at all: see [Add a provider with JSONL](README.md#add-a-provider-with-jsonl). To have `oms` read a tool's own files:
 
 1. **Find a record of each model response with its token counts**, in a file the tool keeps on disk. Session summaries and terminal output are not enough, because they can describe the same usage twice. Read the tool's source for the format, and link the file you relied on.
 2. **Add the reader** to the `Reader` list in `agent/src/providers.rs`, with its provider ID in `provider()` and the file names it reads in `accepts()`. An ID is lowercase, such as `kilo-code`.
@@ -178,7 +178,7 @@ A server's owner applies migrations before deploying. Say in the pull request th
 
 `install.sh` and `install.ps1` are what people run to install, and `oms update` runs the same script from the release it installs. Keep `install.sh` to POSIX `sh`, and `install.ps1` working in both Windows PowerShell 5.1 and PowerShell 7. The release workflow installs each build with them, and `agent/tests/update.rs` runs `oms update` against a release served from the test itself.
 
-Don't try an install script against your real home folder if `oms` runs in the background there, because the script restarts that agent on whatever it just installed. On macOS and Linux, set `HOME` and `OMS_INSTALL_DIR` to a folder made for the test, as the tests do.
+Don't try an install script against your real home folder if `oms` runs in the background there, because the script restarts that `oms` on whatever it just installed. On macOS and Linux, set `HOME` and `OMS_INSTALL_DIR` to a folder made for the test, as the tests do.
 
 ## Style
 
@@ -191,7 +191,7 @@ Don't try an install script against your real home folder if `oms` runs in the b
 
 ## Releases
 
-Maintainers release the agent. The website is deployed separately.
+Maintainers release `oms`. The website is deployed separately.
 
 1. Set the new version in `agent/Cargo.toml`, and build once so `agent/Cargo.lock` follows. CI builds with `--locked`, and fails if the two disagree.
 2. Commit both files as `Release v0.3.1`, push to `main`, and wait for CI to pass on all three systems.
