@@ -132,8 +132,9 @@ export function table(rows: string[][], align: ('l' | 'r')[]): string[] {
 export const PROVIDERS: ReadonlyMap<string, string> = new Map([
   ['claude', 'Claude Code'], ['codex', 'Codex'], ['gemini', 'Gemini CLI'],
   ['amp', 'Amp'], ['cline-cli', 'Cline CLI'], ['copilot-cli', 'GitHub Copilot CLI'],
-  ['hermes-agent', 'Hermes Agent'], ['kimi-cli', 'Kimi Code CLI'], ['opencode', 'OpenCode'],
-  ['pi', 'Pi'], ['qwen-code', 'Qwen Code'],
+  ['goose', 'Goose'], ['hermes-agent', 'Hermes Agent'], ['kilo-code', 'Kilo Code'],
+  ['kimi-cli', 'Kimi Code CLI'], ['oh-my-pi', 'Oh My Pi'], ['opencode', 'OpenCode'],
+  ['pi', 'Pi'], ['qwen-code', 'Qwen Code'], ['roo-code', 'Roo Code'],
 ]);
 
 export const providerName = (id: string): string => PROVIDERS.get(id) ?? id;

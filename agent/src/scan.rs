@@ -29,12 +29,20 @@ pub fn default_roots(skip_native_logs: &[String]) -> Result<LogRoots> {
     let qwen = setting("QWEN_RUNTIME_DIR", setting("QWEN_HOME", home.join(".qwen")));
     let hermes = setting("HERMES_HOME", home.join(".hermes"));
     let cline = setting("CLINE_DATA_DIR", setting("CLINE_DIR", home.join(".cline")).join("data"));
+    let roaming = setting("APPDATA", home.join("AppData/Roaming"));
+    // Goose keeps to ~/.local/share on macOS too, and only an absolute GOOSE_PATH_ROOT moves it.
+    let goose = match std::env::var_os("GOOSE_PATH_ROOT").map(PathBuf::from).filter(|root| root.is_absolute()) {
+        Some(root) => root.join("data"),
+        None if cfg!(windows) => roaming.join("Block/goose/data"),
+        None => data.join("goose"),
+    };
+    let pi = setting("PI_CODING_AGENT_DIR", home.join(".pi/agent")).join("sessions");
     let mut roots: LogRoots = claude.into_iter().map(|path| (Reader::Claude, path)).collect();
     roots.extend([
         (Reader::Codex, codex_base.join("sessions")),
         (Reader::Codex, codex_base.join("archived_sessions")),
         (Reader::Gemini, home.join(".gemini/tmp")),
-        (Reader::Pi, setting("PI_CODING_AGENT_DIR", home.join(".pi/agent")).join("sessions")),
+        (Reader::Pi, pi.clone()),
         (Reader::Qwen, qwen.join("projects")),
         (Reader::Copilot, setting("COPILOT_HOME", home.join(".copilot")).join("session-state")),
         (Reader::Kimi, setting("KIMI_CODE_HOME", home.join(".kimi-code")).join("sessions")),
@@ -43,12 +51,31 @@ pub fn default_roots(skip_native_logs: &[String]) -> Result<LogRoots> {
         (Reader::OpenCode, data.join("opencode/opencode.db")),
         (Reader::OpenCodeJson, data.join("opencode/storage/message")),
         (Reader::Hermes, hermes.join("state.db")),
+        (Reader::Goose, goose.join("sessions/sessions.db")),
+        (Reader::Kilo, data.join("kilo/kilo.db")),
         (Reader::Export, state_dir()?.join("imports")),
     ]);
     if let Ok(profiles) = fs::read_dir(hermes.join("profiles")) {
         for profile in profiles.flatten().filter(|e| e.file_type().is_ok_and(|t| t.is_dir())) {
             roots.push((Reader::Hermes, profile.path().join("state.db")));
         }
+    }
+    // Oh My Pi can be moved with the variables Pi reads too, so only its own folders are read:
+    // the default one, the one it uses when the data folder already has one, and each profile's.
+    let mut oh_my_pi = vec![home.join(".omp/agent/sessions"), data.join("omp/sessions")];
+    for profiles in [home.join(".omp/profiles"), data.join("omp/profiles")] {
+        for profile in fs::read_dir(profiles).into_iter().flatten().flatten() {
+            oh_my_pi.extend([profile.path().join("agent/sessions"), profile.path().join("sessions")]);
+        }
+    }
+    roots.extend(oh_my_pi.into_iter().filter(|sessions| *sessions != pi).map(|sessions| (Reader::OhMyPi, sessions)));
+    for storage in editor_storage_dirs(&home, roaming, setting("XDG_CONFIG_HOME", home.join(".config"))) {
+        roots.push((Reader::RooCode, storage.join("rooveterinaryinc.roo-cline/tasks")));
+        roots.push((Reader::KiloCode, storage.join("kilocode.kilo-code/tasks")));
+    }
+    // Kilo Code's earlier JetBrains plugin and CLI ran the same extension outside an editor.
+    for tasks in ["globalStorage/tasks", "globalStorage/kilo code.kilo-code/tasks", "cli/global/tasks"] {
+        roots.push((Reader::KiloCode, home.join(".kilocode").join(tasks)));
     }
     roots.retain(|(reader, _)| !reader.provider().is_some_and(|id| skip_native_logs.iter().any(|skip| skip == id)));
     Ok(roots)
@@ -70,6 +97,22 @@ fn claude_desktop_dirs(home: &Path) -> Vec<PathBuf> {
     dirs
 }
 
+/// Where VS Code, and every editor built on it, lets extensions keep their own files. An
+/// editor that is reached remotely runs its extensions, and keeps their files, on the remote side.
+fn editor_storage_dirs(home: &Path, roaming: PathBuf, config: PathBuf) -> Vec<PathBuf> {
+    let editors = if cfg!(windows) {
+        roaming
+    } else if cfg!(target_os = "macos") {
+        home.join("Library/Application Support")
+    } else {
+        config
+    };
+    let mut dirs: Vec<PathBuf> = fs::read_dir(editors).into_iter().flatten().flatten().map(|editor| editor.path().join("User/globalStorage")).collect();
+    dirs.extend([".vscode-server", ".vscode-server-insiders", ".cursor-server", ".windsurf-server"].map(|server| home.join(server).join("data/User/globalStorage")));
+    dirs.retain(|dir| dir.is_dir());
+    dirs
+}
+
 #[derive(Debug, Clone)]
 pub struct LogFile {
     pub path: PathBuf,
@@ -88,10 +131,14 @@ fn walk(dir: &Path, reader: Reader, out: &mut Vec<LogFile>) {
             walk(&path, reader, out);
         } else if kind.is_file() && reader.accepts(&path) {
             let Ok(meta) = entry.metadata() else { continue };
-            let mtime = meta.modified().ok().and_then(|time| time.duration_since(UNIX_EPOCH).ok()).map_or(0, |time| time.as_nanos() as i64);
-            out.push(LogFile { path, reader, identity: file_identity(&meta), size: meta.len() as i64, mtime });
+            out.push(log_file(path, reader, &meta));
         }
     }
+}
+
+fn log_file(path: PathBuf, reader: Reader, meta: &fs::Metadata) -> LogFile {
+    let mtime = meta.modified().ok().and_then(|time| time.duration_since(UNIX_EPOCH).ok()).map_or(0, |time| time.as_nanos() as i64);
+    LogFile { path, reader, identity: file_identity(meta), size: meta.len() as i64, mtime }
 }
 
 pub fn discover(roots: &LogRoots) -> Vec<LogFile> {
@@ -106,6 +153,14 @@ pub fn discover(roots: &LogRoots) -> Vec<LogFile> {
                     identity.push_str(&format!(":{}:{}:{}", file_identity(&wal), wal.len(), stamp(&wal)));
                 }
                 out.push(LogFile { path: path.clone(), reader: *reader, identity, size: meta.len() as i64, mtime: stamp(&meta) });
+            }
+        } else if reader.task_log() {
+            // A task's folder also holds checkpoints of the workspace, so only its message log is looked at.
+            for task in fs::read_dir(path).into_iter().flatten().flatten() {
+                let log = task.path().join("ui_messages.json");
+                if let Ok(meta) = fs::metadata(&log) && meta.is_file() {
+                    out.push(log_file(log, *reader, &meta));
+                }
             }
         } else {
             walk(path, *reader, &mut out);
@@ -212,7 +267,7 @@ fn read_file(store: &mut Store, file: &LogFile, path_hash: &str, tz: Tz, saved: 
     let size = i64::try_from(meta.len())?;
     let identity = file_identity(&meta);
     let compressed = file.path.extension().is_some_and(|e| e == "zst");
-    let snapshot = matches!(file.reader, Reader::Gemini | Reader::Amp | Reader::Cline | Reader::OpenCodeJson) && file.path.extension().is_some_and(|e| e == "json");
+    let snapshot = (file.reader.task_log() || matches!(file.reader, Reader::Gemini | Reader::Amp | Reader::Cline | Reader::OpenCodeJson)) && file.path.extension().is_some_and(|e| e == "json");
     let mut start = 0;
     let mut cursor = Cursor::default();
     if let Some(row) = saved && !snapshot && !compressed && row.state.identity == identity
@@ -230,7 +285,9 @@ fn read_file(store: &mut Store, file: &LogFile, path_hash: &str, tz: Tz, saved: 
         Reader::Gemini => providers::read_gemini_line(line, &mut events),
         Reader::Pi | Reader::Qwen | Reader::Kimi | Reader::Copilot =>
             events.extend(providers::native::line(file.reader, line, &file.path, start as u64 + position)),
-        Reader::Cline | Reader::Amp | Reader::OpenCode | Reader::OpenCodeJson | Reader::Hermes => unreachable!("snapshot reader"),
+        Reader::OhMyPi if providers::native::import_marker(line) => events.clear(),
+        Reader::OhMyPi => events.extend(providers::native::line(file.reader, line, &file.path, start as u64 + position)),
+        Reader::Cline | Reader::Amp | Reader::OpenCode | Reader::OpenCodeJson | Reader::Hermes | Reader::Goose | Reader::RooCode | Reader::KiloCode | Reader::Kilo => unreachable!("snapshot reader"),
         Reader::Export => match providers::export_line(line) {
             Some(event) => events.push(event),
             None => invalid_exports += 1,
@@ -239,7 +296,7 @@ fn read_file(store: &mut Store, file: &LogFile, path_hash: &str, tz: Tz, saved: 
     let input = (&mut source).take((size - start) as u64);
     let offset = if snapshot {
         events = if file.reader == Reader::Gemini { providers::gemini_snapshot(BufReader::new(input))? }
-            else { providers::native::snapshot(file.reader, BufReader::new(input))? };
+            else { providers::native::snapshot(file.reader, BufReader::new(input), &file.path)? };
         size
     } else if compressed {
         read_lines(zstd::stream::read::Decoder::new(input)?, &mut handle, false)?;
@@ -351,6 +408,24 @@ mod tests {
     fn a_corrupt_old_timestamp_has_no_day() {
         assert_eq!(day_of("1970-01-01T00:00:00Z", SEOUL), None);
         assert_eq!(day_of("2026-11-08T23:30:00Z", SEOUL).as_deref(), Some("2026-11-09"));
+    }
+
+    #[test]
+    fn extension_folders_are_found_for_every_editor_and_for_remote_hosts() {
+        let dir = TempDir::new("editors");
+        let home = &dir.0;
+        let config = home.join(".config");
+        let roaming = home.join("AppData/Roaming");
+        let editors = if cfg!(windows) { roaming.clone() } else if cfg!(target_os = "macos") { home.join("Library/Application Support") } else { config.clone() };
+        let remote = home.join(".vscode-server/data/User/globalStorage");
+        let cursor = editors.join("Cursor/User/globalStorage");
+        for storage in [&remote, &cursor, &editors.join("Code - Insiders/User/globalStorage")] {
+            fs::create_dir_all(storage).unwrap();
+        }
+        fs::create_dir_all(editors.join("Some other app")).unwrap();
+        let found = editor_storage_dirs(home, roaming, config);
+        assert!(found.contains(&remote) && found.contains(&cursor));
+        assert_eq!(found.len(), 3, "an app without extension storage is left out");
     }
 
     #[test]
