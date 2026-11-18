@@ -15,6 +15,7 @@ pub enum Reader {
     Codex,
     Gemini,
     Pi,
+    OhMyPi,
     Qwen,
     Copilot,
     Kimi,
@@ -23,6 +24,10 @@ pub enum Reader {
     OpenCode,
     OpenCodeJson,
     Hermes,
+    Goose,
+    RooCode,
+    KiloCode,
+    Kilo,
     Export,
 }
 
@@ -35,11 +40,15 @@ impl Reader {
             Self::Amp => "amp",
             Self::Cline => "cline-cli",
             Self::Copilot => "copilot-cli",
+            Self::Goose => "goose",
             Self::Hermes => "hermes-agent",
+            Self::KiloCode | Self::Kilo => "kilo-code",
             Self::Kimi => "kimi-cli",
+            Self::OhMyPi => "oh-my-pi",
             Self::OpenCode | Self::OpenCodeJson => "opencode",
             Self::Pi => "pi",
             Self::Qwen => "qwen-code",
+            Self::RooCode => "roo-code",
             Self::Export => return None,
         })
     }
@@ -50,6 +59,15 @@ impl Reader {
         };
         match self {
             Self::Claude | Self::Pi | Self::Export => name.ends_with(".jsonl"),
+            // Its cleanup leaves copies of sessions in scratch folders while it compresses them.
+            Self::OhMyPi => {
+                name.ends_with(".jsonl")
+                    && !path.components().any(|part| {
+                        part.as_os_str()
+                            .to_string_lossy()
+                            .starts_with(".omp-gc-compress-")
+                    })
+            }
             Self::Qwen => {
                 let dir = path.parent();
                 let chats = |p: &std::path::Path| p.file_name().is_some_and(|n| n == "chats");
@@ -71,6 +89,9 @@ impl Reader {
             Self::OpenCode => name == "opencode.db",
             Self::OpenCodeJson => name.starts_with("msg_") && name.ends_with(".json"),
             Self::Hermes => name == "state.db",
+            Self::Goose => name == "sessions.db",
+            Self::Kilo => name == "kilo.db",
+            Self::RooCode | Self::KiloCode => name == "ui_messages.json",
             Self::Codex => name.ends_with(".jsonl") || name.ends_with(".jsonl.zst"),
             Self::Gemini => {
                 name.starts_with("session-")
@@ -87,7 +108,16 @@ impl Reader {
     }
 
     pub fn database(self) -> bool {
-        matches!(self, Self::OpenCode | Self::Hermes)
+        matches!(
+            self,
+            Self::OpenCode | Self::Hermes | Self::Goose | Self::Kilo
+        )
+    }
+
+    /// An editor extension that keeps one folder per task, with the task's messages in
+    /// `ui_messages.json`.
+    pub fn task_log(self) -> bool {
+        matches!(self, Self::RooCode | Self::KiloCode)
     }
 }
 

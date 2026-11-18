@@ -1,12 +1,14 @@
 //! Persisted CLI formats. Terminal streams and session summaries can describe the
 //! same calls as these records, so each reader uses one source of usage.
+use std::fmt;
 use std::io::Read;
 use std::path::Path;
 
-use anyhow::Result;
+use anyhow::{Context, Result};
 use chrono::DateTime;
 use rusqlite::{Connection, OpenFlags};
 use serde::Deserialize;
+use serde::de::{Deserializer, SeqAccess, Visitor};
 use serde_json::Value;
 
 use super::{MAX_TOKENS, Reader, model_name};
@@ -89,15 +91,30 @@ const CAMEL: [&str; 4] = [
 pub fn line(reader: Reader, line: &str, path: &Path, offset: u64) -> Option<UsageEvent> {
     let row: Value = serde_json::from_str(line).ok()?;
     match (reader, row["type"].as_str()?) {
-        (Reader::Pi, "message") if row["message"]["role"] == "assistant" => {
+        (Reader::Pi | Reader::OhMyPi, "message") if row["message"]["role"] == "assistant" => {
             let msg = &row["message"];
-            let at = timestamp(&msg["timestamp"]).or_else(|| timestamp(&row["timestamp"]))?;
+            // Oh My Pi stores zero for a time it does not know.
+            let sent = Some(&msg["timestamp"]).filter(|at| reader == Reader::Pi || **at != 0);
+            let at = sent
+                .and_then(timestamp)
+                .or_else(|| timestamp(&row["timestamp"]))?;
             let key = format!("{}:{}", at, id(&row["id"])?);
             Tokens::parse(
                 &msg["usage"],
                 ["input", "output", "cacheRead", "cacheWrite"],
             )?
             .event(reader, key, at, &msg["model"])
+        }
+        // Oh My Pi logs model calls made outside the conversation on their own. A turn it
+        // discards is logged again this way under a new ID, after counting as a message.
+        (Reader::OhMyPi, "model_usage") if row["purpose"] != "discarded-turn" => {
+            let at = timestamp(&row["timestamp"])?;
+            let key = format!("{}:{}", at, id(&row["id"])?);
+            Tokens::parse(
+                &row["usage"],
+                ["input", "output", "cacheRead", "cacheWrite"],
+            )?
+            .event(reader, key, at, &row["model"])
         }
         (Reader::Qwen, "assistant") => {
             let u = &row["usageMetadata"];
@@ -164,6 +181,21 @@ pub fn line(reader: Reader, line: &str, path: &Path, offset: u64) -> Option<Usag
     }
 }
 
+/// Oh My Pi ends a session it imported from Claude Code or Codex with this entry. The
+/// usage before it is that tool's, which its own reader counts.
+pub fn import_marker(line: &str) -> bool {
+    #[derive(Deserialize)]
+    #[serde(rename_all = "camelCase")]
+    struct Entry {
+        #[serde(rename = "type")]
+        kind: String,
+        custom_type: String,
+    }
+    line.contains("foreign_session_import")
+        && serde_json::from_str::<Entry>(line)
+            .is_ok_and(|e| e.kind == "custom" && e.custom_type == "foreign_session_import")
+}
+
 // Ignore message bodies during snapshot deserialization. One rewritten snapshot
 // may contain an entire conversation, attachments and tool results.
 #[derive(Deserialize)]
@@ -192,7 +224,93 @@ struct Message {
     usage: Value,
 }
 
-pub fn snapshot(reader: Reader, input: impl Read) -> Result<Vec<UsageEvent>> {
+/// One row of a task's `ui_messages.json`. Most rows are chat text, so each row is
+/// dropped as soon as it has been looked at.
+#[derive(Default, Deserialize)]
+#[serde(default)]
+struct TaskRow {
+    ts: Value,
+    #[serde(rename = "type")]
+    kind: Option<String>,
+    say: Option<String>,
+    text: Option<String>,
+}
+
+/// The counts an `api_req_started` row keeps as JSON in its text, next to the request
+/// itself, which is skipped.
+#[derive(Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct ApiRequest {
+    tokens_in: u64,
+    tokens_out: u64,
+    cache_writes: Option<u64>,
+    cache_reads: Option<u64>,
+}
+
+impl TaskRow {
+    fn into_event(self, reader: Reader, task: &str) -> Option<UsageEvent> {
+        if self.kind.as_deref() != Some("say") || self.say.as_deref() != Some("api_req_started") {
+            return None;
+        }
+        let sent = self.ts.as_u64()?;
+        let request: ApiRequest = serde_json::from_str(self.text.as_deref()?).ok()?;
+        let read = request.cache_reads.unwrap_or(0);
+        let write = request.cache_writes.unwrap_or(0);
+        // Roo Code since 3.29.5 and Kilo Code since 4.119.0 store the whole prompt in
+        // tokensIn, cached parts included. Before that it depended on the provider. A
+        // count smaller than its cached parts can only be the uncached rest, and any
+        // other count is read as the whole prompt, so cached input is never counted twice.
+        let input = request
+            .tokens_in
+            .checked_sub(read.checked_add(write)?)
+            .unwrap_or(request.tokens_in);
+        Tokens {
+            input,
+            output: request.tokens_out,
+            read,
+            write,
+        }
+        .event(
+            reader,
+            format!("{task}:{sent}"),
+            timestamp(&self.ts)?,
+            &Value::Null,
+        )
+    }
+}
+
+/// Reads a task log one row at a time, so a long conversation is never held whole.
+fn task_log(reader: Reader, input: impl Read, path: &Path) -> Result<Vec<UsageEvent>> {
+    struct Rows<'a>(Reader, &'a str);
+
+    impl<'de> Visitor<'de> for Rows<'_> {
+        type Value = Vec<UsageEvent>;
+
+        fn expecting(&self, f: &mut fmt::Formatter) -> fmt::Result {
+            f.write_str("a list of task messages")
+        }
+
+        fn visit_seq<A: SeqAccess<'de>>(self, mut rows: A) -> Result<Self::Value, A::Error> {
+            let mut events = Vec::new();
+            while let Some(row) = rows.next_element::<TaskRow>()? {
+                events.extend(row.into_event(self.0, self.1));
+            }
+            Ok(events)
+        }
+    }
+
+    let task = path
+        .parent()
+        .and_then(|dir| dir.file_name())
+        .and_then(|name| name.to_str())
+        .context("a task log sits in its task's folder")?;
+    Ok(serde_json::Deserializer::from_reader(input).deserialize_seq(Rows(reader, task))?)
+}
+
+pub fn snapshot(reader: Reader, input: impl Read, path: &Path) -> Result<Vec<UsageEvent>> {
+    if reader.task_log() {
+        return task_log(reader, input, path);
+    }
     if reader == Reader::OpenCodeJson {
         let row: Value = serde_json::from_reader(input)?;
         let event = || {
@@ -200,6 +318,7 @@ pub fn snapshot(reader: Reader, input: impl Read) -> Result<Vec<UsageEvent>> {
                 return None;
             }
             opencode(
+                reader,
                 &row["tokens"],
                 id(&row["id"])?.into(),
                 timestamp(&row["time"]["created"])?,
@@ -312,6 +431,84 @@ pub fn database(reader: Reader, path: &Path) -> Result<Vec<UsageEvent>> {
                 }
             }
         }
+    } else if reader == Reader::Goose {
+        if has_table(&tx, "usage_ledger")? {
+            // The ledger has a row per model call. A carried-forward row restates session
+            // totals from before the ledger, which an imported transcript also has, and a
+            // session that runs another tool's CLI repeats what that tool logged itself.
+            let mut stmt = tx.prepare(
+                "SELECT l.id, l.session_id, CAST(l.created_timestamp AS INTEGER), l.model,
+                COALESCE(l.input_tokens,0), COALESCE(l.output_tokens,0),
+                COALESCE(l.cache_read_tokens,0), COALESCE(l.cache_write_tokens,0)
+                FROM usage_ledger l LEFT JOIN sessions s ON s.id = l.session_id
+                WHERE l.cost_source IS NOT 'carried_forward'
+                AND COALESCE(s.provider_name,'') NOT IN ('claude-code','codex','gemini-cli','cursor-agent')
+                AND COALESCE(s.provider_name,'') NOT LIKE '%-acp'",
+            )?;
+            let mut rows = stmt.query([])?;
+            while let Some(row) = rows.next()? {
+                let Some(at) = row
+                    .get::<_, Option<i64>>(2)?
+                    .and_then(|seconds| DateTime::from_timestamp(seconds, 0))
+                else {
+                    continue;
+                };
+                let counts = [row.get::<_, i64>(4)?, row.get(5)?, row.get(6)?, row.get(7)?];
+                if counts.iter().any(|&n| n < 0) {
+                    continue;
+                }
+                let [prompt, output, read, write] = counts.map(|n| n as u64);
+                let key = format!("{}:{}", row.get::<_, String>(1)?, row.get::<_, i64>(0)?);
+                let model: Option<String> = row.get(3)?;
+                // Goose stores the whole prompt and treats the cached parts as inside it.
+                let tokens = Tokens {
+                    input: prompt.saturating_sub(read).saturating_sub(write),
+                    output,
+                    read,
+                    write,
+                };
+                events.extend(tokens.event(reader, key, at.to_rfc3339(), &model.into()));
+            }
+        }
+    } else if reader == Reader::Kilo {
+        if has_table(&tx, "part")? && has_table(&tx, "message")? {
+            // Kilo records each model call as a step under its assistant message, and counts
+            // its own usage from those steps. A fork copies them under new IDs, so a step is
+            // known by its message's time and its counts instead.
+            let mut stmt = tx.prepare(
+                "SELECT m.time_created, COALESCE(json_extract(p.data,'$.model.modelID'), json_extract(m.data,'$.modelID')),
+                json_extract(p.data,'$.tokens')
+                FROM part p JOIN message m ON m.id = p.message_id
+                WHERE json_valid(p.data) AND json_valid(m.data) AND json_extract(m.data,'$.role') = 'assistant'
+                AND json_extract(p.data,'$.type') = 'step-finish' AND json_type(p.data,'$.tokens') = 'object'",
+            )?;
+            let mut rows = stmt.query([])?;
+            while let Some(row) = rows.next()? {
+                let sent: i64 = row.get(0)?;
+                let Some(at) = DateTime::from_timestamp_millis(sent) else {
+                    continue;
+                };
+                let data: String = row.get(2)?;
+                let tokens: Value = serde_json::from_str(&data)?;
+                let counts = [
+                    &tokens["input"],
+                    &tokens["output"],
+                    &tokens["reasoning"],
+                    &tokens["cache"]["read"],
+                    &tokens["cache"]["write"],
+                ]
+                .map(|n| n.as_u64().unwrap_or(0).to_string());
+                let key = format!("{sent}:{}", counts.join(":"));
+                let model: Option<String> = row.get(1)?;
+                events.extend(opencode(
+                    reader,
+                    &tokens,
+                    key,
+                    at.to_rfc3339(),
+                    model.into(),
+                ));
+            }
+        }
     } else {
         // Select just the usage metadata from the v1 and v2 message projections.
         for (table, role, model) in [
@@ -331,7 +528,9 @@ pub fn database(reader: Reader, path: &Path) -> Result<Vec<UsageEvent>> {
                 let data: String = row.get(3)?;
                 let tokens: Value = serde_json::from_str(&data)?;
                 let model: Option<String> = row.get(2)?;
-                if let Some(event) = opencode(&tokens, row.get(0)?, at.to_rfc3339(), model.into()) {
+                if let Some(event) =
+                    opencode(reader, &tokens, row.get(0)?, at.to_rfc3339(), model.into())
+                {
                     events.push(event);
                 }
             }
@@ -341,7 +540,7 @@ pub fn database(reader: Reader, path: &Path) -> Result<Vec<UsageEvent>> {
     Ok(events)
 }
 
-fn opencode(u: &Value, id: String, at: String, model: Value) -> Option<UsageEvent> {
+fn opencode(reader: Reader, u: &Value, id: String, at: String, model: Value) -> Option<UsageEvent> {
     let input = u["input"].as_u64()?;
     let output = u["output"].as_u64()?;
     let read = optional_count(&u["cache"], "read")?;
@@ -366,5 +565,5 @@ fn opencode(u: &Value, id: String, at: String, model: Value) -> Option<UsageEven
         read,
         write,
     }
-    .event(Reader::OpenCode, id, at, &model)
+    .event(reader, id, at, &model)
 }
