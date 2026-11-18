@@ -2,6 +2,7 @@ import type { GitHubMetrics, Metrics } from '../shared/metrics.ts';
 import { weeklyUsage } from '../shared/insights.ts';
 import { manualProfileFromForm, manualProfileFromJson, manualProfileJson, profileOf } from '../shared/profile.ts';
 import { buildCards, cardContent, type Card } from '../shared/render/cards.ts';
+import { previewData, PREVIEW_HEIGHT, PREVIEW_WIDTH, renderPreview } from '../shared/render/preview.ts';
 import {
   availableComponents,
   COMPONENT_KEYS,
@@ -313,6 +314,7 @@ async function purgeProfile(request: Request, deps: Deps, login: string): Promis
     base,
     landingBoardKey(new URL(request.url).origin).url,
     `${new URL(request.url).origin}/sitemap.xml`,
+    `${base}/${PREVIEW_IMAGE}`,
     ...CARD_KEYS.map((key) => `${base}/cards/${key}.txt`),
     ...images.flatMap((image) => THEME_NAMES.map((theme) => themed(image, theme))),
   ];
@@ -378,6 +380,18 @@ async function serveCard(login: string, key: string, deps: Deps): Promise<Respon
   });
 }
 
+/** The picture sites show where a link to the profile is shared. They want a PNG, so it is drawn here. */
+const PREVIEW_IMAGE = 'og.png';
+
+async function servePreview(login: string, deps: Deps): Promise<Response> {
+  const user = await publicProfile(login, deps);
+  if (!user) return svgNotFound();
+  const [{ metrics }, { position }] = await Promise.all([buildMetrics(user, deps), publicRankings(deps.db, rankingPeriod('all', deps.now()), user.id)]);
+  return new Response(await renderPreview(previewData(metrics, position)), {
+    headers: { 'content-type': 'image/png', 'cache-control': hasData(metrics) ? PUBLIC_CACHE : 'no-store', 'x-content-type-options': 'nosniff' },
+  });
+}
+
 async function renderProfile(login: string, request: Request, deps: Deps, viewer: UserRow | null): Promise<Response> {
   const user = await publicProfile(login, deps);
   if (!user) return html(errorPage(404, 'This profile is private or does not exist.', viewer), 404);
@@ -385,7 +399,13 @@ async function renderProfile(login: string, request: Request, deps: Deps, viewer
   const origin = new URL(request.url).origin;
   // The page names whoever is signed in, so only signed-out visits share a cached copy.
   const shared = !viewer && hasData(metrics);
-  const page = profilePage(user, renderDashboard(await withAvatar(metrics, user, origin, deps)), metrics.tokens, buildCards(metrics), availableComponents(metrics), origin, viewer, position);
+  const image = {
+    url: `${origin}/u/${encodeURIComponent(user.login)}/${PREVIEW_IMAGE}`,
+    width: PREVIEW_WIDTH,
+    height: PREVIEW_HEIGHT,
+    alt: `The stats of @${user.login}: AI tokens, rank, contributions and a calendar of AI usage over the last year.`,
+  };
+  const page = profilePage(user, renderDashboard(await withAvatar(metrics, user, origin, deps)), metrics.tokens, buildCards(metrics), availableComponents(metrics), origin, viewer, position, image);
   return html(page, 200, shared ? { 'cache-control': PUBLIC_CACHE } : {});
 }
 
@@ -654,6 +674,7 @@ async function route(request: Request, deps: Deps): Promise<Response> {
     const theme = themeNamed(url.searchParams.get('theme'));
     if (resource === undefined) return serveProfile(login, request, deps);
     if (resource === 'dashboard.svg') return cachedPublic(request, deps, () => serveDashboardSvg(login, theme, url.origin, deps));
+    if (resource === PREVIEW_IMAGE) return cachedPublic(request, deps, () => servePreview(login, deps));
     const [, cardKey] = /^cards\/([a-z]+)\.txt$/.exec(resource) ?? [];
     if (cardKey) return cachedPublic(request, deps, () => serveCard(login, cardKey, deps));
     const [, componentKey] = /^components\/([a-z]+)\.svg$/.exec(resource) ?? [];
