@@ -1,7 +1,9 @@
 import type { GitHubMetrics, Metrics } from '../shared/metrics.ts';
 import { weeklyUsage } from '../shared/insights.ts';
 import { manualProfileFromForm, manualProfileFromJson, manualProfileJson, profileOf } from '../shared/profile.ts';
+import { BADGE_METRICS, badgeFor, badgeMetricNamed, DEFAULT_BADGE_METRIC, renderBadge, type BadgeMetric } from '../shared/render/badge.ts';
 import { buildCards, cardContent, type Card } from '../shared/render/cards.ts';
+import { renderSmallCard } from '../shared/render/small-card.ts';
 import {
   availableComponents,
   COMPONENT_KEYS,
@@ -9,6 +11,7 @@ import {
   isComponentKey,
   renderComponent,
   renderDashboard,
+  reviewYear,
   THEME_NAMES,
   themeNamed,
   type Theme,
@@ -234,18 +237,61 @@ const clientIp = (request: Request) => request.headers.get('cf-connecting-ip') ?
 
 const tooMany = () => new Response('Too many requests', { status: 429, headers: { 'retry-after': '60', 'cache-control': 'no-store' } });
 
+/** An address with the choices made for it, in the order given. A default is not written, so older links share its copy. */
+const choosing = (url: string, ...choices: (string | false)[]) => {
+  const query = choices.filter(Boolean).join('&');
+  return query ? `${url}?${query}` : url;
+};
+
+const themeChoice = (theme: Theme) => theme !== DEFAULT_THEME && `theme=${theme}`;
+
 /** An image's address with its theme. The default theme has none, so older links share its copy. */
-const themed = (url: string, theme: Theme) => (theme === DEFAULT_THEME ? url : `${url}?theme=${theme}`);
+const themed = (url: string, theme: Theme) => choosing(url, themeChoice(theme));
+
+const badgeAddress = (url: string, metric: BadgeMetric) => choosing(url, metric !== DEFAULT_BADGE_METRIC && `metric=${metric}`);
+
+const cardAddress = (url: string, theme: Theme, graph: boolean) => choosing(url, graph && 'graph=1', themeChoice(theme));
+
+/** Without a year, it is the review a profile shows by default. */
+const reviewAddress = (url: string, theme: Theme, year: number | null) => choosing(url, themeChoice(theme), year !== null && `year=${year}`);
+
+const graphAsked = (query: URLSearchParams) => query.get('graph') === '1';
+
+/** A year from an address, when it is written as one. Whether it has a review is known only once the profile is read. */
+const yearAsked = (query: URLSearchParams) => {
+  const value = query.get('year') ?? '';
+  return /^[12]\d{3}$/.test(value) ? Number(value) : null;
+};
+
+/** Uploads are refused for days before this year, so no real review reaches further back. */
+const FIRST_REVIEW_YEAR = 2020;
 
 /**
- * Query strings and letter case can't be used to get around the cache. An image keeps
- * its theme, written one way, so there is one copy per theme.
+ * The years whose review is kept in the cache under its own address, through next year,
+ * which a profile ahead of UTC reaches first. The list is short and known without reading
+ * a profile, so making one private can remove every copy.
+ */
+const reviewYears = (now: Date) =>
+  Array.from({ length: now.getUTCFullYear() + 2 - FIRST_REVIEW_YEAR }, (_, index) => FIRST_REVIEW_YEAR + index);
+
+/**
+ * Query strings and letter case can't be used to get around the cache. An image keeps only
+ * the choices it offers, each written one way and in one order, so there is one copy per
+ * choice: a theme, a badge's metric, a card's graph, a review's year.
  */
 const publicKey = (request: Request) => {
   const url = new URL(request.url);
   const path = url.pathname.toLowerCase();
   const key = `${url.origin}${path}`;
-  return new Request(path.endsWith('.svg') ? themed(key, themeNamed(url.searchParams.get('theme'))) : key);
+  if (!path.endsWith('.svg')) return new Request(key);
+  const query = url.searchParams;
+  const theme = themeNamed(query.get('theme'));
+  const [, image] = /^\/u\/[^/]+\/(badge|card|components\/year)\.svg$/.exec(path) ?? [];
+  // A metric that doesn't exist is refused before the cache is asked, so it never gets here.
+  if (image === 'badge') return new Request(badgeAddress(key, badgeMetricNamed(query.get('metric')) ?? DEFAULT_BADGE_METRIC));
+  if (image === 'card') return new Request(cardAddress(key, theme, graphAsked(query)));
+  if (image === 'components/year') return new Request(reviewAddress(key, theme, yearAsked(query)));
+  return new Request(themed(key, theme));
 };
 
 /**
@@ -295,19 +341,28 @@ async function landingBoard(origin: string, deps: Deps): Promise<LandingBoard> {
 /**
  * Removes a profile from this location's cache. Other locations let it expire, so a page
  * made private can stay visible there for up to five minutes.
+ * A request may make only so many cache calls, 50 on Cloudflare's free plan. So the copies
+ * most likely to exist go first, and one that can't be removed is left to expire like those
+ * elsewhere, rather than failing the request that already made the profile private.
  */
 async function purgeProfile(request: Request, deps: Deps, login: string): Promise<void> {
   const { cache } = deps;
   if (!cache) return;
-  const base = `${new URL(request.url).origin}/u/${login.toLowerCase()}`;
+  const origin = new URL(request.url).origin;
+  const base = `${origin}/u/${login.toLowerCase()}`;
   const images = [`${base}/dashboard.svg`, ...COMPONENT_KEYS.map((key) => `${base}/components/${key}.svg`)];
   const urls = [
     base,
-    landingBoardKey(new URL(request.url).origin).url,
-    ...CARD_KEYS.map((key) => `${base}/cards/${key}.txt`),
+    landingBoardKey(origin).url,
+    ...BADGE_METRICS.map((metric) => badgeAddress(`${base}/badge.svg`, metric)),
+    ...THEME_NAMES.flatMap((theme) => [false, true].map((graph) => cardAddress(`${base}/card.svg`, theme, graph))),
     ...images.flatMap((image) => THEME_NAMES.map((theme) => themed(image, theme))),
+    ...CARD_KEYS.map((key) => `${base}/cards/${key}.txt`),
+    ...reviewYears(deps.now()).reverse().flatMap((year) => THEME_NAMES.map((theme) => reviewAddress(`${base}/components/year.svg`, theme, year))),
   ];
-  await Promise.all(urls.map((url) => cache.delete(new Request(url))));
+  const removals = await Promise.allSettled(urls.map(async (url) => cache.delete(new Request(url))));
+  const failed = removals.filter((removal) => removal.status === 'rejected').length;
+  if (failed) console.error(JSON.stringify({ message: 'profile cache purge incomplete', failed, of: urls.length }));
 }
 
 // Public pages. A private or missing profile answers the same way, so neither is revealed.
@@ -347,13 +402,38 @@ async function serveDashboardSvg(login: string, theme: Theme, origin: string, de
   return svg(renderDashboard(await withAvatar(metrics, user, origin, deps), theme), hasData(metrics));
 }
 
-async function serveComponentSvg(login: string, key: string, theme: Theme, origin: string, deps: Deps): Promise<Response> {
+/** `year` is the year an address asks the year in review for. Other parts have none. */
+async function serveComponentSvg(login: string, key: string, theme: Theme, origin: string, deps: Deps, year: number | null = null): Promise<Response> {
   if (!isComponentKey(key)) return svgNotFound();
   const user = await publicProfile(login, deps);
   if (!user) return svgNotFound();
   const { metrics } = await buildMetrics(user, deps);
   const drawn = key === 'profile' ? await withAvatar(metrics, user, origin, deps) : metrics;
-  return svg(renderComponent(drawn, key, theme), availableComponents(metrics).some((item) => item.key === key));
+  // A year without a review gets the default one instead. That copy isn't kept under the
+  // year's address, and neither is a year purgeProfile wouldn't know to remove.
+  const kept = year === null || (reviewYear(metrics, year) === year && reviewYears(deps.now()).includes(year));
+  return svg(renderComponent(drawn, key, theme, year), kept && availableComponents(metrics).some((item) => item.key === key));
+}
+
+/** The place on the lifetime public board, which the profile page shows too. */
+const lifetimePosition = async (user: UserRow, deps: Deps) => (await publicRankings(deps.db, rankingPeriod('all', deps.now()), user.id)).position;
+
+async function serveBadge(login: string, metric: BadgeMetric, deps: Deps): Promise<Response> {
+  const user = await publicProfile(login, deps);
+  if (!user) return svgNotFound();
+  // Ranking every profile is the costly part, so only the rank badge asks for it, and it asks for nothing else.
+  const badge = metric === 'rank'
+    ? badgeFor(metric, { tokens: null, github: null, position: await lifetimePosition(user, deps) })
+    : badgeFor(metric, { ...(await buildMetrics(user, deps)).metrics, position: null });
+  // A badge without its figure isn't cached, so the first upload shows at once.
+  return svg(renderBadge(badge), badge.known);
+}
+
+async function serveSmallCard(login: string, theme: Theme, graph: boolean, deps: Deps): Promise<Response> {
+  const user = await publicProfile(login, deps);
+  if (!user) return svgNotFound();
+  const [{ metrics }, position] = await Promise.all([buildMetrics(user, deps), lifetimePosition(user, deps)]);
+  return svg(renderSmallCard(metrics, position, theme, graph), hasData(metrics));
 }
 
 async function serveCard(login: string, key: string, deps: Deps): Promise<Response> {
@@ -638,10 +718,19 @@ async function route(request: Request, deps: Deps): Promise<Response> {
     const theme = themeNamed(url.searchParams.get('theme'));
     if (resource === undefined) return serveProfile(login, request, deps);
     if (resource === 'dashboard.svg') return cachedPublic(request, deps, () => serveDashboardSvg(login, theme, url.origin, deps));
+    if (resource === 'badge.svg') {
+      // A metric that doesn't exist is refused here, before the cache or the profile is read.
+      const metric = badgeMetricNamed(url.searchParams.get('metric'));
+      return metric ? cachedPublic(request, deps, () => serveBadge(login, metric, deps)) : svgNotFound();
+    }
+    if (resource === 'card.svg') return cachedPublic(request, deps, () => serveSmallCard(login, theme, graphAsked(url.searchParams), deps));
     const [, cardKey] = /^cards\/([a-z]+)\.txt$/.exec(resource) ?? [];
     if (cardKey) return cachedPublic(request, deps, () => serveCard(login, cardKey, deps));
     const [, componentKey] = /^components\/([a-z]+)\.svg$/.exec(resource) ?? [];
-    if (componentKey) return cachedPublic(request, deps, () => serveComponentSvg(login, componentKey, theme, url.origin, deps));
+    if (componentKey) {
+      const year = componentKey === 'year' ? yearAsked(url.searchParams) : null;
+      return cachedPublic(request, deps, () => serveComponentSvg(login, componentKey, theme, url.origin, deps, year));
+    }
   }
   return html(errorPage(404, 'Page not found.', await viewerFromCookie(request, deps)), 404);
 }

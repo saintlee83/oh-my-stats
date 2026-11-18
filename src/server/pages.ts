@@ -300,16 +300,23 @@ ${leaders}
 
 type Part = { key: ComponentKey; label: string };
 
-/** The whole dashboard as one image, then each part on its own for a README that wants only some. */
+/**
+ * The whole dashboard as one image, then each part on its own for a README that wants only
+ * some, then the two small images for one that has no room for either.
+ */
 function embedCode(url: string, parts: Part[]): string {
   const dashboard = `<pre><code>${esc(`![Developer stats](${url}/dashboard.svg)`)}</code></pre>`;
   if (parts.length === 0) return dashboard;
   // A blank line puts each image in its own paragraph, so GitHub spaces them evenly.
   const lines = parts.map((part) => `![${part.label}](${url}/components/${part.key}.svg)`).join('\n\n');
+  const small = `![Developer stats](${url}/card.svg)\n\n![AI tokens](${url}/badge.svg)`;
   return `${dashboard}
   <p>Or pick the parts you want, in any order:</p>
   <pre><code>${esc(lines)}</code></pre>
-  <p class="muted">For Tokyo Night colors, add <code>?theme=tokyo-night</code> to any image address.</p>`;
+  <p>Or something smaller, a card 495 pixels wide and a badge:</p>
+  <pre><code>${esc(small)}</code></pre>
+  <p class="muted">The card adds a calendar of the last 26 weeks with <code>?graph=1</code>. The badge shows another figure with <code>?metric=cost</code>, <code>rank</code>, <code>contributions</code> or <code>streak</code>.</p>
+  <p class="muted">For Tokyo Night colors, add <code>?theme=tokyo-night</code> to any image address. The badge keeps its own colors.</p>`;
 }
 
 function providerActivity(tokens: TokenMetrics | null): string {
