@@ -9,6 +9,9 @@
 #   $env:OMS_VERSION       a release to install instead of the latest, such as v0.1.0
 #   $env:OMS_INSTALL_DIR   where to put oms.exe, instead of ~\.local\bin
 #   $env:OMS_DOWNLOAD_URL  a copy of the release's files to use instead of GitHub's
+#
+# `oms update` runs this script too, and sets $env:OMS_UPDATING so it doesn't end by
+# explaining how to sign in to a machine that already is.
 
 # A script block keeps this script's variables and settings out of the session that runs it,
 # and `throw` stops it without closing that session's window, which `exit` would do.
@@ -107,7 +110,7 @@
     } else {
       Write-Host "Couldn't restart the background agent. Run: oms service install"
     }
-  } else {
+  } elseif (-not $env:OMS_UPDATING) {
     Write-Host 'Next, sign this machine in and keep it tracking:'
     Write-Host ''
     Write-Host '  oms login'

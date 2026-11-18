@@ -76,6 +76,12 @@ enum Commands {
     Unpublish,
     /// Print exactly what this machine would upload, without sending anything
     Preview,
+    /// Install the newest release in place of this one
+    Update {
+        /// Only say whether a newer release is available
+        #[arg(long)]
+        check: bool,
+    },
 }
 
 #[derive(Subcommand)]
@@ -134,6 +140,7 @@ fn main() -> Result<()> {
         Commands::Publish => set_public(true),
         Commands::Unpublish => set_public(false),
         Commands::Preview => preview(),
+        Commands::Update { check } => updates::update(check),
     };
     if check_updates {
         updates::notify();

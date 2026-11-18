@@ -74,9 +74,11 @@ oms publish           # optional: make your profile public
 
 Repeat this on each computer. On Windows, `oms service install` adds the agent to your startup apps, so it needs no administrator rights.
 
-To update, run the install command again. If the agent runs in the background, it restarts on the new version. Set `OMS_VERSION` to install a particular release, such as `v0.1.0`, or `OMS_INSTALL_DIR` to put `oms` somewhere else.
+To update, run `oms update`. It downloads the newest release's own install script, checks it against that release's checksums, and runs it, so the new `oms` goes where the old one is. If the agent runs in the background, it restarts on the new version. On Windows the installer stops the running `oms` to replace it, and finishes on its own. `oms update --check` only says whether a newer release exists.
 
-When you run `oms status`, `oms sync`, or `oms rankings` in a terminal, the agent checks GitHub for a newer stable release up to once a day. If one is available, it shows the update command for the current installation. Set `OMS_NO_UPDATE_CHECK=1` to turn off these notices and checks.
+Running the install command again does the same, for a version without `oms update` (0.3.0 and earlier). Set `OMS_VERSION` to install a particular release, such as `v0.1.0`, or `OMS_INSTALL_DIR` to put `oms` somewhere else.
+
+When you run `oms status`, `oms sync`, or `oms rankings` in a terminal, the agent checks GitHub for a newer stable release up to once a day. If one is available, it says so and names the command to run: `oms update`. Set `OMS_NO_UPDATE_CHECK=1` to turn off these notices and checks.
 
 Every file in a release has build provenance from GitHub Actions. To check a download, run `gh attestation verify <file> --repo saintlee83/oh-my-stats`.
 
@@ -190,6 +192,8 @@ oms service status        Show whether the service is running
 oms publish               Show your profile to everyone
 oms unpublish             Make your profile private again
 oms preview               Print exactly what would be uploaded, without sending anything
+oms update                Install the newest release in place of this one
+oms update --check        Only say whether a newer release is available
 ```
 
 ## What leaves your machine

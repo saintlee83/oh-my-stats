@@ -10,6 +10,9 @@
 #   OMS_VERSION       a release to install instead of the latest, such as v0.1.0
 #   OMS_INSTALL_DIR   where to put `oms`, instead of ~/.local/bin
 #   OMS_DOWNLOAD_URL  a copy of the release's files to use instead of GitHub's
+#
+# `oms update` runs this script too, and sets OMS_UPDATING so it doesn't end by explaining
+# how to sign in to a machine that already is.
 
 set -eu
 
@@ -126,7 +129,7 @@ if [ -f "$HOME/Library/LaunchAgents/dev.oh-my-stats.agent.plist" ] || [ -f "$HOM
   else
     say "" "Couldn't restart the background agent. Run: $cmd service install"
   fi
-else
+elif [ -z "${OMS_UPDATING:-}" ]; then
   say "" "Next, sign this machine in and keep it tracking:" "" \
     "  $cmd login" "  $cmd sync" "  $cmd service install"
 fi
