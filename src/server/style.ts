@@ -238,6 +238,14 @@ const SOURCE = `
   .notice h1 { margin: 0 0 24px; text-wrap: balance; }
   .notice .actions { justify-content: center; }
 
+  /* Rankings boards */
+
+  /* Profile and dashboard */
+
+  /* Groups */
+
+  /* Reading pages */
+
   @media (max-width: 860px) { .hero-art { display: none; } }
   @media (max-width: 640px) {
     h1 { font-size: 25px; }

@@ -1,18 +1,48 @@
 import { providerName } from '../shared/format.ts';
-import { lastDays } from '../shared/time.ts';
+import { lastDays, lastMonths } from '../shared/time.ts';
 import type { Db } from './db.ts';
 import { BadRequest, isToolName } from './wire.ts';
 
+/** Days are reporting dates in UTC. The two calendar months are for the website only. */
 export type RankingPeriod =
   | { days: 'all'; start: null; end: null }
-  | { days: 7 | 30; start: string; end: string };
+  | { days: 7 | 30 | 'month' | 'last-month'; start: string; end: string };
 
-export function rankingPeriod(value: string | null, now: Date): RankingPeriod {
+const lastDayOf = (month: string) => new Date(Date.UTC(Number(month.slice(0, 4)), Number(month.slice(5)), 0)).toISOString().slice(0, 10);
+
+/** A period from an address. The agent's API takes all time, 7 days or 30 days; pages also take the two months. */
+export function rankingPeriod(value: string | null, now: Date, months = false): RankingPeriod {
   if (value === null || value === 'all') return { days: 'all', start: null, end: null };
-  if (value !== '7' && value !== '30') throw new BadRequest('Choose all time, 7 days or 30 days.');
-  const days = value === '30' ? 30 : 7;
   const end = now.toISOString().slice(0, 10);
-  return { days, start: lastDays(end, days)[0], end };
+  if (value === '7' || value === '30') {
+    const days = value === '30' ? 30 : 7;
+    return { days, start: lastDays(end, days)[0], end };
+  }
+  if (months && value === 'month') return { days: 'month', start: `${end.slice(0, 7)}-01`, end };
+  if (months && value === 'last-month') {
+    const [month] = lastMonths(end.slice(0, 7), 2);
+    return { days: 'last-month', start: `${month}-01`, end: lastDayOf(month) };
+  }
+  throw new BadRequest(months ? 'Choose all time, 7 days, 30 days, this month or last month.' : 'Choose all time, 7 days or 30 days.');
+}
+
+/** The stretch right before a period, to compare it with: as many days, or the month before. All time has none. */
+export function previousPeriod(period: RankingPeriod): RankingPeriod | null {
+  if (period.days === 'all') return null;
+  if (period.days === 7 || period.days === 30) {
+    const end = lastDays(period.start, 2)[0];
+    return { days: period.days, start: lastDays(end, period.days)[0], end };
+  }
+  // A month is compared with the whole month before it, however far into it today is.
+  const [month] = lastMonths(period.start.slice(0, 7), 2);
+  return { days: 'last-month', start: `${month}-01`, end: lastDayOf(month) };
+}
+
+/** Which page of a board, from an address. */
+export function rankingPage(value: string | null): number {
+  if (value === null || value === '') return 1;
+  if (!/^[1-9]\d{0,3}$/.test(value)) throw new BadRequest('Choose a page by its number.');
+  return Number(value);
 }
 
 /** A provider to rank by, from a page address. None ranks by every provider together. */
@@ -43,14 +73,36 @@ function standings(rows: Score[]): Standing[] {
   });
 }
 
-function rankingUsage(period: RankingPeriod, userId?: string) {
+/** Whose usage a query covers: every public profile, one account, or the members of a group. */
+export type Membership =
+  | { kind: 'public' }
+  | { kind: 'user'; id: string }
+  /** `publicOnly` leaves out members whose profiles are private, for a board anyone can open. */
+  | { kind: 'group'; id: string; publicOnly: boolean };
+
+/** Values for a query, each named by its number so a query can use one more than once. */
+class Bindings {
+  readonly values: (string | number | null)[] = [];
+  add(value: string | number | null): string {
+    this.values.push(value);
+    return `?${this.values.length}`;
+  }
+}
+
+function rankingUsage(period: RankingPeriod, members: Membership) {
   const lifetime = period.days === 'all';
-  const params: string[] = lifetime ? [] : [period.start, period.end];
-  const membership = userId === undefined ? 'is_public = 1' : `id = ?${params.length + 1}`;
-  if (userId !== undefined) params.push(userId);
+  const bind = new Bindings();
+  // The dated queries below name the period's first and last day as ?1 and ?2.
+  if (!lifetime) {
+    bind.add(period.start);
+    bind.add(period.end);
+  }
+  const membership = members.kind === 'public' ? 'is_public = 1'
+    : members.kind === 'user' ? `id = ${bind.add(members.id)}`
+    : `id IN (SELECT user_id FROM group_members WHERE group_id = ${bind.add(members.id)})${members.publicOnly ? ' AND is_public = 1' : ''}`;
   const detail = lifetime ? 'models' : 'daily';
   const sql = `WITH members AS (
-    SELECT id, login FROM users WHERE ${membership}
+    SELECT id, login, name FROM users WHERE ${membership}
   ), figures AS (
     SELECT t.user_id, t.machine_id, t.tool, json_extract(payload, '$.scope') AS scope,
       json_extract(payload, '$.total') AS lifetime, json_extract(payload, '$.asOf') AS through_day,
@@ -65,7 +117,7 @@ function rankingUsage(period: RankingPeriod, userId?: string) {
     SELECT user_id, tool, lifetime, ${lifetime ? 'through_day' : 'CASE WHEN has_days THEN through_day END AS through_day'}
     FROM account_reports WHERE position = 1
   ), ${lifetime ? lifetimeUsage : datedUsage}`;
-  return { sql, params };
+  return { sql, bind };
 }
 
 // Use the same lifetime floors as computeTokens at each level: model, machine, then account.
@@ -144,42 +196,84 @@ export interface ProviderUsage {
   profiles: number;
 }
 
+/** How many profiles a board shows at a time. */
+export const BOARD_PAGE = 100;
+
+export interface RankedProfile extends Standing {
+  /** The name on the account, when it has one. `label` is the login. */
+  name: string | null;
+}
+
+export interface Board {
+  users: RankedProfile[];
+  position: PublicPosition;
+  /** The providers these members use, most used first, whichever provider the board ranks by. */
+  providers: ProviderUsage[];
+  /** What every ranked profile used together, whichever page is shown. */
+  tokens: number;
+  page: number;
+  pages: number;
+}
+
 /**
- * The public board, by every provider together or by one. Either way it also lists the
- * providers that public profiles use, from the same read of the usage records.
+ * A board of members ranked by tokens, by every provider together or by one, a page at a time.
+ * It also finds the viewer's place, wherever it is, and lists the providers the members use,
+ * all from one read of the usage records.
  */
-export async function publicRankings(db: Db, period: RankingPeriod, viewerId: string | null = null, provider: string | null = null) {
-  const { sql, params } = rankingUsage(period);
+export async function rankBoard(
+  db: Db,
+  period: RankingPeriod,
+  members: Membership,
+  options: { viewerId?: string | null; provider?: string | null; page?: number } = {},
+): Promise<Board> {
+  const { viewerId = null, provider = null, page = 1 } = options;
+  const { sql, bind } = rankingUsage(period, members);
+  const byOne = provider === null ? '' : `WHERE by_provider.tool = ${bind.add(provider)}`;
+  const after = bind.add((page - 1) * BOARD_PAGE);
+  const through = bind.add(page * BOARD_PAGE);
   // Usage is never negative, so leaving out a profile's unused providers changes no total.
   const { results } = await db.prepare(`${sql}, by_provider AS (
       SELECT user_id, tool, TOTAL(tokens) AS tokens FROM usage GROUP BY user_id, tool HAVING TOTAL(tokens) > 0
     ), scores AS (
-      SELECT members.id, members.login AS label, TOTAL(by_provider.tokens) AS tokens
+      SELECT members.id, members.login AS label, members.name, TOTAL(by_provider.tokens) AS tokens
       FROM by_provider JOIN members ON members.id = by_provider.user_id
-      ${provider === null ? '' : 'WHERE by_provider.tool = ?'}
+      ${byOne}
       GROUP BY members.id
     ), ranked AS (
-      SELECT *, RANK() OVER (ORDER BY tokens DESC) AS rank, COUNT(*) OVER () AS participants,
+      SELECT *, RANK() OVER (ORDER BY tokens DESC) AS rank,
         ROW_NUMBER() OVER (ORDER BY tokens DESC, label COLLATE NOCASE, id) AS row_num FROM scores
     )
-    SELECT 'profile' AS kind, id, label, tokens, rank, participants, row_num FROM ranked WHERE row_num <= 100 OR id = ?
+    SELECT 'profile' AS kind, id, label, name, tokens, rank, 0 AS count, row_num FROM ranked
+      WHERE (row_num > ${after} AND row_num <= ${through}) OR id = ${bind.add(viewerId)}
     UNION ALL
-    SELECT 'provider', NULL, tool, TOTAL(tokens), 0, COUNT(*), 0 FROM by_provider GROUP BY tool
+    SELECT 'provider', NULL, tool, NULL, TOTAL(tokens), 0, COUNT(*), 0 FROM by_provider GROUP BY tool
+    UNION ALL
+    SELECT 'total', NULL, '', NULL, TOTAL(tokens), 0, COUNT(*), 0 FROM scores
     ORDER BY kind, row_num, tokens DESC, label`)
-    .bind(...params, ...(provider === null ? [] : [provider]), viewerId)
-    .all<Standing & { kind: 'profile' | 'provider'; id: string | null; participants: number; row_num: number }>();
+    .bind(...bind.values)
+    .all<RankedProfile & { kind: 'profile' | 'provider' | 'total'; id: string | null; count: number; row_num: number }>();
   const profiles = results.filter(row => row.kind === 'profile');
-  const position: PublicPosition = {
-    days: period.days, rank: profiles.find(row => row.id === viewerId)?.rank ?? null, participants: profiles[0]?.participants ?? 0,
+  const total = results.find(row => row.kind === 'total');
+  const participants = total?.count ?? 0;
+  return {
+    users: profiles.filter(row => row.row_num > (page - 1) * BOARD_PAGE && row.row_num <= page * BOARD_PAGE)
+      .map(({ rank, label, name, tokens }) => ({ rank, label, name, tokens })),
+    position: { days: period.days, rank: profiles.find(row => row.id === viewerId)?.rank ?? null, participants },
+    providers: results.filter(row => row.kind === 'provider').map(({ label, tokens, count }) => ({ tool: label, tokens, profiles: count })),
+    tokens: total?.tokens ?? 0,
+    page,
+    pages: Math.max(1, Math.ceil(participants / BOARD_PAGE)),
   };
-  const users = profiles.filter(row => row.row_num <= 100).map(({ rank, label, tokens }) => ({ rank, label, tokens }));
-  const providers: ProviderUsage[] = results.filter(row => row.kind === 'provider')
-    .map(({ label, tokens, participants }) => ({ tool: label, tokens, profiles: participants }));
-  return { users, position, providers };
+}
+
+/** The first page of the public board, as the agent's API has always given it. */
+export async function publicRankings(db: Db, period: RankingPeriod, viewerId: string | null = null, provider: string | null = null) {
+  const { users, position, providers } = await rankBoard(db, period, { kind: 'public' }, { viewerId, provider });
+  return { users: users.map(({ rank, label, tokens }): Standing => ({ rank, label, tokens })), position, providers };
 }
 
 export async function personalRankings(db: Db, userId: string, period: RankingPeriod): Promise<PersonalRankings> {
-  const { sql, params } = rankingUsage(period, userId);
+  const { sql, bind } = rankingUsage(period, { kind: 'user', id: userId });
   const { results } = await db.prepare(`${sql}
     SELECT 'machine' AS kind, m.id AS id, m.name AS label, TOTAL(u.device_tokens) AS tokens
     FROM usage u JOIN machines m ON m.user_id = u.user_id AND m.id = u.device
@@ -188,7 +282,7 @@ export async function personalRankings(db: Db, userId: string, period: RankingPe
     SELECT 'provider' AS kind, tool AS id, tool AS label, TOTAL(tokens) AS tokens
     FROM usage GROUP BY tool HAVING TOTAL(tokens) > 0
     ORDER BY kind, tokens DESC, label COLLATE NOCASE, id`)
-    .bind(...params).all<Score & { kind: 'machine' | 'provider' }>();
+    .bind(...bind.values).all<Score & { kind: 'machine' | 'provider' }>();
   return {
     machines: standings(results.filter(row => row.kind === 'machine')),
     providers: standings(results.filter(row => row.kind === 'provider').map(row => ({ ...row, label: providerName(row.label) }))),

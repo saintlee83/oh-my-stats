@@ -141,6 +141,37 @@ test('weekly change and calendar-month comparisons follow the profile date acros
   assert.equal(monthlyRecap({ ...metrics, github: null }).commits, null);
 });
 
+test('every day with usage is kept, and each year is summed up on its own', () => {
+  const days = (dates: string[], tuple: number[]) => Object.fromEntries(dates.map((date) => [date, { 'claude/claude-opus-5-5': tuple }]));
+  const tokens = compute([{
+    id: 'a'.repeat(16),
+    days: {
+      ...days(['2025-12-30', '2025-12-31', '2026-01-01', '2026-01-02', '2026-01-03', '2026-03-10'], [1, 1, 8, 0, 2]),
+      '2026-03-11': { 'claude/claude-opus-5-5': [2, 2, 16, 0, 3], 'codex/gpt-6-astra': [5, 0, 0, 0, 1], 'local-ai/unpriced': [70, 0, 0, 0, 1] },
+    },
+    // Dated by the tool itself, with no log behind it: it counts toward the year, but names no model.
+    totals: { gemini: { scope: 'machine', total: 300, asOf: '2024-05-02', daily: { '2024-05-01': 100, '2024-05-02': 200, '2024-05-03': 0 } } },
+  }]);
+  assert.deepEqual(tokens.dated.map((day) => [day.date, day.total]), [
+    ['2024-05-01', 100], ['2024-05-02', 200], ['2025-12-30', 10], ['2025-12-31', 10],
+    ['2026-01-01', 10], ['2026-01-02', 10], ['2026-01-03', 10], ['2026-03-10', 10], ['2026-03-11', 95],
+  ], 'days without usage are left out');
+  assert.deepEqual(tokens.dated.at(-1)?.byTool, { claude: 20, codex: 5, 'local-ai': 70 });
+  assert.equal(tokens.dated.reduce((sum, day) => sum + day.total, 0), tokens.monthly.reduce((sum, month) => sum + month.total, 0));
+
+  assert.deepEqual(tokens.years.map((row) => row.year), [2026, 2025, 2024], 'newest first');
+  const [y2026, y2025, y2024] = tokens.years;
+  assert.deepEqual([y2026.total, y2026.activeDays, y2026.bestStreak, y2026.messages], [135, 5, 3, 13]);
+  assert.deepEqual(y2026.peak, { date: '2026-03-11', total: 95 });
+  assert.deepEqual(y2026.byTool, { claude: 60, codex: 5, 'local-ai': 70 });
+  assert.deepEqual(y2026.models, [
+    { tool: 'local-ai', model: 'unpriced', total: 70 }, { tool: 'claude', model: 'claude-opus-5-5', total: 60 }, { tool: 'codex', model: 'gpt-6-astra', total: 5 },
+  ]);
+  assert.equal(y2026.cost, 12 + 5, 'input and output of the priced models; the unpriced one adds nothing');
+  assert.deepEqual([y2025.total, y2025.activeDays, y2025.bestStreak], [20, 2, 2], 'a run across New Year is cut at the year');
+  assert.deepEqual([y2024.total, y2024.activeDays, y2024.bestStreak, y2024.messages, y2024.models.length, y2024.cost], [300, 2, 2, 0, 0, 0]);
+});
+
 test('undated account totals do not invent weekly growth or monthly activity', () => {
   const tokens = compute([{ id: 'one', days: {}, totals: { codex: { scope: 'account', total: 12345, asOf: null } } }]);
   assert.equal(weeklyUsage(tokens).changePercent, null);

@@ -625,14 +625,23 @@ async function route(request: Request, deps: Deps): Promise<Response> {
     return html(rankingsPage(period, board.users, viewer, [board.position], { provider, providers: board.providers }, url.origin));
   }
 
-  const profile = /^\/u\/([A-Za-z0-9-]{1,39})(?:\/(dashboard\.svg|cards\/([a-z]+)\.txt|components\/([a-z]+)\.svg))?$/.exec(path);
+  // Boards under /rankings.
+
+  // Groups.
+
+  // Reading pages, and what search engines ask for.
+
+  // A profile, and what is published under it. Anything else under a profile is not found.
+  const profile = /^\/u\/([A-Za-z0-9-]{1,39})(?:\/([a-z0-9./-]+))?$/.exec(path);
   if (profile) {
-    const [, login, resource, cardKey, componentKey] = profile;
+    const [, login, resource] = profile;
     const theme = themeNamed(url.searchParams.get('theme'));
+    if (resource === undefined) return serveProfile(login, request, deps);
     if (resource === 'dashboard.svg') return cachedPublic(request, deps, () => serveDashboardSvg(login, theme, url.origin, deps));
+    const [, cardKey] = /^cards\/([a-z]+)\.txt$/.exec(resource) ?? [];
     if (cardKey) return cachedPublic(request, deps, () => serveCard(login, cardKey, deps));
+    const [, componentKey] = /^components\/([a-z]+)\.svg$/.exec(resource) ?? [];
     if (componentKey) return cachedPublic(request, deps, () => serveComponentSvg(login, componentKey, theme, url.origin, deps));
-    return serveProfile(login, request, deps);
   }
   return html(errorPage(404, 'Page not found.', await viewerFromCookie(request, deps)), 404);
 }

@@ -1,6 +1,6 @@
-import type { ModelUsage, TokenMetrics, TokenToolRow } from './metrics.ts';
+import type { ModelUsage, TokenMetrics, TokenToolRow, TokenYear } from './metrics.ts';
 import { costOf, findPrice } from './pricing.ts';
-import { lastDays, zoned } from './time.ts';
+import { lastDays, nextDay, zoned } from './time.ts';
 import type { MachineUsage, PriceTable, TokenBreakdown, ToolTotals } from './types.ts';
 
 const totalOf = (usage: TokenBreakdown) => usage[0] + usage[1] + usage[2] + usage[3];
@@ -35,6 +35,59 @@ function accountFigure(machines: MachineUsage[], tool: string): ToolTotals | nul
     for (const [date, value] of Object.entries(figure.daily ?? {})) daily[date] = Math.max(daily[date] ?? 0, value);
   }
   return best ? { ...best, daily } : null;
+}
+
+/** Each calendar year on its own: how much, on how many days, and with which models. */
+function yearsOf(dated: TokenMetrics['dated'], machines: MachineUsage[], prices: PriceTable): TokenYear[] {
+  const years = new Map<number, TokenYear>();
+  const yearOf = (date: string) => {
+    const year = Number(date.slice(0, 4));
+    let row = years.get(year);
+    if (!row) years.set(year, (row = { year, total: 0, activeDays: 0, bestStreak: 0, peak: null, byTool: {}, messages: 0, models: [], cost: 0 }));
+    return row;
+  };
+  let streak = 0;
+  let previous = '';
+  for (const { date, total, byTool } of dated) {
+    const row = yearOf(date);
+    row.total += total;
+    row.activeDays += 1;
+    for (const [tool, value] of Object.entries(byTool)) row.byTool[tool] = (row.byTool[tool] ?? 0) + value;
+    if (total > (row.peak?.total ?? 0)) row.peak = { date, total };
+    // A run that crosses New Year counts in each year for the days it has there.
+    streak = previous && nextDay(previous) === date && previous.slice(0, 4) === date.slice(0, 4) ? streak + 1 : 1;
+    row.bestStreak = Math.max(row.bestStreak, streak);
+    previous = date;
+  }
+
+  const logged = new Map<number, Map<string, { tool: string; model: string; usage: TokenBreakdown }>>();
+  for (const machine of machines) {
+    for (const [date, entries] of Object.entries(machine.days)) {
+      const year = Number(date.slice(0, 4));
+      // Logs from a year with no dated usage would describe a year the calendar doesn't show.
+      const row = years.get(year);
+      if (!row) continue;
+      const models = logged.get(year) ?? new Map();
+      logged.set(year, models);
+      for (const [key, tuple] of Object.entries(entries)) {
+        const [tool, model] = splitKey(key);
+        const entry = models.get(key) ?? { tool, model, usage: [0, 0, 0, 0] as TokenBreakdown };
+        addInto(entry.usage, tuple);
+        models.set(key, entry);
+        row.messages += tuple[4];
+      }
+    }
+  }
+  for (const [year, models] of logged) {
+    const row = years.get(year)!;
+    for (const { tool, model, usage } of models.values()) {
+      row.models.push({ tool, model, total: totalOf(usage) });
+      const price = findPrice(prices, model);
+      if (price) row.cost += costOf(price, { input: usage[0], output: usage[1], cacheRead: usage[2], cacheWrite: usage[3] });
+    }
+    row.models.sort((a, b) => b.total - a.total || a.model.localeCompare(b.model));
+  }
+  return [...years.values()].sort((a, b) => b.year - a.year);
 }
 
 /**
@@ -264,6 +317,7 @@ export function computeTokens(
     if (total > (peak?.total ?? 0)) peak = { date, total };
   }
 
+  const dated = allDates.map((date) => ({ date, total: dayTotal(date), byTool: { ...days.get(date) } })).filter((day) => day.total > 0);
   const sum = (pick: (row: ModelUsage) => number) => modelRows.reduce((total, row) => total + pick(row), 0);
   const input = sum((row) => row.input);
   const cacheRead = sum((row) => row.cacheRead);
@@ -285,6 +339,8 @@ export function computeTokens(
     machines: perMachine.sort((a, b) => b.total - a.total),
     unassigned,
     daily: lastDays(today, 60).map((date) => ({ date, total: dayTotal(date), byTool: { ...days.get(date) } })),
+    dated,
+    years: yearsOf(dated, machines, prices),
     monthly: [...monthly.values()].sort((a, b) => a.month.localeCompare(b.month)),
     undated: toolRows.reduce((total, row) => total + Math.max(0, row.total - (datedByTool[row.tool] ?? 0)), 0),
     last30: {

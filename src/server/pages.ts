@@ -16,15 +16,15 @@ export function esc(value: unknown): string {
 
 export const REPO_URL = 'https://github.com/saintlee83/oh-my-stats';
 const HOSTED_ORIGIN = 'https://ohmystats.dev';
-const SITE = 'oh-my-stats';
+export const SITE = 'oh-my-stats';
 const DESCRIPTION = 'Your AI tokens and GitHub contributions in one place, from every machine, with private work included.';
 const AVATARS = 'https://avatars.githubusercontent.com';
 
-const GITHUB_MARK =
+export const GITHUB_MARK =
   '<svg viewBox="0 0 16 16" aria-hidden="true"><path d="M8 0c4.42 0 8 3.58 8 8a8.013 8.013 0 0 1-5.45 7.59c-.4.08-.55-.17-.55-.38 0-.27.01-1.13.01-2.2 0-.75-.25-1.23-.54-1.48 1.78-.2 3.65-.88 3.65-3.95 0-.88-.31-1.59-.82-2.15.08-.2.36-1.02-.08-2.12 0 0-.67-.22-2.2.82-.64-.18-1.32-.27-2-.27-.68 0-1.36.09-2 .27-1.53-1.03-2.2-.82-2.2-.82-.44 1.1-.16 1.92-.08 2.12-.51.56-.82 1.28-.82 2.15 0 3.06 1.86 3.75 3.64 3.95-.23.2-.44.55-.51 1.07-.46.21-1.61.55-2.33-.66-.15-.24-.6-.83-1.23-.82-.67.01-.27.38.01.53.34.19.73.9.82 1.13.16.45.68 1.31 2.69.94 0 .67.01 1.3.01 1.49 0 .21-.15.45-.55.38A7.995 7.995 0 0 1 0 8c0-4.42 3.58-8 8-8Z"/></svg>';
 
 /** A GitHub avatar at twice the size it's drawn, for sharp screens. The page may load images from nowhere else. */
-function avatar(url: string | null, size: number): string {
+export function avatar(url: string | null, size: number): string {
   if (!url) return '';
   try {
     const sized = new URL(url);
@@ -40,19 +40,24 @@ function avatar(url: string | null, size: number): string {
  * What a page says about itself. A page worth sharing gives the address it's served from, and
  * gets the preview image: sites that show link previews only follow a full address.
  */
-interface PageOptions {
+export interface PageOptions {
   description?: string;
   bleed?: boolean;
   origin?: string;
+  /** A preview image of the page's own, by its full address, in place of the site's banner. */
+  image?: { url: string; width: number; height: number; alt: string };
 }
 
-function layout(title: string, body: string, viewer: UserRow | null, page: PageOptions = {}): string {
+/** The frame every page shares: the head, the header and the footer around a body. */
+export function layout(title: string, body: string, viewer: UserRow | null, page: PageOptions = {}): string {
   const description = esc(page.description ?? DESCRIPTION);
-  const preview = page.origin
-    ? `<meta property="og:image" content="${esc(page.origin)}/og.png">
-<meta property="og:image:width" content="2400">
-<meta property="og:image:height" content="1260">
-<meta property="og:image:alt" content="${SITE}. Your real developer stats, from every machine.">
+  const image = page.image
+    ?? (page.origin ? { url: `${page.origin}/og.png`, width: 2400, height: 1260, alt: `${SITE}. Your real developer stats, from every machine.` } : null);
+  const preview = image
+    ? `<meta property="og:image" content="${esc(image.url)}">
+<meta property="og:image:width" content="${image.width}">
+<meta property="og:image:height" content="${image.height}">
+<meta property="og:image:alt" content="${esc(image.alt)}">
 <meta name="twitter:card" content="summary_large_image">`
     : '<meta name="twitter:card" content="summary">';
   const account = viewer
@@ -89,7 +94,7 @@ ${preview}
  * A ranked list. Totals span orders of magnitude, so each row has the short figure to
  * scan, the exact one beneath it, and a bar comparing it with the leader.
  */
-function standings(rows: Standing[], column: string, tokenColumn: string, profiles: { viewer: string | null } | null = null): string {
+export function standings(rows: Standing[], column: string, tokenColumn: string, profiles: { viewer: string | null } | null = null): string {
   if (!rows.length) return '<p>No token usage for this period.</p>';
   const most = rows[0].tokens;
   const body = rows.map((row) => {
@@ -107,9 +112,14 @@ function standings(rows: Standing[], column: string, tokenColumn: string, profil
   return `<div class="table"><table class="standings"><thead><tr><th class="rank">Rank</th><th>${column}</th><td class="meter" aria-hidden="true"></td><th class="num">${tokenColumn}</th></tr></thead><tbody>${body}</tbody></table></div>`;
 }
 
-const periodLabel = (days: RankingPeriod['days']) => (days === 'all' ? 'All time' : `Last ${days} days`);
+export const periodLabel = (days: RankingPeriod['days']) =>
+  days === 'all' ? 'All time' : days === 'month' ? 'This month' : days === 'last-month' ? 'Last month' : `Last ${days} days`;
 
-const profileCount = (count: number) => `${commas(count)} ranked public ${count === 1 ? 'profile' : 'profiles'}`;
+/** The heading of a board's token column, which says what stretch the tokens are from. */
+export const tokenColumnLabel = (days: RankingPeriod['days']) =>
+  days === 'all' ? 'Lifetime tokens' : typeof days === 'number' ? `Tokens (${days} days)` : `Tokens (${periodLabel(days).toLowerCase()})`;
+
+export const profileCount = (count: number) => `${commas(count)} ranked public ${count === 1 ? 'profile' : 'profiles'}`;
 
 /** Which provider the public board ranks by, and the providers its profiles use. */
 export interface ProviderFilter {
@@ -143,7 +153,7 @@ export function rankingsPage(
   const views = viewer
     ? `<nav class="segments" aria-label="Ranking views"><a href="/rankings?days=${period.days}"${current(isPublic)}>Everyone</a><a href="/me/rankings?days=${period.days}"${current(!isPublic)}>Mine</a></nav>`
     : '';
-  const tokenColumn = period.days === 'all' ? 'Lifetime tokens' : `Tokens (${period.days} days)`;
+  const tokenColumn = tokenColumnLabel(period.days);
   const unranked = viewer && positions.every(p => p.rank === null) ? (viewer.is_public ? 'No ranked usage in these periods.' : 'Your profile is private.') : '';
   let content: string;
   if (isPublic) {
@@ -169,7 +179,7 @@ ${content}`, viewer, isPublic ? { origin, description: 'Published developer prof
 }
 
 /** The same steps on every system but the first, so the reader picks theirs once. */
-function installCommands(origin: string): string {
+export function installCommands(origin: string): string {
   const login = `oms login${origin === HOSTED_ORIGIN ? '' : ` --server ${origin}`}`;
   const pane = (install: string) => `<pre><code>${esc(`${install}\n${login}\noms service install`)}</code></pre>`;
   return `<div class="terminal" role="group" aria-label="Install commands">
@@ -355,6 +365,7 @@ export function profilePage(
   origin: string,
   viewer: UserRow | null,
   position: PublicPosition | null = null,
+  image?: PageOptions['image'],
 ): string {
   const url = `${origin}/u/${encodeURIComponent(user.login)}`;
   const login = esc(encodeURIComponent(user.login));
@@ -377,7 +388,7 @@ ${providerActivity(tokens)}
   ${cards.length ? `<h2>Text cards</h2><ul>${cardLinks}</ul>` : ''}
 </div>`,
     viewer,
-    { origin, description: `The developer stats of @${user.login}: AI tokens and GitHub contributions, counted across every machine.` },
+    { origin, image, description: `The developer stats of @${user.login}: AI tokens and GitHub contributions, counted across every machine.` },
   );
 }
 

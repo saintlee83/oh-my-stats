@@ -69,6 +69,25 @@ export interface TokenToolRow {
   };
 }
 
+/**
+ * One calendar year of dated usage. The total follows each tool's own daily figures where it
+ * has them. Models, responses and cost come from logged responses, so they can fall short of it.
+ */
+export interface TokenYear {
+  year: number;
+  total: number;
+  activeDays: number;
+  /** The longest run of days in a row with usage, within the year. */
+  bestStreak: number;
+  peak: { date: string; total: number } | null;
+  byTool: Record<string, number>;
+  messages: number;
+  /** Most used first. */
+  models: { tool: string; model: string; total: number }[];
+  /** At list price, for logged usage of models with a known price. A minimum. */
+  cost: number;
+}
+
 export interface TokenMetrics {
   total: number;
   /** Input, output and cache writes. Only covers tokens with a known breakdown. */
@@ -91,6 +110,10 @@ export interface TokenMetrics {
   unassigned: { total: number; last7: number; last30: number };
   /** Trailing 60 days, oldest first. */
   daily: { date: string; total: number; byTool: Record<string, number> }[];
+  /** Every day with usage, oldest first, however long ago: what a year's calendar is drawn from. */
+  dated: { date: string; total: number; byTool: Record<string, number> }[];
+  /** Calendar years with dated usage, newest first. */
+  years: TokenYear[];
   monthly: { month: string; total: number; byTool: Record<string, number> }[];
   /** Lifetime tokens from before a tool's daily records begin. */
   undated: number;
