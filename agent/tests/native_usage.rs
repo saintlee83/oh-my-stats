@@ -5,8 +5,13 @@ use serde_json::{Value, json};
 use std::fs;
 use std::path::{Path, PathBuf};
 use std::process::Command;
+use std::sync::atomic::{AtomicUsize, Ordering};
 
 struct Home(PathBuf);
+
+/// Tests run side by side in one process, and the clock can give two of them the same
+/// instant. The count keeps each one's folder its own.
+static HOMES: AtomicUsize = AtomicUsize::new(0);
 
 impl Home {
     fn new() -> Self {
@@ -14,7 +19,11 @@ impl Home {
             .duration_since(std::time::UNIX_EPOCH)
             .unwrap()
             .as_nanos();
-        Self(std::env::temp_dir().join(format!("oms-native-{}-{nonce}", std::process::id())))
+        let count = HOMES.fetch_add(1, Ordering::Relaxed);
+        Self(std::env::temp_dir().join(format!(
+            "oms-native-{}-{nonce}-{count}",
+            std::process::id()
+        )))
     }
 }
 
