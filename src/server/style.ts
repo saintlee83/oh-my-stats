@@ -193,6 +193,11 @@ const SOURCE = `
   .terminal input:focus-visible + label { outline: 2px solid #58a6ff; outline-offset: -3px; border-radius: 6px; }
   .terminal pre { display: none; grid-column: 1 / -1; margin: 0; padding: 16px 18px; border: 0; border-top: 1px solid #30363d; border-radius: 0; background: none; color: inherit; font-size: 14px; line-height: 1.75; }
   .terminal input:nth-of-type(1):checked ~ pre:nth-of-type(1), .terminal input:nth-of-type(2):checked ~ pre:nth-of-type(2) { display: block; }
+  .github-setup { margin-top: 16px; text-align: left; }
+  .github-setup summary { cursor: pointer; font-weight: 600; }
+  .github-setup[open] summary { margin-bottom: 8px; }
+  .github-setup li + li { margin-top: 8px; }
+  .github-setup ol { margin: 0; padding-inline-start: 24px; color: var(--ink2); }
 
   /* Landing page */
   main.bleed { max-width: none; padding: 0 0 72px; }
@@ -209,6 +214,8 @@ const SOURCE = `
   .lead { max-width: 60ch; margin: 0 auto 28px; font-size: clamp(16px, 1.7vw, 19px); line-height: 1.55; text-wrap: pretty; }
   .hero .actions { justify-content: center; gap: 12px; }
   .hero .terminal { max-width: 640px; margin: 40px auto 14px; box-shadow: var(--shadow-lg); }
+  .hero .github-setup { max-width: 640px; margin-inline: auto; }
+  .hero .github-setup summary { text-align: center; }
   .hero .muted { margin: 0; }
   .section { padding-top: 64px; }
   .section-head { margin: 0 0 24px; }

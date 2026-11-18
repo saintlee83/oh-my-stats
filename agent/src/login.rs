@@ -7,6 +7,7 @@ use serde_json::{Value, json};
 
 use crate::api::{Api, check_server_url, is_local_server};
 use crate::config::{Config, state_dir};
+use crate::github;
 use crate::machine::machine_info;
 use crate::store::Store;
 
@@ -134,6 +135,7 @@ pub fn login(server: Option<&str>, name: Option<&str>, use_gh: bool) -> Result<(
     println!("\nSigned in as @{user}, on {} ({}).", machine.name, machine.platform);
     println!("Next: `oms sync` to send your usage now, then `oms service install` to keep it running.");
     println!("Your profile stays private until you run `oms publish`.");
+    github::print_setup_hint(&config);
     Ok(())
 }
 

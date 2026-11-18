@@ -2,7 +2,7 @@ import type { Card } from '../shared/render/cards.ts';
 import type { ComponentKey } from '../shared/render/svg.ts';
 import { commas, compact, percent, PROVIDERS, providerName } from '../shared/format.ts';
 import { providerMix } from '../shared/insights.ts';
-import type { GitHubProfile, TokenMetrics } from '../shared/metrics.ts';
+import type { GitHubMetrics, GitHubProfile, TokenMetrics } from '../shared/metrics.ts';
 import { PROFILE_LIMITS, STATUS_CHOICES, type ManualProfile } from '../shared/profile.ts';
 import type { MachineRow, UserRow } from './db.ts';
 import type { PersonalRankings, ProviderUsage, PublicPosition, RankingPeriod, Standing } from './rankings.ts';
@@ -179,6 +179,16 @@ ${pane(`curl -fsSL ${origin}/install.sh | sh`)}${pane(`irm ${origin}/install.ps1
 </div>`;
 }
 
+const GITHUB_SETUP = `<details class="github-setup">
+<summary>Add GitHub contribution stats (optional)</summary>
+<p><code>oms login</code> is enough to sync AI usage. To include commits and other repository activity, set up the <a href="https://cli.github.com/">GitHub CLI</a> on one machine.</p>
+<ol>
+  <li>Run <code>gh auth status</code> to check the active GitHub account. If you need to sign in, run <code>gh auth login</code> with the account you use for OMS.</li>
+  <li>Run <code>oms sync --github</code> to update your contribution stats now. The agent uses the repository token on this machine to read from GitHub.</li>
+  <li>If the sync reports that your GitHub CLI login is missing <code>repo</code> or <code>read:org</code>, run <code>gh auth refresh -s repo,read:org</code>, approve the request, and retry the sync. The <code>repo</code> scope includes read and write access to repositories you can access. OMS uses it to read activity. The <code>read:org</code> scope allows reading organization and team membership.</li>
+</ol>
+</details>`;
+
 /**
  * The logo's motif behind the landing page's heading: contribution squares that rise like
  * bar charts toward both edges, leaving the middle clear for the words. Each bar is one
@@ -266,6 +276,7 @@ export function landingPage(origin: string, viewer: UserRow | null, board: Landi
 <div class="actions">${start}<a class="button lg" href="/rankings">See the rankings</a></div>
 ${installCommands(origin)}
 <p class="muted">The agent records usage continuously and uploads once a day. Run <code>oms sync</code> to update right away.</p>
+${GITHUB_SETUP}
 </div></section>
 ${showcase}
 <section class="section wrap">
@@ -441,11 +452,12 @@ export function dashboardPage(
   tokens: TokenMetrics | null,
   parts: Part[],
   origin: string,
-  profile: { manual: ManualProfile; github: GitHubProfile | null },
+  profile: { manual: ManualProfile; github: GitHubMetrics | null },
 ): string {
   const url = `${origin}/u/${encodeURIComponent(user.login)}`;
   const isPublic = user.is_public === 1;
-  const empty = `<div class="panel"><h2>Connect your first machine</h2><p>Run this on each computer. The agent records usage continuously and uploads once a day.</p>${installCommands(origin)}</div>`;
+  const githubSetup = profile.github ? '' : GITHUB_SETUP;
+  const empty = `<div class="panel"><h2>Connect your first machine</h2><p>Run this on each computer. The agent records usage continuously and uploads once a day.</p>${installCommands(origin)}${githubSetup}</div>`;
   return layout(
     `Your dashboard · ${SITE}`,
     `<div class="page-head"><div><h1>Your dashboard</h1><p>Signed in as @${esc(user.login)}. ${isPublic ? 'Your profile is public.' : 'Only you can see these numbers.'}</p></div>
@@ -463,14 +475,15 @@ ${providerActivity(tokens)}
   }
   <form method="post" action="/me/visibility"><input type="hidden" name="public" value="${isPublic ? '0' : '1'}"><button class="${isPublic ? '' : 'primary'}">${isPublic ? 'Make private' : 'Publish profile'}</button></form>
 </div>
-${profileForm(profile.manual, profile.github)}
+${profileForm(profile.manual, profile.github?.profile ?? null)}
 ${
   machines.length
     ? `<div class="panel"><h2>Machines</h2><div class="table"><table>
 <thead><tr><th>Name</th><th>Platform</th><th class="num">Tokens · last 7d</th><th class="num">Tokens · last 30d</th><th class="num">Lifetime tokens</th><th>Last sync</th><th></th></tr></thead>
 <tbody>${machineRows(machines, tokens)}${tokens && Object.values(tokens.unassigned).some(n => n > 0) ? `<tr><td colspan="2">No matching device</td>
   <td class="num">${commas(tokens.unassigned.last7)}</td><td class="num">${commas(tokens.unassigned.last30)}</td><td class="num">${commas(tokens.unassigned.total)}</td><td colspan="2"></td></tr>` : ''}</tbody></table></div>
-<p class="muted">Machines upload once a day, so numbers can be up to a day behind. Run <code>oms sync</code> on a machine to update it now. For providers with an account-wide total, device attribution uses local logs. Account usage with no matching machine record appears only in the account total. Removing a machine deletes its data and signs it out.</p></div>`
+<p class="muted">Machines upload once a day, so numbers can be up to a day behind. Run <code>oms sync</code> on a machine to update it now. For providers with an account-wide total, device attribution uses local logs. Account usage with no matching machine record appears only in the account total. Removing a machine deletes its data and signs it out.</p>
+${githubSetup}</div>`
     : ''
 }
 <div class="panel">

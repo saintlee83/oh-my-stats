@@ -433,7 +433,7 @@ async function serveMe(request: Request, deps: Deps): Promise<Response> {
   const [machines, { metrics, github }] = await Promise.all([listMachines(deps.db, viewer.id), buildMetrics(viewer, deps)]);
   const origin = new URL(request.url).origin;
   const dashboard = hasData(metrics) ? renderDashboard(await withAvatar(metrics, viewer, origin, deps)) : null;
-  const profile = { manual: manualProfileFromJson(viewer.profile), github: github?.profile ?? null };
+  const profile = { manual: manualProfileFromJson(viewer.profile), github };
   return html(dashboardPage(viewer, machines, dashboard, metrics.tokens, availableComponents(metrics), origin, profile));
 }
 

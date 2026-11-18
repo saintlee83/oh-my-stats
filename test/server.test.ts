@@ -383,6 +383,10 @@ test('the dashboard requires sign-in and shows the owner their machines', async 
   const text = await page.text();
   assert.ok(text.includes(SECRET_NAME), 'the owner sees machine names');
   assert.ok(text.includes('Publish profile'));
+  assert.ok(text.includes('oms sync --github'), 'GitHub setup remains available after connecting an AI usage source');
+  assert.equal((await context.call('/v1/github', api(agent, 'PUT', githubMetrics()))).status, 200);
+  const synced = await context.call('/me', { headers: { cookie: session } });
+  assert.doesNotMatch(await synced.text(), /oms sync --github/, 'GitHub setup disappears after the first contribution sync');
 });
 
 test('an agent token cannot open the website, nor a web session the API', async () => {
@@ -1120,6 +1124,9 @@ test('install commands are shown per system, each with the same next steps', asy
     assert.match(text, /<pre><code>irm https:\/\/stats\.example\/install\.ps1 \| iex\noms login --server https:\/\/stats\.example\noms service install<\/code><\/pre>/);
     assert.equal(text.match(/type="radio" name="os"/g)?.length, 2);
     assert.equal(text.match(/type="radio" name="os"[^>]* checked/g)?.length, 1, 'one system is shown to start with');
+    const setup = text.match(/<details class="github-setup">([\s\S]*?)<\/details>/)?.[1] ?? '';
+    assert.match(setup, /<summary>[^<]*optional[^<]*<\/summary>/i);
+    assert.match(setup, /gh auth status[\s\S]*gh auth login[\s\S]*oms sync --github[\s\S]*gh auth refresh -s repo,read:org/);
   }
 });
 
