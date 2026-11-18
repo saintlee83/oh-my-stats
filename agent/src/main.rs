@@ -6,6 +6,7 @@ mod login;
 mod machine;
 mod parse;
 mod providers;
+mod rankings;
 mod scan;
 mod service;
 mod store;
@@ -44,6 +45,13 @@ enum Commands {
     Logout,
     /// Show sign-in, totals and machines
     Status,
+    /// Show the public token leaderboard and your own device and provider rankings
+    #[command(visible_alias = "ranking")]
+    Rankings {
+        /// Number of reporting dates ending today in UTC
+        #[arg(long, default_value = "7", value_parser = ["7", "30"])]
+        days: String,
+    },
     /// Read new logs and upload what changed, right now
     Sync {
         /// Collect GitHub stats now, even if they aren't due
@@ -112,6 +120,7 @@ fn main() -> Result<()> {
         Commands::Login { server, name, gh } => login::login(server.as_deref(), name.as_deref(), gh),
         Commands::Logout => login::logout(),
         Commands::Status => daemon::print_status(),
+        Commands::Rankings { days } => rankings::show(&days),
         Commands::Sync { github } => daemon::run_once_verbose(github),
         Commands::Daemon { interval } => daemon::run(interval.max(10)),
         Commands::Service { action } => match action {

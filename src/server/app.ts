@@ -51,7 +51,8 @@ import {
   type SessionRow,
   type UserRow,
 } from './db.ts';
-import { dashboardPage, errorPage, landingPage, profilePage } from './pages.ts';
+import { dashboardPage, errorPage, landingPage, profilePage, rankingsPage } from './pages.ts';
+import { personalRankings, publicRankings, rankingPeriod } from './rankings.ts';
 import { loadPrices } from './prices.ts';
 import { LOGO_SVG } from './logo.ts';
 import { BadRequest, cleanMachineName, parseGitHubMetrics, parseMachine, parseUsageUpload } from './wire.ts';
@@ -485,6 +486,11 @@ async function handleApi(request: Request, path: string, deps: Deps): Promise<Re
   // Writing costs far more than reading, and an agent only has a few uploads to make.
   const kind = request.method === 'GET' ? 'public' : 'strict';
   if (deps.allow && !(await deps.allow(kind, `agent:${session.user_id}`))) return json({ error: 'Too many requests. Try again in a minute.' }, 429);
+  if (path === '/v1/rankings' && request.method === 'GET') {
+    const period = rankingPeriod(new URL(request.url).searchParams.get('days'), now);
+    const [users, personal] = await Promise.all([publicRankings(deps.db, period), personalRankings(deps.db, session.user_id, period)]);
+    return json({ period, users, ...personal });
+  }
 
   if (path === '/v1/usage' && request.method === 'PUT') {
     const upload = parseUsageUpload(await readJson(request, MAX_USAGE_BYTES), now);
@@ -570,6 +576,16 @@ async function route(request: Request, deps: Deps): Promise<Response> {
   if (path === '/login') return startLogin(request, deps);
   if (path === '/auth/callback') return finishLogin(request, deps);
   if (path === '/me') return serveMe(request, deps);
+  if (path === '/rankings' || path === '/me/rankings') {
+    if (deps.allow && !(await deps.allow('public', `rankings:${clientIp(request)}`))) return tooMany();
+    const viewer = await viewerFromCookie(request, deps);
+    const period = rankingPeriod(url.searchParams.get('days'), deps.now());
+    if (path === '/me/rankings') {
+      if (!viewer) return redirect('/login');
+      return html(rankingsPage(period, await personalRankings(deps.db, viewer.id, period), viewer));
+    }
+    return html(rankingsPage(period, await publicRankings(deps.db, period), viewer));
+  }
 
   const profile = /^\/u\/([A-Za-z0-9-]{1,39})(?:\/(dashboard\.svg|cards\/([a-z]+)\.txt|components\/([a-z]+)\.svg))?$/.exec(path);
   if (profile) {

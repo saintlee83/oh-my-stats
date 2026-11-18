@@ -30,7 +30,8 @@ function accountFigure(machines: MachineUsage[], tool: string): ToolTotals | nul
   for (const machine of machines) {
     const figure = machine.totals?.[tool];
     if (figure?.scope !== 'account') continue;
-    if (!best || figure.total > best.total) best = figure;
+    if (!best || figure.total > best.total
+      || (figure.total === best.total && (figure.asOf ?? '') > (best.asOf ?? ''))) best = figure;
     for (const [date, value] of Object.entries(figure.daily ?? {})) daily[date] = Math.max(daily[date] ?? 0, value);
   }
   return best ? { ...best, daily } : null;

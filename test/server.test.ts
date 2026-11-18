@@ -1031,3 +1031,108 @@ test('the owner can compare device periods and see lifetime usage with no matchi
     }
   }
 });
+
+test('rankings reconcile tool figures, respect visibility, and keep device and provider ranks personal', async () => {
+  const context = app({}, {
+    'gh-token': octo, 'web-token': octo,
+    alpha: { id: 2, login: 'alpha' }, beta: { id: 3, login: 'beta' }, hidden: { id: 4, login: 'secret-user' },
+  });
+  const a = await signIn(context, MACHINE_A, 'office-laptop');
+  const b = await signIn(context, MACHINE_B, 'studio-mac');
+  const put = async (token: string, id: string, days: object, totals: object = {}) => {
+    assert.equal((await context.call('/v1/usage', api(token, 'PUT', { ...upload(id), days, totals }))).status, 200);
+  };
+  await put(a, MACHINE_A, {
+    '2026-11-02': { 'pi/m': [40, 0, 0, 0, 1] },
+    '2026-11-03': { 'codex/m': [11, 0, 0, 0, 1], 'claude/m': [1, 0, 0, 0, 1] },
+    '2026-11-09': { 'codex/m': [5, 0, 0, 0, 1], 'pi/m': [1, 1, 2, 2, 1], 'claude/m': [2, 0, 0, 0, 1] },
+    '2026-11-10': { 'pi/m': [999, 0, 0, 0, 1] },
+  }, {
+    codex: { scope: 'account', total: 1000, asOf: '2026-11-08', daily: { '2026-11-03': 70, '2026-11-04': 11 } },
+    claude: { scope: 'machine', total: 20, asOf: '2026-11-04', daily: { '2026-11-03': 20 } },
+  });
+  await put(b, MACHINE_B, {
+    '2026-11-03': { 'codex/m': [7, 0, 0, 0, 1] }, '2026-11-09': { 'codex/m': [4, 0, 0, 0, 1] },
+  }, { codex: { scope: 'account', total: 500, asOf: '2026-11-05', daily: { '2026-11-03': 55, '2026-11-04': 16 } } });
+  await context.call('/v1/me', api(a, 'PATCH', { public: true }));
+  let betaToken = '';
+  for (const [login, tokens] of [['alpha', 123], ['beta', 21], ['hidden', 9999]] as const) {
+    // Reusing a machine ID on another account must never join private records across owners.
+    const response = await context.call('/v1/auth/token', api(null, 'POST', { githubToken: login, machine: machine(MACHINE_A, login + '-device') }));
+    const { token } = await response.json() as { token: string };
+    await put(token, MACHINE_A, { '2026-11-09': { 'copilot-cli/m': [tokens, 0, 0, 0, 1] } });
+    if (login !== 'hidden') await context.call('/v1/me', api(token, 'PATCH', { public: true }));
+    if (login === 'beta') betaToken = token;
+  }
+  const get = async (token: string, query = '') => {
+    const res = await context.call('/v1/rankings' + query, api(token, 'GET'));
+    assert.equal(res.status, 200);
+    return res.json() as Promise<{ period: object; users: object[]; machines: object[]; providers: object[] }>;
+  };
+  const week = await get(a);
+  const row = (rank: number, label: string, tokens: number) => ({ rank, label, tokens });
+  assert.deepEqual(week.period, { days: 7, start: '2026-11-03', end: '2026-11-09' });
+  assert.deepEqual(week.users, [row(1, 'alpha', 123), row(1, 'octo', 123), row(3, 'beta', 21)]);
+  assert.deepEqual(week.machines, [row(1, 'office-laptop', 44), row(2, 'studio-mac', 11)]);
+  assert.deepEqual(week.providers, [row(1, 'Codex', 95), row(2, 'Claude Code', 22), row(3, 'Pi', 6)]);
+  const month = await get(a, '?days=30');
+  assert.deepEqual(month.users[0], row(1, 'octo', 163));
+  assert.deepEqual(month.providers[1], row(2, 'Pi', 46));
+  const beta = await get(betaToken, '?days=7&user=1');
+  assert.deepEqual(beta.machines, [row(1, 'beta-device', 21)]);
+
+  const board = await context.call('/rankings');
+  assert.equal(board.headers.get('cache-control'), 'no-store');
+  const html = await board.text();
+  assert.match(html, /href="\/u\/octo"/);
+  assert.doesNotMatch(html, /office-laptop|studio-mac|beta-device|secret-user/);
+  const signedOut = await context.call('/me/rankings');
+  assert.equal(signedOut.headers.get('location'), '/login');
+  const cookie = await webLogin(context);
+  const privatePage = await context.call('/me/rankings?days=30', { headers: { cookie } });
+  assert.equal(privatePage.headers.get('cache-control'), 'no-store');
+  assert.match(await privatePage.text(), /office-laptop[\s\S]+studio-mac[\s\S]+My providers/);
+  await context.call('/v1/me', api(a, 'PATCH', { public: false }));
+  assert.doesNotMatch(await (await context.call('/rankings')).text(), /href="\/u\/octo"/);
+  assert.deepEqual((await get(a)).machines, week.machines, 'private owners keep their own rankings');
+  await context.call('/me/machines/' + MACHINE_B + '/delete', webPost(cookie, ''));
+  assert.deepEqual((await get(a)).machines, [row(1, 'office-laptop', 44)]);
+});
+
+test('empty ranking pages, invalid periods, and access limits', async () => {
+  const context = app();
+  assert.match(await (await context.call('/rankings')).text(), /No token usage for this period/);
+  assert.equal((await context.call('/rankings?days=0')).status, 400);
+  assert.equal((await context.call('/v1/rankings')).status, 401);
+  const token = await signIn(context);
+  assert.equal((await context.call('/v1/rankings?days=8', api(token, 'GET'))).status, 400);
+  assert.equal((await app({ allow: async () => false }).call('/rankings')).status, 429);
+});
+
+test('public rankings limit tied profiles deterministically and use the latest cutoff for equal lifetime reports', async () => {
+  const context = app();
+  const db = context.deps.db as ReturnType<typeof testDb>;
+  db.raw.exec(`
+    WITH RECURSIVE n(i) AS (VALUES(1) UNION ALL SELECT i+1 FROM n WHERE i<101)
+    INSERT INTO users (id, login, is_public, created_at, updated_at)
+    SELECT i, printf('member-%03d', i), 1, '2026-11-01', '2026-11-01' FROM n;
+    INSERT INTO machines (user_id,id,name,created_at,last_seen_at)
+    SELECT id,'a','Primary','2026-11-01','2026-11-01' FROM users;
+    INSERT INTO usage_daily
+    SELECT id,'a','2026-11-08','codex','m',25,0,0,0,1 FROM users;
+    INSERT INTO machines (user_id,id,name,created_at,last_seen_at) VALUES ('1','b','Second','2026-11-01','2026-11-01');
+    INSERT INTO tool_totals VALUES
+      ('1','a','codex','{"scope":"account","total":200,"asOf":"2026-11-06","daily":{"2026-11-06":30}}','2026-11-09'),
+      ('1','b','codex','{"scope":"account","total":200,"asOf":"2026-11-09","daily":{"2026-11-08":70}}','2026-11-09');
+  `);
+  const { publicRankings, rankingPeriod } = await import('../src/server/rankings.ts');
+  const { computeTokens } = await import('../src/shared/tokens.ts');
+  const { loadUsage } = await import('../src/server/db.ts');
+  const period = rankingPeriod(null, context.deps.now());
+  const board = await publicRankings(db, period);
+  const dashboard = computeTokens(await loadUsage(db, '1'), {}, 'UTC', context.deps.now(), null)!;
+  assert.deepEqual(board[0], { rank: 1, label: 'member-001', tokens: 100 });
+  assert.equal(board[0].tokens, dashboard.tools[0].activity.last7);
+  assert.equal(board.length, 100);
+  assert.deepEqual(board.at(-1), { rank: 2, label: 'member-100', tokens: 25 });
+});

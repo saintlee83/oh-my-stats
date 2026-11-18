@@ -134,6 +134,8 @@ Images follow the viewer's light or dark mode. By default they use GitHub's colo
 oms login                 Sign this machine in with GitHub
 oms logout                Sign this machine out, keeping its local history
 oms status                Show sign-in, totals and machines
+oms rankings               Show the public, device and provider token rankings (7 days)
+oms rankings --days 30     Compare the last 30 reporting dates
 oms sync                  Read new logs and upload what changed, right now
 oms sync --github         Also collect GitHub stats now
 oms daemon                Keep tracking in the foreground
@@ -181,6 +183,12 @@ Usage logged after a tool's figure was last updated is added on top. Codex's spl
 The **Machines** table on your private dashboard and `oms status` show each device's name, token counts for the last 7 and 30 calendar days, lifetime tokens and last sync. The windows include today in your profile timezone. Machine-scoped daily figures and local records provide the device breakdown. Account-wide tokens without a matching device record appear separately in the lifetime summary. Machine names and this breakdown are visible only to the owner.
 
 A machine's id comes from its hardware, so reinstalling doesn't register it twice. Give it a name with `oms login --name "Work laptop"` or rename it in the dashboard.
+
+## Token rankings
+
+Open **Rankings** (`/rankings`) to see the top 100 published profiles by token usage. **My rankings** (`/me/rankings`) shows your devices and providers, including when your profile is private. A signed-in agent can show all three tables with `oms rankings`.
+
+Choose the last 7 or 30 reporting dates. Each range ends on today's UTC date and uses the dates attached to uploaded usage. It includes input, output, cache reads and cache writes. Profiles with positive usage qualify, and equal totals share a rank (1, 1, 3). Setting a profile to private removes it from the public rankings immediately. Account-wide usage counts once in user and provider scores. A device receives credit for usage attributable to that device.
 
 ## Provider activity
 
