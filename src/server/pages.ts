@@ -48,7 +48,10 @@ export interface PageOptions {
   image?: { url: string; width: number; height: number; alt: string };
 }
 
-/** The frame every page shares: the head, the header and the footer around a body. */
+/**
+ * The frame every page shares: the head, the header and the footer around a body. A page that
+ * gives no address is one only its owner sees, or an error, so search engines are asked to leave it out.
+ */
 export function layout(title: string, body: string, viewer: UserRow | null, page: PageOptions = {}): string {
   const description = esc(page.description ?? DESCRIPTION);
   const image = page.image
@@ -70,7 +73,7 @@ export function layout(title: string, body: string, viewer: UserRow | null, page
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>${esc(title)}</title>
 <meta name="description" content="${description}">
-<meta property="og:site_name" content="${SITE}">
+${page.origin ? '' : '<meta name="robots" content="noindex">\n'}<meta property="og:site_name" content="${SITE}">
 <meta property="og:type" content="website">
 <meta property="og:title" content="${esc(title)}">
 <meta property="og:description" content="${description}">
@@ -84,7 +87,7 @@ ${preview}
 <a class="skip" href="#main">Skip to content</a>
 <header class="top"><div class="bar"><a class="brand" href="/"><img src="/favicon.svg" alt="" width="26" height="26">${SITE}</a><nav class="links" aria-label="Main navigation"><a href="/rankings">Rankings</a>${account}</nav></div></header>
 <main id="main"${page.bleed ? ' class="bleed"' : ''}>${body}</main>
-<footer class="bottom"><div class="bar"><p>${SITE} is open source, under the MIT license.</p><nav aria-label="Footer"><a href="/rankings">Rankings</a><a href="${REPO_URL}#get-started">Install</a><a href="${REPO_URL}#what-leaves-your-machine">Privacy</a><a href="${REPO_URL}">GitHub</a></nav></div></footer>
+<footer class="bottom"><div class="bar"><p>${SITE} is open source, under the MIT license.</p><nav aria-label="Footer"><a href="/rankings">Rankings</a><a href="/how-we-count">How we count</a><a href="${REPO_URL}#get-started">Install</a><a href="/privacy">Privacy</a><a href="/terms">Terms</a><a href="${REPO_URL}">GitHub</a></nav></div></footer>
 </body>
 </html>
 `;
@@ -243,13 +246,55 @@ const UPLOADED = [
 ];
 const KEPT = ['Prompts, responses and code', 'Commit messages and file paths', 'Private repository and organization names', 'The token that reads your repositories'];
 
+const STEPS: [title: string, text: string][] = [
+  ['The agent reads, on your machine',
+    'Run <code>oms</code> on each computer. It reads the usage records your AI tools already keep there. One computer with GitHub access also walks your repositories, and that access never leaves it.'],
+  ['Only totals are uploaded',
+    'Tokens per day and model, and aggregated GitHub numbers. Prompts, code, commit messages and private repository names stay where they are.'],
+  ['You see it where you choose',
+    'First on a dashboard only you can open. Publish it for a profile page, a place in the rankings, and images to embed in your README.'],
+];
+
+const QUESTIONS: [question: string, answer: string][] = [
+  ['Is anything public by default?',
+    'No. Your profile stays hidden until you publish it, and a private profile looks the same as one that doesn’t exist. Publishing shows your totals per model and per day, and lists you in the public rankings. Machine names are never public.'],
+  ['What does the agent read, and what does it send?',
+    'It reads the usage records your AI tools keep on that machine, and your GitHub repositories with a token that stays there. It sends totals: tokens per day and model, each tool’s lifetime total, aggregated GitHub numbers, your public GitHub profile, your timezone, and the machine’s name and platform, which only you see. Run <code>oms preview</code> to see exactly what would be uploaded, without sending anything.'],
+  ['What can this server do with my GitHub sign-in?',
+    'Only tell who you are. The token it receives comes from a GitHub App with no permissions, so it can’t read your repositories. The server uses it once and doesn’t store it.'],
+  ['How is cost estimated?',
+    'At public API list prices. It is what the usage would cost through the API, not what you paid. Tokens without a known model or price are left out, so the figure is then shown as a minimum. <a href="/how-we-count#cost">How we count</a> has the rest.'],
+  ['What if I use several machines?',
+    'Sign in on each one. Per-machine figures and logs are added together, and an account-wide total, such as Codex’s, is counted once. A machine’s id comes from its hardware, so reinstalling doesn’t register it twice.'],
+  ['How often do the numbers update?',
+    'The agent reads new log lines every 5 minutes and uploads once a day, so your numbers can be up to a day behind. Run <code>oms sync</code> to update right away. Public pages are cached for 5 minutes.'],
+  ['How do I delete everything?',
+    'On your dashboard. Removing a machine deletes its data and signs it out. Deleting your account removes everything on the server, after you confirm with your username. Each machine keeps its local history, so signing in again brings your usage back. <a href="/privacy#deleting">Privacy</a> has the details.'],
+  ['Can I run my own server?',
+    `Yes. The server is a single Cloudflare Worker with a D1 database, and has no runtime dependencies. <a href="${REPO_URL}#run-your-own-server">The README</a> has the steps, and how to point your agents at it.`],
+];
+
 /** What the landing page shows of the public rankings. */
 export interface LandingBoard {
   leaders: Standing[];
   participants: number;
+  /** What every ranked profile has used together, all time. */
+  tokens: number;
 }
 
-export function landingPage(origin: string, viewer: UserRow | null, board: LandingBoard = { leaders: [], participants: 0 }): string {
+/** With fewer ranked profiles, their count and total describe those few people rather than the site. */
+const FIGURES_FROM = 3;
+
+/** A quiet line of numbers under the heading. How many tools the agent reads is true of any server, so it always shows. */
+function figures(board: LandingBoard): string {
+  const ranked = board.participants >= FIGURES_FROM
+    ? [[commas(board.participants), 'ranked public profiles'], [compact(board.tokens), 'AI tokens between them, all time']]
+    : [];
+  const items = [...ranked, [String(PROVIDERS.size), 'AI tools the agent reads on its own']];
+  return `<ul class="figures wrap">${items.map(([value, label]) => `<li><strong>${value}</strong> <span>${label}</span></li>`).join('')}</ul>`;
+}
+
+export function landingPage(origin: string, viewer: UserRow | null, board: LandingBoard = { leaders: [], participants: 0, tokens: 0 }): string {
   const start = viewer
     ? '<a class="button primary lg" href="/me">Go to your dashboard</a>'
     : `<a class="button primary lg" href="/login">${GITHUB_MARK}Sign in with GitHub</a>`;
@@ -277,7 +322,12 @@ export function landingPage(origin: string, viewer: UserRow | null, board: Landi
 ${installCommands(origin)}
 <p class="muted">The agent records usage continuously and uploads once a day. Run <code>oms sync</code> to update right away.</p>
 </div></section>
+${figures(board)}
 ${showcase}
+<section class="section wrap">
+<div class="section-head"><h2>How it works</h2><p>The counting happens on your machines. The server adds up what they send.</p></div>
+<ol class="steps">${STEPS.map(([title, text]) => `<li><h3>${title}</h3><p>${text}</p></li>`).join('')}</ol>
+</section>
 <section class="section wrap">
 <div class="section-head"><h2>Numbers you can stand behind</h2><p>Collected on your machines, combined on the server, and shown only where you choose.</p></div>
 <div class="grid">${FEATURES.map(([icon, title, text]) => `<div class="feature"><div class="icon"><svg viewBox="0 0 24 24" aria-hidden="true">${icon}</svg></div><h3>${title}</h3><p>${text}</p></div>`).join('')}</div>
@@ -291,6 +341,10 @@ ${showcase}
 <div class="grid"><div class="panel ledger"><h3>Uploaded</h3>${list(UPLOADED)}</div><div class="panel ledger kept"><h3>Stays on your machine</h3>${list(KEPT)}</div></div>
 </section>
 ${leaders}
+<section class="section wrap questions">
+<div class="section-head"><h2>Questions</h2><p>Short answers. <a href="/how-we-count">How we count</a> and <a href="/privacy">Privacy</a> have the long ones.</p></div>
+<div class="panel faq">${QUESTIONS.map(([question, answer]) => `<details><summary>${question}</summary><p>${answer}</p></details>`).join('')}</div>
+</section>
 <div class="wrap"><section class="cta"><h2>Start counting</h2><p>Install the agent, sign in with GitHub, and run <code>oms sync</code> to see your first numbers.</p>
 <div class="actions">${start}<a class="button lg" href="${REPO_URL}#get-started">Read the guide</a></div></section></div>`,
     viewer,

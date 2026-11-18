@@ -164,9 +164,11 @@ oms preview               Print exactly what would be uploaded, without sending 
 
 Run `oms preview` to see the next usage request, or an ordered JSON array when catching up takes multiple requests. It uses the same upload planner as `oms sync`. After everything is synced, it shows the heartbeat with empty days and totals. GitHub stats are aggregated on your machine first, so no commit-level data is sent.
 
+The site's [privacy page](https://ohmystats.dev/privacy) covers the rest: what the server stores, the two cookies it sets, who else is involved, and how to delete your data.
+
 **Sign-in:** the server only ever receives a token that proves who you are. It comes from a GitHub App with no permissions, so it can't read your repositories. The server uses it once and doesn't store it, and only accepts tokens issued to its own app. It stores a hash of its own session tokens. The agent refuses to send a GitHub token with more access than that. A machine's sign-in expires after 180 days without an upload, and signing in again replaces it.
 
-**Publishing:** a private profile looks the same as one that doesn't exist. Publishing shows your totals per model and per day, and lists you in the public rankings. Machine names are never public. Public pages are cached for 5 minutes, so after you unpublish, a copy can stay visible for up to that long.
+**Publishing:** a private profile looks the same as one that doesn't exist. Publishing shows your totals per model and per day, and lists you in the public rankings. It also lists your profile in the site's `sitemap.xml`, where search engines look for pages. Machine names are never public. Public pages are cached for 5 minutes, so after you unpublish, a copy can stay visible for up to that long.
 
 **Co-authors:** AI assistants are named. Bots are too, except a custom bot in a private repo, because its name can include an organization's. People are named only if they have a GitHub account and co-authored in a public repo, counting those public commits only. Everyone else is an anonymous count. Emails are never uploaded.
 

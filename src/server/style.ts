@@ -245,6 +245,60 @@ const SOURCE = `
   /* Groups */
 
   /* Reading pages */
+  .figures { display: flex; flex-wrap: wrap; justify-content: center; gap: 4px 40px; padding-top: 20px; list-style: none; }
+  .figures li { display: flex; align-items: baseline; gap: 8px; }
+  .figures strong { font-size: 18px; letter-spacing: -0.01em; font-variant-numeric: tabular-nums; }
+  .figures span { font-size: 13px; color: var(--muted); }
+  .steps { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 24px; margin: 0; padding: 0; list-style: none; counter-reset: step; }
+  .steps li { position: relative; counter-increment: step; }
+  .steps li::before { content: counter(step); display: grid; place-items: center; width: 32px; height: 32px; margin: 0 0 14px; border-radius: 50%; font-size: 14px; font-weight: 700; color: var(--accent); background: var(--accent-soft); }
+  /* A line from each number to the next, so the three read as one sequence. */
+  .steps li::after { content: ""; position: absolute; top: 16px; left: 44px; right: -12px; height: 1px; background: var(--line); }
+  .steps li:last-child::after { display: none; }
+  .steps p { margin: 0; max-width: 44ch; font-size: 14px; line-height: 1.55; }
+  /* The heading beside the answers, as on the reading pages, which keeps an answer's lines short. */
+  .questions { display: grid; grid-template-columns: 256px minmax(0, 1fr); gap: 0 48px; align-items: start; }
+  .faq { margin: 0; padding-block: 6px; }
+  .faq details + details { border-top: 1px solid var(--line-soft); }
+  .faq summary { display: flex; align-items: center; justify-content: space-between; gap: 16px; padding: 14px 0; font-weight: 600; cursor: pointer; list-style: none; }
+  .faq summary::-webkit-details-marker { display: none; }
+  .faq summary::after { content: ""; flex: none; width: 8px; height: 8px; margin: -4px 4px 0; border: solid var(--muted); border-width: 0 2px 2px 0; transform: rotate(45deg); }
+  .faq [open] > summary::after { margin-top: 4px; transform: rotate(-135deg); }
+  .faq summary:hover { color: var(--link); }
+  .faq summary:focus-visible { outline-offset: -2px; border-radius: 6px; }
+  .faq p { max-width: 34em; margin: 0; padding: 0 0 16px; }
+  .reading { margin: 20px 0 0; }
+  .reading > section { display: grid; grid-template-columns: 256px minmax(0, 1fr); gap: 8px 48px; padding: 28px 0; border-top: 1px solid var(--line); scroll-margin-top: 12px; }
+  .reading h2 { margin: 0; font-size: 18px; font-weight: 700; letter-spacing: -0.01em; }
+  /* About 70 characters to a line. */
+  .reading h2 + div { max-width: 32em; font-size: 16px; line-height: 1.65; text-wrap: pretty; }
+  .reading h2 + div > :last-child { margin-bottom: 0; }
+  .reading h3 { margin: 22px 0 6px; font-size: 16px; }
+  .reading h3:first-child { margin-top: 0; }
+  .reading p, .reading ul, .reading .table { margin: 0 0 14px; }
+  .reading ul { padding-left: 20px; color: var(--ink2); }
+  .reading li { margin: 0 0 6px; padding-left: 2px; }
+  .reading li::marker { color: var(--muted); }
+  .reading table { font-size: 14px; line-height: 1.5; }
+  .reading th, .reading td { white-space: normal; vertical-align: top; }
+  @media (max-width: 760px) {
+    /* Stacked, the numbers share a column, so the lines start at one edge. */
+    .figures { display: grid; grid-template-columns: auto auto; gap: 2px 10px; }
+    .figures li { display: contents; }
+    .figures strong { text-align: right; }
+    .steps { grid-template-columns: minmax(0, 1fr); gap: 20px; }
+    .steps li { padding-left: 46px; }
+    .steps li::before { position: absolute; left: 0; top: -4px; margin: 0; }
+    .steps li::after { display: none; }
+    .steps p { max-width: none; }
+    .questions { grid-template-columns: minmax(0, 1fr); }
+    /* One row that scrolls sideways, so a phone shows the page's first words and not only its contents. */
+    .jump { flex-wrap: nowrap; overflow-x: auto; margin-inline: -16px; padding: 2px 16px; }
+    .jump a { flex: none; }
+    .reading > section { grid-template-columns: minmax(0, 1fr); gap: 12px; padding: 24px 0; }
+  }
+  /* Six footer links don't fit one row of a phone. Two rows of three leave none on its own. */
+  @media (max-width: 480px) { footer.bottom nav { display: grid; grid-template-columns: repeat(3, auto); justify-content: start; } }
 
   @media (max-width: 860px) { .hero-art { display: none; } }
   @media (max-width: 640px) {

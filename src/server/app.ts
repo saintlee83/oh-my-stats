@@ -53,7 +53,8 @@ import {
   type UserRow,
 } from './db.ts';
 import { dashboardPage, errorPage, landingPage, profilePage, rankingsPage, REPO_URL, type LandingBoard } from './pages.ts';
-import { personalRankings, publicRankings, rankingPeriod, rankingProvider } from './rankings.ts';
+import { personalRankings, publicRankings, rankBoard, rankingPeriod, rankingProvider } from './rankings.ts';
+import { crawlerFile, publicLogins, READING_PAGES, robotsTxt, sitemapXml } from './reading.ts';
 import { loadPrices } from './prices.ts';
 import { LOGO_SVG } from './logo.ts';
 import { BadRequest, cleanMachineName, parseGitHubMetrics, parseMachine, parseUsageUpload } from './wire.ts';
@@ -272,8 +273,11 @@ async function cachedPublic(request: Request, deps: Deps, render: () => Promise<
 }
 
 const LANDING_LEADERS = 5;
-/** Where a location keeps what the landing page shows of the rankings. No page is served from here. */
-const landingBoardKey = (origin: string) => new Request(`${origin}/cache/landing-board`);
+/**
+ * Where a location keeps what the landing page shows of the rankings. No page is served from here.
+ * The name changes when the kept shape does, so a newer page never reads an older board.
+ */
+const landingBoardKey = (origin: string) => new Request(`${origin}/cache/landing-board-2`);
 
 /**
  * The top of the public rankings, for the landing page. Ranking every profile is too much
@@ -283,8 +287,12 @@ async function landingBoard(origin: string, deps: Deps): Promise<LandingBoard> {
   const key = landingBoardKey(origin);
   const kept = await deps.cache?.match(key);
   if (kept) return kept.json();
-  const { users, position } = await publicRankings(deps.db, rankingPeriod('all', deps.now()));
-  const board: LandingBoard = { leaders: users.slice(0, LANDING_LEADERS), participants: position.participants };
+  const ranked = await rankBoard(deps.db, rankingPeriod('all', deps.now()), { kind: 'public' });
+  const board: LandingBoard = {
+    leaders: ranked.users.slice(0, LANDING_LEADERS).map(({ rank, label, tokens }) => ({ rank, label, tokens })),
+    participants: ranked.position.participants,
+    tokens: ranked.tokens,
+  };
   // An empty board isn't kept, so the first published profile shows at once.
   if (deps.cache && board.leaders.length) {
     deps.waitUntil(deps.cache.put(key, new Response(JSON.stringify(board), { headers: { 'content-type': 'application/json', 'cache-control': PUBLIC_CACHE } })));
@@ -304,6 +312,7 @@ async function purgeProfile(request: Request, deps: Deps, login: string): Promis
   const urls = [
     base,
     landingBoardKey(new URL(request.url).origin).url,
+    `${new URL(request.url).origin}/sitemap.xml`,
     ...CARD_KEYS.map((key) => `${base}/cards/${key}.txt`),
     ...images.flatMap((image) => THEME_NAMES.map((theme) => themed(image, theme))),
   ];
@@ -630,6 +639,13 @@ async function route(request: Request, deps: Deps): Promise<Response> {
   // Groups.
 
   // Reading pages, and what search engines ask for.
+  const reading = READING_PAGES.get(path);
+  if (reading) return html(reading(url.origin, await viewerFromCookie(request, deps)));
+  if (path === '/robots.txt') return crawlerFile(robotsTxt(url.origin), 'text/plain', PUBLIC_CACHE);
+  // The sitemap names every public profile, so it is kept, and purged, like a profile's own pages.
+  if (path === '/sitemap.xml') {
+    return cachedPublic(request, deps, async () => crawlerFile(sitemapXml(url.origin, await publicLogins(deps.db)), 'application/xml', PUBLIC_CACHE));
+  }
 
   // A profile, and what is published under it. Anything else under a profile is not found.
   const profile = /^\/u\/([A-Za-z0-9-]{1,39})(?:\/([a-z0-9./-]+))?$/.exec(path);
