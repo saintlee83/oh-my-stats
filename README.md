@@ -198,6 +198,19 @@ The website and CLI default to **All time**, using the lifetime token total show
 
 Rankings include input, output, cache reads and cache writes. Profiles with positive usage qualify, and equal totals share a rank (1, 1, 3). Setting a profile to private removes it from the public rankings immediately. The home page's preview and the rank on profile pages are cached like other public pages, so they can lag by up to five minutes. Account-wide usage counts once in user and provider scores. A device receives credit for usage attributable to that device.
 
+## Groups
+
+A group is a board for a team or a circle of friends: its members, ranked by tokens with the same score the public rankings use. Open `/groups` to start one, see the ones you are in, or look through the public ones. A board covers all time, the last 7 or 30 days, this month or last month.
+
+- **Private groups** are shown to their members only. To anyone else, signed in or not, a private group looks the same as one that doesn't exist. People join with the owner's invite link. The owner can make a new link at any time, and the old one stops working.
+- **Public groups** can be opened by anyone and joined by any signed-in account. People who are not members see only the members whose profiles are public, and how many are not shown. Members see every member.
+
+**Joining shows your token totals to the group's members, even while your profile is private.** That means your GitHub username and your token total for each period the board covers. It doesn't show models, a day-by-day history or machine names. A member with a private profile is named on the board without a link to a profile. When you leave, your totals stop showing there at once.
+
+The owner can rename the group, change who can see it, remove a member, and delete the group after typing its name. A private group can be made public only while every other member's profile is public, because a public group lets anyone join and see its members' totals. The owner can't leave while others remain. Deleting your account removes your memberships and the groups you own.
+
+An account can own 5 groups and be in 20, and a group holds 200 members. A group's address is its name followed by a few random characters, so starting a group never tells you whether another one already has that name. Group pages are not cached, so a change shows on the next visit.
+
 ## Provider activity
 
 The dashboard and published profiles include an AI usage calendar of the last 53 weeks, which can switch to each calendar year with usage, up to the newest four. In the last 53 weeks, select a day to see its exact token total and provider breakdown. **Usage by period** shows tokens, active days, the most used provider and the busiest day for your lifetime, the last 30 and 7 days, this month and last month. Lifetime includes tokens from before a tool's daily records begin. They have no date, so the calendar and the other periods leave them out. **Token mix** splits tokens into input, output, cache reads and cache writes, and covers only tokens with a known breakdown. The provider share table compares the previous calendar month with the current month to date in the profile timezone. The weekly card also appears in `oms status`. A missing comparison period has no percentage change.

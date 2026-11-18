@@ -53,6 +53,7 @@ import {
   type SessionRow,
   type UserRow,
 } from './db.ts';
+import { groupGet, groupPost } from './grouproutes.ts';
 import { dashboardPage, errorPage, landingPage, profilePage, rankingsPage, REPO_URL, type LandingBoard } from './pages.ts';
 import { personalRankings, publicRankings, rankBoard, rankingPeriod, rankingProvider } from './rankings.ts';
 import { crawlerFile, publicLogins, READING_PAGES, robotsTxt, sitemapXml } from './reading.ts';
@@ -506,6 +507,13 @@ async function handleWebPost(request: Request, path: string, deps: Deps): Promis
     else await renameMachine(deps.db, viewer.id, machineId, cleanMachineName(form.get('name')));
     return redirect('/me');
   }
+  if (path === '/groups' || path.startsWith('/groups/')) {
+    // Starting and joining are what an account could repeat, to fill the tables or to guess an invite code.
+    const guarded = path === '/groups' || path.endsWith('/join');
+    if (guarded && deps.allow && !(await deps.allow('strict', `groups:${viewer.id}`))) return tooMany();
+    const answer = await groupPost(deps.db, viewer, path, form, now);
+    return 'location' in answer ? redirect(answer.location) : html(answer.page, answer.status);
+  }
   return html(errorPage(404, 'Page not found.', viewer), 404);
 }
 
@@ -657,6 +665,13 @@ async function route(request: Request, deps: Deps): Promise<Response> {
   // Boards under /rankings.
 
   // Groups.
+  const group = /^\/groups(?:\/([a-z0-9-]{1,64}))?$/.exec(path);
+  if (group) {
+    // Counted before the group is looked for, so being turned away says nothing about it.
+    if (deps.allow && !(await deps.allow('public', `groups:${clientIp(request)}`))) return tooMany();
+    const answer = await groupGet(deps.db, await viewerFromCookie(request, deps), group[1] ?? null, url, deps.now());
+    return 'location' in answer ? redirect(answer.location) : html(answer.page, answer.status);
+  }
 
   // Reading pages, and what search engines ask for.
   const reading = READING_PAGES.get(path);

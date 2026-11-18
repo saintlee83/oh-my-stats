@@ -293,6 +293,49 @@ const SOURCE = `
   }
 
   /* Groups */
+  .group-crumb { margin: 0 0 4px; font-size: 13px; font-weight: 600; }
+  .group-crumb a { color: var(--muted); text-decoration: none; }
+  .group-crumb a:hover { color: var(--link); text-decoration: underline; }
+  /* A name is one unbroken word as often as not, and must not push the page sideways. */
+  .group-head > div:first-child { min-width: 0; }
+  .group-head h1, .group-head p, .group-list a, .group-list p { overflow-wrap: anywhere; }
+  .group-facts { display: flex; align-items: center; flex-wrap: wrap; gap: 4px 8px; margin-top: 10px; }
+  .group-facts .badge { vertical-align: 0; }
+  /* Five periods are more than a phone is wide, so they take a second row there. */
+  .group-periods { flex-wrap: wrap; }
+  .group-tiles { grid-template-columns: repeat(auto-fit, minmax(150px, 1fr)); }
+  /* One tile can hold a line more than the other, and the shorter one keeps its lines together. */
+  .group-tiles .tile { align-content: start; }
+  /* A name with its badges may take two lines, so the tokens stay on the screen of a phone. */
+  .group-board .who { white-space: normal; overflow-wrap: anywhere; }
+  .group-board .who .badge { margin-block: 2px; }
+  .group-list { margin: 0; padding: 0; list-style: none; }
+  .group-list li { display: flex; align-items: baseline; justify-content: space-between; gap: 4px 24px; padding: 12px 0; border-top: 1px solid var(--line-soft); }
+  .group-list li:first-child { padding-top: 0; border-top: 0; }
+  .group-list li:last-child { padding-bottom: 0; }
+  .group-list div { min-width: 0; }
+  .group-list a { font-weight: 600; color: var(--ink); text-decoration: none; }
+  .group-list a:hover { color: var(--link); text-decoration: underline; }
+  .group-list .badge { margin-left: 8px; }
+  .group-list p { margin: 2px 0 0; font-size: 14px; color: var(--muted); }
+  .group-count { flex: none; font-size: 13px; color: var(--muted); font-variant-numeric: tabular-nums; }
+  .group-roster li { align-items: center; flex-wrap: wrap; }
+  .group-roster .who { overflow-wrap: anywhere; }
+  .group-roster p { font-size: 13px; font-weight: 400; }
+  .group-roster details.confirm form { margin: 0 0 4px; }
+  /* Two fields and one wide one: a grid that fits as many columns as it can would leave half the row empty. */
+  .group-fields { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+  @media (max-width: 640px) { .group-fields { grid-template-columns: minmax(0, 1fr); } }
+  .group-start { margin-top: 16px; }
+  .group-start summary { width: fit-content; list-style: none; }
+  .group-start summary::-webkit-details-marker { display: none; }
+  .group-start[open] summary { margin-bottom: 16px; }
+  .group-member { display: inline-flex; align-items: center; gap: 10px; vertical-align: middle; }
+  .group-audience { margin-top: 12px; }
+  .group-confirm { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; }
+  .group-notice h1 { margin-bottom: 12px; }
+  .group-notice p:not(.code) { max-width: 60ch; margin: 0 auto 12px; }
+  .group-notice .actions { margin-top: 24px; }
 
   /* Reading pages */
   .tally { display: flex; flex-wrap: wrap; justify-content: center; gap: 4px 40px; padding-top: 20px; list-style: none; }

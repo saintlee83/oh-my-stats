@@ -80,6 +80,9 @@ export async function deleteUser(db: Db, userId: string): Promise<void> {
     db.prepare('DELETE FROM machines WHERE user_id = ?').bind(userId),
     db.prepare('DELETE FROM sessions WHERE user_id = ?').bind(userId),
     db.prepare('DELETE FROM kv WHERE key = ?').bind(`github-lease:${userId}`),
+    // The groups this account owns go with it, along with everyone's membership in them.
+    db.prepare('DELETE FROM group_members WHERE user_id = ?1 OR group_id IN (SELECT id FROM groups WHERE owner_id = ?1)').bind(userId),
+    db.prepare('DELETE FROM groups WHERE owner_id = ?').bind(userId),
     db.prepare('DELETE FROM users WHERE id = ?').bind(userId),
   ]);
 }
