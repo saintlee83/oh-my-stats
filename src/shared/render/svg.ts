@@ -1,4 +1,4 @@
-import type { GitHubMetrics, Metrics, ProfileMetrics, ProfileStatus, TokenMetrics } from '../metrics.ts';
+import type { GitHubMetrics, Metrics, ProfileMetrics, ProfileStatus, TokenMetrics, TokenYear } from '../metrics.ts';
 import { clip, commas, compact, costLabel, hours, percent, providerName } from '../format.ts';
 import { WEEKDAYS } from '../time.ts';
 import { monthlyRecap, weeklyUsage } from '../insights.ts';
@@ -101,7 +101,7 @@ interface Section {
   body: string;
 }
 
-function esc(text: string): string {
+export function esc(text: string): string {
   return text.replace(/[&<>"']/g, (char) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' })[char] as string);
 }
 
@@ -109,7 +109,7 @@ function n(value: number): string {
   return Number(value.toFixed(2)).toString();
 }
 
-function text(x: number, y: number, content: string, cls: string, anchor: 'start' | 'end' | 'middle' = 'start'): string {
+export function text(x: number, y: number, content: string, cls: string, anchor: 'start' | 'end' | 'middle' = 'start'): string {
   const attr = anchor === 'start' ? '' : ` text-anchor="${anchor}"`;
   return `<text x="${n(x)}" y="${n(y)}" class="${cls}"${attr}>${esc(content)}</text>`;
 }
@@ -118,7 +118,7 @@ function text(x: number, y: number, content: string, cls: string, anchor: 'start
 const WIDE = /[\u1100-\u115F\u2E80-\uA4CF\uAC00-\uD7A3\uF900-\uFAFF\uFE30-\uFE4F\uFF00-\uFF60\uFFE0-\uFFE6]|\p{Extended_Pictographic}/u;
 
 /** Roughly how wide a line is drawn, since an SVG can't wrap or measure text itself. Errs wide. */
-function textWidth(content: string, size: number): number {
+export function textWidth(content: string, size: number): number {
   let width = 0;
   for (const char of content) {
     if (/[\u200D\uFE0F]/u.test(char)) continue;
@@ -128,11 +128,28 @@ function textWidth(content: string, size: number): number {
 }
 
 /** Shortens a line to fit a width, ending it with an ellipsis. */
-function fit(content: string, maxWidth: number, size: number): string {
+export function fit(content: string, maxWidth: number, size: number): string {
   if (textWidth(content, size) <= maxWidth) return content;
   const chars = Array.from(content);
   while (chars.length && textWidth(`${chars.join('')}…`, size) > maxWidth) chars.pop();
   return `${chars.join('').trimEnd()}…`;
+}
+
+/**
+ * Holds a line to a length, whatever font draws it: the browser squeezes or spreads the
+ * glyphs to fit. Widths here are estimates, and a system's font can run wider than they say.
+ */
+export const held = (length: number) => ` textLength="${n(length)}" lengthAdjust="spacingAndGlyphs"`;
+
+/**
+ * A line shortened to fit a width, like `fit`. Once shortened it fills that width, so it is
+ * also held to the length it was measured at, and a wider font can't push it out of its room.
+ */
+export function fitted(x: number, y: number, content: string, maxWidth: number, size: number, cls: string, anchor: 'start' | 'end' = 'start'): string {
+  const shown = fit(content, maxWidth, size);
+  if (shown === content) return text(x, y, content, cls, anchor);
+  const attr = anchor === 'start' ? '' : ` text-anchor="${anchor}"`;
+  return `<text x="${n(x)}" y="${n(y)}" class="${cls}"${attr}${held(textWidth(shown, size))}>${esc(shown)}</text>`;
 }
 
 function title(content: string): string {
@@ -190,6 +207,16 @@ function heatStep(value: number, max: number): number {
   return Math.max(1, Math.ceil(Math.sqrt(value / max) * 5));
 }
 
+/** The key to a heat scale, from the quietest step to the busiest, ending at `right`. */
+export function heatLegend(right: number, y: number): string {
+  const x = right - 142;
+  let out = text(x - 6, y, 'Less', 'axis', 'end');
+  for (let step = 0; step <= 5; step++) {
+    out += `<rect x="${n(x + step * 18)}" y="${n(y - 10)}" width="16" height="11" rx="2" fill="var(--h${step})"/>`;
+  }
+  return out + text(x + 6 * 18 + 2, y, 'More', 'axis');
+}
+
 function miniBars(x: number, y: number, values: number[], width: number, height: number): string {
   const slot = width / values.length;
   const max = Math.max(1, ...values);
@@ -229,7 +256,8 @@ function headerSection(github: GitHubMetrics, heading = `@${github.login}`): Sec
 }
 
 const AVATAR = 72;
-const BOLD = 1.12;
+/** Semibold text runs wider than the estimate. */
+export const BOLD = 1.12;
 
 const TONES: Record<ProfileStatus['tone'], string> = { open: 'c3', hiring: 'c1', freelance: 'c4', busy: 'c2', neutral: 'muted' };
 
@@ -244,7 +272,6 @@ function avatar(profile: ProfileMetrics): string {
 
 /** A rounded label in the top right corner. Returns its width, so the name can stay clear of it. */
 function statusPill(status: ProfileStatus): { width: number; body: string } {
-  // Semibold text runs wider than the estimate.
   const label = fit(status.label, 260, 12 * BOLD);
   const marker = status.emoji ? textWidth(status.emoji, 13) + 6 : 14;
   const width = 24 + marker + (label ? textWidth(label, 12 * BOLD) : -6);
@@ -350,12 +377,7 @@ function rhythmSection(github: GitHubMetrics, timezone: string): Section {
     body += text(labelWidth + hour * (cell + gap), axisY, `${String(hour).padStart(2, '0')}:00`, 'axis');
   }
 
-  const scaleX = labelWidth + 24 * (cell + gap) - 142;
-  body += text(scaleX - 6, axisY, 'Less', 'axis', 'end');
-  for (let step = 0; step <= 5; step++) {
-    body += `<rect x="${scaleX + step * 18}" y="${axisY - 10}" width="16" height="11" rx="2" fill="var(--h${step})"/>`;
-  }
-  body += text(scaleX + 6 * 18 + 2, axisY, 'More', 'axis');
+  body += heatLegend(labelWidth + 24 * (cell + gap), axisY);
 
   const barX = labelWidth + 24 * (cell + gap) + 40;
   const barWidth = INNER - barX;
@@ -466,6 +488,28 @@ function churnSection(github: GitHubMetrics): Section {
   return { height: bottom, body };
 }
 
+/** The same figure wherever it's shown: a minimum when some tokens have no known model or price. */
+export const listPrice = (tokens: TokenMetrics) =>
+  costLabel(tokens.cost, tokens.models.some((m) => m.cost !== null), tokens.unpricedModels.length > 0 || tokens.unattributed > 0);
+
+/**
+ * Providers as chart series, most used first. A chart has four colors, so past four providers
+ * the smaller ones are drawn together. Claude Code, Codex and Gemini CLI keep their color
+ * wherever they rank.
+ */
+function providerSeries(tools: string[]): { label: string; tools: string[]; fill: string }[] {
+  // Keep the compact embed readable; the text card lists every provider individually.
+  const visible = tools.slice(0, tools.length > 4 ? 3 : 4);
+  const groups = visible.map((tool) => ({ label: providerName(tool), tools: [tool] }));
+  if (visible.length < tools.length) groups.push({ label: 'Others', tools: tools.slice(visible.length) });
+  const colors = new Map([['claude', 'c1'], ['codex', 'c2'], ['gemini', 'c3']]);
+  const usedColors = new Set(visible.map((tool) => colors.get(tool)));
+  const spare = ['c1', 'c2', 'c3', 'c4'].filter((color) => !usedColors.has(color));
+  return groups.map((group) => ({
+    ...group, fill: (group.tools.length === 1 && colors.get(group.tools[0])) || spare.shift()!,
+  }));
+}
+
 function tokensSection(tokens: TokenMetrics): Section {
   const machineCount = (count: number) => (count === 1 ? '1 machine' : `${count} machines`);
   const reach = {
@@ -473,12 +517,11 @@ function tokensSection(tokens: TokenMetrics): Section {
     account: () => 'across the account',
     logs: (count: number) => `from logs on ${machineCount(count)}`,
   };
-  const isMinimum = tokens.unpricedModels.length > 0 || tokens.unattributed > 0;
   const tileItems: [string, string][] = [
     ['Total tokens', compact(tokens.total)],
     ...tokens.tools.slice(0, 2).map((row): [string, string] => [clip(providerName(row.tool), 20), compact(row.total)]),
     ['Cache hit rate', percent(tokens.cacheShare, 1)],
-    ['At API list price', costLabel(tokens.cost, tokens.models.some((m) => m.cost !== null), isMinimum)],
+    ['At API list price', listPrice(tokens)],
   ];
   let body = text(0, 14, 'AI token trace', 'h1');
   body += text(0, 32, clip(tokens.tools.map((row) => `${providerName(row.tool)} ${reach[row.scope](row.machines)}`).join(', '), 110), 'note');
@@ -488,18 +531,7 @@ function tokensSection(tokens: TokenMetrics): Section {
     body += text(index * tileWidth, 86, label, 'label');
   });
 
-  // Keep the compact embed readable; the text card lists every provider individually.
-  const visible = tokens.tools.slice(0, tokens.tools.length > 4 ? 3 : 4);
-  const groups = visible.map(({ tool }) => ({ label: providerName(tool), tools: [tool] }));
-  if (visible.length < tokens.tools.length) {
-    groups.push({ label: 'Others', tools: tokens.tools.slice(visible.length).map(({ tool }) => tool) });
-  }
-  const colors = new Map([['claude', 'c1'], ['codex', 'c2'], ['gemini', 'c3']]);
-  const usedColors = new Set(visible.map(({ tool }) => colors.get(tool)));
-  const spare = ['c1', 'c2', 'c3', 'c4'].filter((color) => !usedColors.has(color));
-  const series = groups.map((group) => ({
-    ...group, fill: (group.tools.length === 1 && colors.get(group.tools[0])) || spare.shift()!,
-  }));
+  const series = providerSeries(tokens.tools.map(({ tool }) => tool));
   const labels = series.map(({ label, fill }) => ({ label: clip(label, 16), fill }));
   const legendWidth = labels.reduce((sum, { label }) => sum + 33 + label.length * 6.6, 0);
   body += text(0, 120, 'Tokens per day, last 60 days', 'label');
@@ -584,6 +616,18 @@ function historySection(github: GitHubMetrics): Section {
   return { height: Math.max(gridBottom, 144), body };
 }
 
+/** The image itself: what it's called, what it says, the theme's colors, and the bordered surface it is drawn on. */
+export function surface(theme: Theme, heading: string, summary: string, width: number, height: number, content: string, rules = ''): string {
+  return `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 ${width} ${n(height)}" width="${width}" height="${n(height)}" role="img" aria-labelledby="omg-title omg-desc">
+<title id="omg-title">${esc(heading)}</title>
+<desc id="omg-desc">${esc(summary)}</desc>
+<style>${style(theme)}${rules}</style>
+<rect x="0.5" y="0.5" width="${width - 1}" height="${n(height - 1)}" rx="12" class="surface"/>
+${content}
+</svg>
+`;
+}
+
 /** Stacks sections on one surface, with a rule between each. */
 function frame(theme: Theme, heading: string, summary: string, sections: Section[], footer: string | null): string {
   const spacing = 36;
@@ -601,15 +645,7 @@ function frame(theme: Theme, heading: string, summary: string, sections: Section
     height += 18;
     content += text(MARGIN, height - 20, footer, 'axis');
   }
-
-  return `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 ${WIDTH} ${n(height)}" width="${WIDTH}" height="${n(height)}" role="img" aria-labelledby="omg-title omg-desc">
-<title id="omg-title">${esc(heading)}</title>
-<desc id="omg-desc">${esc(summary)}</desc>
-<style>${style(theme)}</style>
-<rect x="0.5" y="0.5" width="${WIDTH - 1}" height="${n(height - 1)}" rx="12" class="surface"/>
-${content}
-</svg>
-`;
+  return surface(theme, heading, summary, WIDTH, height, content);
 }
 
 const contributionsSummary = (github: GitHubMetrics) =>
@@ -653,6 +689,214 @@ function hasMonthlyRecap(metrics: Metrics): boolean {
 
 const listed = (items: string[], empty: string) => (items.length ? `${items.join(', ')}.` : empty);
 
+const MONTHS = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
+
+const dayNumber = (date: string) => Date.parse(`${date}T00:00:00Z`) / 86_400_000;
+
+/**
+ * Days as squares, a column per week with Monday on top, from `first` through `last`, in the
+ * width given. Days without usage share one shape filled with a pattern of squares, so a quiet
+ * stretch stays a small image. Days after `today` haven't happened, and are drawn as outlines.
+ */
+export function calendar(days: { date: string; total: number }[], first: string, last: string, today: string, width: number): Section {
+  const labelWidth = 30;
+  const top = 18;
+  const offset = (new Date(`${first}T00:00:00Z`).getUTCDay() + 6) % 7;
+  const slot = (date: string) => offset + dayNumber(date) - dayNumber(first);
+  const end = slot(last) + 1;
+  const happened = Math.max(offset, Math.min(end, slot(today) + 1));
+  const pitch = Math.floor((width - labelWidth + 2) / Math.ceil(end / 7));
+  const cell = pitch - 2;
+  /** One rectangle per week, over the slots from `from` up to `to`. */
+  const weeks = (from: number, to: number) => {
+    let d = '';
+    for (let week = Math.floor(from / 7); week * 7 < to; week++) {
+      const upper = Math.max(from, week * 7) - week * 7;
+      const lower = Math.min(to, week * 7 + 7) - week * 7;
+      d += `M${week * pitch} ${upper * pitch}h${cell}v${(lower - upper) * pitch - 2}h-${cell}z`;
+    }
+    return d;
+  };
+  const squares = (id: string, square: string, from: number, to: number) =>
+    from < to ? `<pattern id="${id}" width="${pitch}" height="${pitch}" patternUnits="userSpaceOnUse">${square}</pattern><path d="${weeks(from, to)}" fill="url(#${id})"/>` : '';
+
+  let grid = squares('omg-days', `<rect width="${cell}" height="${cell}" rx="3" fill="var(--h0)"/>`, offset, happened);
+  grid += squares('omg-ahead', `<rect x="0.5" y="0.5" width="${cell - 1}" height="${cell - 1}" rx="2.5" class="outline"/>`, happened, end);
+  const shown = days.filter((day) => day.date >= first && day.date <= last);
+  const max = Math.max(1, ...shown.map((day) => day.total));
+  for (const day of shown) {
+    const at = slot(day.date);
+    grid += `<rect x="${Math.floor(at / 7) * pitch}" y="${(at % 7) * pitch}" width="${cell}" height="${cell}" rx="3" fill="var(--h${heatStep(day.total, max)})">${title(`${day.date} · ${commas(day.total)} tokens`)}</rect>`;
+  }
+
+  // A month is named above the week its first day is in.
+  const months: { week: number; label: string }[] = [];
+  for (const month = new Date(`${first.slice(0, 7)}-01T00:00:00Z`); month.toISOString().slice(0, 10) <= last; month.setUTCMonth(month.getUTCMonth() + 1)) {
+    const date = month.toISOString().slice(0, 10);
+    months.push({ week: Math.floor(slot(date < first ? first : date) / 7), label: MONTHS[month.getUTCMonth()] });
+  }
+  let body = '';
+  months.forEach(({ week, label }, index) => {
+    // A stretch that starts late in a month has no room for that month's name.
+    if (index < months.length - 1 && months[index + 1].week - week < 2) return;
+    body += text(labelWidth + week * pitch, 10, label, 'axis');
+  });
+  for (const row of [0, 2, 4]) body += text(0, top + row * pitch + cell - 3, WEEKDAYS[row], 'axis');
+  return { height: top + 7 * pitch - 2, body: `${body}<g transform="translate(${labelWidth} ${top})">${grid}</g>` };
+}
+
+/** The year a review shows: the one asked for when it has usage, else this year, else the latest year with usage. */
+export function reviewYear(metrics: Metrics, wanted: number | null = null): number | null {
+  const years = metrics.tokens?.years ?? [];
+  const current = Number(metrics.generatedDate.slice(0, 4));
+  return [wanted, current].find((year) => years.some((row) => row.year === year)) ?? years[0]?.year ?? null;
+}
+
+/**
+ * A year's cost comes from logged responses of models with a known price. So it is a minimum
+ * when the logs hold less than the year's total, or name a model without a price.
+ */
+function yearPrice(tokens: TokenMetrics, year: TokenYear): string {
+  const priced = (used: TokenYear['models'][number]) =>
+    tokens.models.some((row) => row.tool === used.tool && row.model === used.model && row.cost !== null);
+  const logged = year.models.reduce((sum, row) => sum + row.total, 0);
+  return costLabel(year.cost, year.models.some(priced), logged < year.total || !year.models.every(priced));
+}
+
+/** A model reached through two tools is one model here. Most used first. */
+function yearModels(year: TokenYear): [model: string, total: number][] {
+  const totals = new Map<string, number>();
+  for (const { model, total } of year.models) totals.set(model, (totals.get(model) ?? 0) + total);
+  return [...totals].filter(([, total]) => total > 0).sort((a, b) => b[1] - a[1] || a[0].localeCompare(b[0]));
+}
+
+function yearProviders(year: TokenYear) {
+  const used = Object.entries(year.byTool).filter(([, total]) => total > 0).sort((a, b) => b[1] - a[1] || a[0].localeCompare(b[0]));
+  return providerSeries(used.map(([tool]) => tool)).map((item) => {
+    const total = item.tools.reduce((sum, tool) => sum + year.byTool[tool], 0);
+    return { ...item, total, share: total / year.total };
+  });
+}
+
+export const dayCount = (count: number) => (count === 1 ? '1 day' : `${commas(count)} days`);
+
+function yearOverview(tokens: TokenMetrics, year: TokenYear, days: TokenMetrics['dated']): Section {
+  const price = yearPrice(tokens, year);
+  const logged = year.models.length > 0;
+  const tiles: [label: string, value: string, note: string][] = [
+    ['Active days', commas(year.activeDays), 'with AI usage'],
+    ['Longest streak', commas(year.bestStreak), year.bestStreak === 1 ? 'day' : 'days in a row'],
+    ['Busiest day', compact(year.peak?.total ?? 0), year.peak ? `on ${year.peak.date}` : ''],
+    ['Responses', logged ? compact(year.messages) : 'n/a', logged ? 'in synced logs' : 'no synced logs'],
+    ['At API list price', price, price === 'n/a' ? 'no known price' : price.startsWith('≥') ? 'a minimum' : 'not what was paid'],
+  ];
+  const [first, last] = [days[0].date, days[days.length - 1].date];
+  let body = text(0, 22, `${year.year} in review`, 'h1');
+  body += text(0, 92, compact(year.total), 'hero');
+  body += text(0, 118, `AI tokens in ${year.year}`, 'note');
+  body += text(0, 136, first === last ? `on ${first}` : `from ${first} to ${last}`, 'note');
+  const startX = 282;
+  const tileWidth = (INNER - startX) / tiles.length;
+  tiles.forEach(([label, value, note], index) => {
+    const x = startX + index * tileWidth;
+    body += text(x, 56, label, 'label') + text(x, 92, value, 'tile-value') + text(x, 112, note, 'axis');
+  });
+  return { height: 142, body };
+}
+
+function yearModelsPanel(year: TokenYear, width: number): Section {
+  const models = yearModels(year);
+  const rows = models.slice(0, 3);
+  const body = text(0, 14, 'Top models', 'h1');
+  if (rows.length === 0) return { height: 36, body: body + text(0, 32, 'No synced logs name the models used this year.', 'note') };
+  const nameWidth = 200;
+  const valueWidth = 96;
+  const logged = models.reduce((sum, [, total]) => sum + total, 0);
+  const bars = rows.map(([model, total], index) => {
+    const y = 50 + index * 26;
+    const size = Math.max(2, (total / rows[0][1]) * (width - nameWidth - valueWidth));
+    return fitted(0, y + 12, model, nameWidth - 12, 13, 'label')
+      + barRight(nameWidth, y, size, 14, 'c1', `${model}: ${commas(total)} tokens`)
+      + text(nameWidth + size + 6, y + 12, `${compact(total)} · ${percent(total / logged, 0)}`, 'value');
+  });
+  const note = `By tokens in synced logs, of ${models.length === 1 ? '1 model' : `${commas(models.length)} models`}`;
+  return { height: 50 + rows.length * 26, body: body + text(0, 32, note, 'note') + bars.join('') };
+}
+
+function yearProvidersPanel(year: TokenYear, width: number): Section {
+  const series = yearProviders(year);
+  let body = text(0, 14, 'Providers', 'h1') + text(0, 32, 'By share of the year’s tokens', 'note');
+  let x = 0;
+  series.forEach((item, index) => {
+    const raw = item.share * width;
+    // A gap of the surface keeps neighbours apart.
+    const drawn = Math.max(1, index === series.length - 1 ? raw : raw - 2);
+    body += `<rect x="${n(x)}" y="46" width="${n(drawn)}" height="8" rx="${n(Math.min(4, drawn / 2))}" fill="var(--${item.fill})">${title(`${item.label}: ${commas(item.total)} tokens`)}</rect>`;
+    x += raw;
+  });
+  series.forEach((item, index) => {
+    const y = 80 + index * 22;
+    body += `<rect x="0" y="${y - 9}" width="10" height="10" rx="2" fill="var(--${item.fill})"/>`;
+    body += fitted(16, y, item.label, width - 16 - 124, 13, 'label');
+    body += text(width - 58, y, percent(item.share, item.share < 0.1 ? 1 : 0), 'value', 'end');
+    body += text(width, y, compact(item.total), 'value', 'end');
+  });
+  return { height: 86 + (series.length - 1) * 22, body };
+}
+
+function yearGitHub(row: GitHubMetrics['years'][number]): Section {
+  const figures = [['Contributions', row.calendar], ['Commits', row.commits], ['Pull requests', row.pulls], ['Code reviews', row.reviews], ['Issues', row.issues]] as const;
+  let body = text(0, 22, `On GitHub in ${row.year}`, 'h1');
+  figures.forEach(([label, value], index) => {
+    const x = (index * INNER) / figures.length;
+    body += text(x, 70, commas(value), 'tile-value') + text(x, 94, label, 'label');
+  });
+  return { height: 102, body };
+}
+
+function yearCalendar(year: TokenYear, days: TokenMetrics['dated'], today: string): Section {
+  // Dates are written with four digits, whatever the year.
+  const written = String(year.year).padStart(4, '0');
+  // A machine ahead of the profile's timezone can report a day the profile hasn't reached yet.
+  const reached = [today, days[days.length - 1].date].sort()[1];
+  const grid = calendar(days, `${written}-01-01`, `${written}-12-31`, reached, INNER);
+  const through = reached.startsWith(`${written}-`) ? `, through ${reached}` : '';
+  let body = text(0, 14, 'Every day of the year', 'h1') + text(0, 32, `AI tokens per day${through}`, 'note');
+  body += `<g transform="translate(0 46)">${grid.body}</g>`;
+  body += heatLegend(INNER, 46 + grid.height + 24);
+  return { height: 46 + grid.height + 30, body };
+}
+
+/** One calendar year on its own: how much was used, with which models and providers, and on which days. */
+function yearReview(metrics: Metrics, wanted: number | null): { heading: string; summary: string; sections: Section[] } | null {
+  const { tokens, github } = metrics;
+  const drawn = reviewYear(metrics, wanted);
+  const year = tokens?.years.find((row) => row.year === drawn);
+  if (!tokens || !year) return null;
+  const days = tokens.dated.filter((day) => Number(day.date.slice(0, 4)) === year.year);
+  const onGitHub = github?.years.find((row) => row.year === year.year);
+  const gap = 48;
+  const leftWidth = Math.round((INNER - gap) * 0.58);
+  const models = yearModelsPanel(year, leftWidth);
+  const providers = yearProvidersPanel(year, INNER - gap - leftWidth);
+  const sections = [
+    yearOverview(tokens, year, days),
+    { height: Math.max(models.height, providers.height), body: `${models.body}<g transform="translate(${leftWidth + gap} 0)">${providers.body}</g>` },
+    ...(onGitHub ? [yearGitHub(onGitHub)] : []),
+    yearCalendar(year, days, metrics.generatedDate),
+  ];
+  const summary = [
+    `${compact(year.total)} AI tokens on ${dayCount(year.activeDays)}, longest streak ${dayCount(year.bestStreak)}`,
+    ...(year.peak ? [`Busiest day ${year.peak.date}, ${compact(year.peak.total)} tokens`] : []),
+    ...(year.models.length ? [`${commas(year.messages)} responses in synced logs`] : []),
+    `At API list price ${yearPrice(tokens, year)}`,
+    `Top models: ${yearModels(year).slice(0, 3).map(([model, total]) => `${model} ${compact(total)}`).join(', ') || 'none logged'}`,
+    `Providers: ${yearProviders(year).map((item) => `${item.label} ${percent(item.share, 0)}`).join(', ')}`,
+    ...(onGitHub ? [`On GitHub: ${commas(onGitHub.calendar)} contributions, ${commas(onGitHub.commits)} commits, ${commas(onGitHub.pulls)} pull requests, ${commas(onGitHub.reviews)} reviews, ${commas(onGitHub.issues)} issues`] : []),
+  ];
+  return { heading: `${year.year} in review`, summary: `${summary.join('. ')}.`, sections };
+}
+
 function profileSummary({ profile }: Metrics): string {
   const role = profile.title && profile.company ? `${profile.title} at ${profile.company}` : (profile.title ?? profile.company);
   const status = profile.status ? [profile.status.emoji, profile.status.label].filter(Boolean).join(' ') : null;
@@ -670,9 +914,11 @@ function profileSummary({ profile }: Metrics): string {
 type Component =
   | { label: string; source: 'profile' | 'recap'; draw(metrics: Metrics): Section; summary(metrics: Metrics): string }
   | { label: string; source: 'github'; draw(github: GitHubMetrics, timezone: string): Section; summary(github: GitHubMetrics): string }
-  | { label: string; source: 'tokens'; draw(tokens: TokenMetrics): Section; summary(tokens: TokenMetrics): string };
+  | { label: string; source: 'tokens'; draw(tokens: TokenMetrics): Section; summary(tokens: TokenMetrics): string }
+  /** Drawn for one year at a time, so it is a part of its own and not in the dashboard. */
+  | { label: string; source: 'year' };
 
-export const COMPONENT_KEYS = ['profile', 'weekly', 'recap', 'contributions', 'rhythm', 'languages', 'coauthors', 'churn', 'tokens', 'history'] as const;
+export const COMPONENT_KEYS = ['profile', 'weekly', 'recap', 'contributions', 'rhythm', 'languages', 'coauthors', 'churn', 'tokens', 'history', 'year'] as const;
 export type ComponentKey = (typeof COMPONENT_KEYS)[number];
 
 const COMPONENTS: Record<ComponentKey, Component> = {
@@ -723,6 +969,7 @@ const COMPONENTS: Record<ComponentKey, Component> = {
     draw: historySection,
     summary: ({ pulse }) => `Contributions by month, every year. Current streak ${pulse.streak} days, best ${pulse.bestStreak} days.`,
   },
+  year: { label: 'Year in review', source: 'year' },
 };
 
 export const isComponentKey = (key: string): key is ComponentKey => Object.hasOwn(COMPONENTS, key);
@@ -731,14 +978,19 @@ export const isComponentKey = (key: string): key is ComponentKey => Object.hasOw
 export function availableComponents(metrics: Metrics): { key: ComponentKey; label: string }[] {
   return COMPONENT_KEYS.filter(key => {
     const source = COMPONENTS[key].source;
-    return source === 'recap' ? hasMonthlyRecap(metrics) : metrics[source];
+    return source === 'recap' ? hasMonthlyRecap(metrics) : source === 'year' ? reviewYear(metrics) !== null : metrics[source];
   }).map(key => ({ key, label: COMPONENTS[key].label }));
 }
 
-/** One part of the dashboard. Without its data, it says so rather than leaving a broken image. */
-export function renderComponent(metrics: Metrics, key: ComponentKey, theme: Theme = DEFAULT_THEME): string {
+/**
+ * One part of the dashboard. Without its data, it says so rather than leaving a broken image.
+ * `year` asks the year in review for a year; `reviewYear` says which one is drawn.
+ */
+export function renderComponent(metrics: Metrics, key: ComponentKey, theme: Theme = DEFAULT_THEME, year: number | null = null): string {
   const component = COMPONENTS[key];
   const heading = `oh-my-stats: ${component.label}`;
+  const review = component.source === 'year' ? yearReview(metrics, year) : null;
+  if (review) return frame(theme, `oh-my-stats: ${review.heading}`, review.summary, review.sections, null);
   if (component.source === 'profile' || (component.source === 'recap' && hasMonthlyRecap(metrics))) {
     return frame(theme, heading, component.summary(metrics), [component.draw(metrics)], null);
   }
@@ -749,6 +1001,7 @@ export function renderComponent(metrics: Metrics, key: ComponentKey, theme: Them
     return frame(theme, heading, component.summary(metrics.github), [component.draw(metrics.github, metrics.timezone)], null);
   }
   const message = component.source === 'tokens' ? 'No AI token usage yet.'
+    : component.source === 'year' ? 'No dated AI token usage yet.'
     : component.source === 'recap' ? 'No records for the previous calendar month.' : 'No GitHub stats yet.';
   return frame(theme, heading, message, [{ height: 36, body: text(0, 14, component.label, 'h1') + text(0, 32, message, 'note') }], null);
 }

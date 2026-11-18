@@ -121,16 +121,49 @@ Or show only the parts you want, in any order. Each part is its own image, as wi
 | `churn` | Lines added and removed, by language |
 | `tokens` | AI tokens by tool, cache hit rate, API list price, and tokens per day for 60 days |
 | `history` | Every year by month, streaks, and time to merge and review |
+| `year` | One calendar year in review: AI tokens, active days, longest streak, busiest day, responses, API list price, top three models, providers by share, that year's GitHub numbers, and a calendar of every day. It is not part of the dashboard |
 
 Your profile page lists the embed code for every part that has data. A part without data yet shows a short note instead of a broken image.
 
 The `profile` part, which also opens the dashboard, comes from your GitHub profile. To change what it says, fill in **Profile header** on your dashboard at [ohmystats.dev/me](https://ohmystats.dev/me): a job title, a company, a status such as *Open to work* or *Hiring*, and more. Any field you leave empty keeps using your GitHub profile, which the agent reads once a day.
+
+The `year` part shows the current year, in your timezone, once it has usage, and the latest year with usage until then. To keep showing one year after it ends, name it. A year without usage shows the default instead:
+
+```markdown
+![2026 in review](https://ohmystats.dev/u/<login>/components/year.svg?year=2026)
+```
+
+A year counts the tokens whose day is known, so it leaves out what a tool used before it kept daily figures. Models, responses and the list price come from synced logs, so they can cover less than the year's total. The price is a minimum when it starts with `≥`.
+
+For a README with less room, there is a card 495 pixels wide, and a badge:
+
+```markdown
+![Developer stats](https://ohmystats.dev/u/<login>/card.svg)
+
+![AI tokens](https://ohmystats.dev/u/<login>/badge.svg)
+```
+
+The card shows your lifetime AI tokens, your place among published profiles, your contributions this year, your current streak and the provider you use most, from whichever of these your profile has. Add `?graph=1` for a calendar of the last 26 weeks of AI tokens.
+
+The badge shows one figure. Choose it with `?metric=`:
+
+| `metric` | Shows |
+|---|---|
+| `tokens` | Lifetime AI tokens. The default |
+| `cost` | What they cost at API list price, a minimum when it starts with `≥` |
+| `rank` | Your place among published profiles, by lifetime AI tokens |
+| `contributions` | Lifetime contributions |
+| `streak` | Your current contribution streak, in days |
+
+A badge shows `n/a` until its figure exists, and `unranked` until you have a place.
 
 Images follow the viewer's light or dark mode. By default they use GitHub's colors, so they blend into a GitHub page. For [Tokyo Night](https://github.com/tokyo-night/tokyo-night-vscode-theme) colors, add `?theme=tokyo-night` to any image address. Dark mode uses Tokyo Night, and light mode uses its Day variant:
 
 ```markdown
 ![Developer stats](https://ohmystats.dev/u/<login>/dashboard.svg?theme=tokyo-night)
 ```
+
+The badge is the exception. Its colors are fixed, and read the same on a light page and a dark one.
 
 ## Commands
 
