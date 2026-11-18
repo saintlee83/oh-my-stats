@@ -2,6 +2,7 @@ import type { Card } from '../shared/render/cards.ts';
 import type { ComponentKey } from '../shared/render/svg.ts';
 import { commas, compact, percent, PROVIDERS, providerName } from '../shared/format.ts';
 import { providerMix } from '../shared/insights.ts';
+import { tokenMix, usageCalendar, usagePeriods, type CalendarDay, type CalendarView, type UsagePeriod } from '../shared/usage.ts';
 import type { GitHubProfile, TokenMetrics } from '../shared/metrics.ts';
 import { PROFILE_LIMITS, STATUS_CHOICES, type ManualProfile } from '../shared/profile.ts';
 import type { MachineRow, UserRow } from './db.ts';
@@ -378,23 +379,93 @@ function providerActivity(tokens: TokenMetrics | null): string {
     <tbody>${rows}</tbody></table></div><p class="muted">Response counts and averages use responses recorded by your synced machines.</p></section>`;
 }
 
+/**
+ * Panes switched without scripts: a radio for each, then their labels, then the panes. The
+ * stylesheet pairs the nth radio with the nth label and the nth pane, for five at most.
+ */
+function tabbedPanel(name: string, title: string, panes: { key: string; label: string; body: string }[], id = ''): string {
+  const anchor = id ? ` id="${id}"` : '';
+  if (panes.length === 1) return `<section class="panel"${anchor}><h2>${title}</h2><div>${panes[0].body}</div></section>`;
+  const radios = panes.map(({ key }, index) => `<input type="radio" name="${name}" id="${name}-${key}"${index ? '' : ' checked'}>`).join('');
+  const labels = panes.map(({ key, label }) => `<label for="${name}-${key}" data-label="${label}">${label}</label>`).join('');
+  return `<section class="panel panes"${anchor} role="group" aria-label="${title}">${radios}
+<header class="panel-head"><h2>${title}</h2><span class="segments">${labels}</span></header>
+${panes.map(({ body }) => `<div class="pane">${body}</div>`).join('\n')}</section>`;
+}
+
+const dayCount = (count: number) => `${commas(count)} ${count === 1 ? 'day' : 'days'}`;
+
+const WEEKDAY_LABELS = ['', 'Mon', '', 'Wed', '', 'Fri', '', ''].map(label => (label ? `<small aria-hidden="true">${label}</small>` : '<span></span>')).join('');
+const SCALE = `<p class="scale" aria-hidden="true"><small>Less</small>${[0, 1, 2, 3, 4].map(level => `<span class="day"${level ? ` data-level="${level}"` : ''}></span>`).join('')}<small>More</small></p>`;
+
+function dayDetails({ date, total, byTool }: CalendarDay): string {
+  const tools = Object.entries(byTool).filter(([, count]) => count > 0).sort((a, b) => b[1] - a[1]);
+  const list = tools.map(([tool, count]) => `<li>${esc(providerName(tool))} · ${commas(count)}</li>`).join('');
+  return `<section popover class="day-details" id="day-${date}" aria-label="AI usage on ${date}"><h2>${date}</h2><p>${commas(total)} tokens</p>${list ? `<ul>${list}</ul>` : ''}<button popovertarget="day-${date}" popovertargetaction="hide">Close</button></section>`;
+}
+
+/**
+ * One view of the calendar, weeks as columns. Only the newest view opens its days: a
+ * breakdown for every day of every year would outweigh the rest of the page, so the
+ * others say their total in a tooltip.
+ */
+function calendarPane(view: CalendarView, opens: boolean): string {
+  const cell = (day: CalendarDay | null) => {
+    if (!day) return '<span></span>';
+    const label = `${day.date} · ${commas(day.total)} tokens`;
+    return opens && day.total
+      ? `<button class="day" popovertarget="day-${day.date}" data-level="${day.level}" aria-label="${label}" title="${label}"></button>`
+      : `<span class="day"${day.level ? ` data-level="${day.level}"` : ''} title="${label}"></span>`;
+  };
+  const weeks = view.weeks.map(({ month, days }) => `${month ? `<small aria-hidden="true">${month}</small>` : '<span></span>'}${days.map(cell).join('')}`).join('\n');
+  const opened = opens ? view.weeks.flatMap(week => week.days).filter(day => day !== null).filter(day => day.total > 0) : [];
+  // Each day that opens is a stop for the Tab key, so a keyboard gets a way past them.
+  const hint = opened.length ? ' · Select a day for its providers. <a class="sr" href="#periods">Skip the calendar</a>' : '';
+  const summary = view.total ? `${compact(view.total)} tokens on ${dayCount(view.activeDays)}${hint}` : 'No dated usage.';
+  return `<p class="muted">${view.start} – ${view.end} · ${summary}</p>
+<div class="weeks-scroll${opens ? ' newest' : ''}"><div class="weeks-fit"><div class="weeks">${WEEKDAY_LABELS}
+${weeks}</div>${SCALE}</div></div>${opened.map(dayDetails).join('\n')}`;
+}
+
+function periodPane(period: UsagePeriod, undated: number): string {
+  const figure = (label: string, value: string, detail: string) => `<div class="figure"><span>${label}</span><strong>${value}</strong><span>${detail}</span></div>`;
+  const short = compact(period.total);
+  const exact = commas(period.total);
+  const { range, top, busiest, firstDay } = period;
+  // Lifetime has no number of days to be active out of, so it says when its days began.
+  const outOf = range ? `of ${dayCount(range.days)}${period.key === 'month' ? ' so far' : ''}` : firstDay ? `since ${firstDay}` : 'No dated usage';
+  const figures = [
+    figure('Tokens', short, short === exact ? '' : exact),
+    figure('Active days', commas(period.activeDays), outOf),
+    figure('Most used provider', top ? esc(providerName(top.tool)) : '—', top ? `${percent(top.share)} of tokens` : 'No usage'),
+    figure('Busiest day', busiest?.date ?? '—', busiest ? `${compact(busiest.total)} tokens` : 'No dated usage'),
+  ];
+  const note = range
+    ? `${range.start} – ${range.end}`
+    : undated > 0
+      ? `Includes ${compact(undated)} tokens from before a tool’s daily records begin. They have no date, so the calendar and the other periods leave them out.`
+      : 'Everything counted so far.';
+  return `<div class="figures">${figures.join('')}</div><p class="muted">${note}</p>`;
+}
+
+/** A thin bar for the split at a glance, above a table that names each part and gives its figures. */
+function tokenMixPanel(tokens: TokenMetrics): string {
+  const { known, parts } = tokenMix(tokens);
+  if (!known) return '<section class="panel"><h2>Token mix</h2><p>No tokens with a known breakdown yet.</p></section>';
+  const bar = parts.filter(part => part.tokens > 0)
+    .map(({ key, label, share }) => `<span style="flex-grow:${(share * 100).toFixed(2)};background:var(--${key})" title="${label} · ${percent(share)}"></span>`).join('');
+  const rows = parts.map(({ key, label, tokens: count, share }) =>
+    `<tr><td><i style="background:var(--${key})"></i>${label}</td><td class="num">${percent(share)}</td><td class="num">${commas(count)}</td></tr>`).join('');
+  return `<section class="panel mix"><h2>Token mix</h2>
+    <p class="muted">Covers tokens with a known breakdown: ${compact(known)} of ${compact(tokens.total)} lifetime tokens.</p>
+    <div class="mix-bar" role="img" aria-label="${parts.map(part => `${part.label} ${percent(part.share)}`).join(', ')}">${bar}</div>
+    <div class="table"><table><thead><tr><th>Kind</th><th class="num">Share</th><th class="num">Tokens</th></tr></thead><tbody>${rows}</tbody></table></div></section>`;
+}
+
 function activityPanels(tokens: TokenMetrics | null): string {
   if (!tokens) return '';
-  const days = tokens.daily;
-  const peak = Math.max(1, ...days.map(day => day.total));
-  const offset = (new Date(days[0].date + 'T00:00:00Z').getUTCDay() + 6) % 7;
-  const labels = ['Mo', 'Tu', 'We', 'Th', 'Fr', 'Sa', 'Su'].map(label => `<small aria-hidden="true">${label}</small>`).join('');
-  const cells = days.map(({ date, total }) => {
-    const level = total ? Math.ceil(Math.sqrt(total / peak) * 4) : 0;
-    const label = `${date} · ${commas(total)} tokens`;
-    return `<button class="day" popovertarget="day-${date}" data-level="${level}" aria-label="${label}" title="${label}"></button>`;
-  }).join('');
-  const details = days.map(({ date, total, byTool }) => {
-    const tools = Object.entries(byTool).filter(([, count]) => count > 0).sort((a, b) => b[1] - a[1]);
-    const list = tools.map(([tool, count]) => `<li>${esc(providerName(tool))} · ${commas(count)}</li>`).join('');
-    return `<section popover class="day-details" id="day-${date}" aria-label="AI usage on ${date}"><h2>${date}</h2>
-      <p>${commas(total)} tokens</p>${list ? `<ul>${list}</ul>` : ''}<button popovertarget="day-${date}" popovertargetaction="hide">Close</button></section>`;
-  }).join('');
+  const calendar = usageCalendar(tokens).map((view, index) => ({ key: view.key, label: view.label, body: calendarPane(view, index === 0) }));
+  const periods = usagePeriods(tokens).map(period => ({ key: period.key, label: period.label, body: periodPane(period, tokens.undated) }));
   const mix = providerMix(tokens);
   const shareLabel = (value: number | null) => value === null ? '—' : percent(value);
   const rows = mix.rows.map(({ tool, share, priorShare }) => {
@@ -402,9 +473,9 @@ function activityPanels(tokens: TokenMetrics | null): string {
     return `<tr><td>${esc(providerName(tool))}</td><td class="num">${shareLabel(priorShare)}</td><td class="num">${shareLabel(share)}</td>
       <td class="num">${delta === null ? '—' : `${delta > 0 ? '+' : ''}${delta.toFixed(1)} pp`}</td></tr>`;
   }).join('');
-  return `<div class="activity-panels"><section class="panel"><h2>AI usage calendar</h2>
-    <p class="muted">${days[0].date} – ${days.at(-1)!.date} · Select a day for its providers.</p>
-    <div class="calendar">${labels}${'<span></span>'.repeat(offset)}${cells}</div>${details}</section>
+  return `${tabbedPanel('range', 'AI usage calendar', calendar)}
+${tabbedPanel('period', 'Usage by period', periods, 'periods')}
+<div class="activity-panels">${tokenMixPanel(tokens)}
     <section class="panel"><h2>Provider share of tokens</h2><p class="muted">Previous month and month to date through ${mix.today}.</p>
     ${rows ? `<div class="table"><table><thead><tr><th>Provider</th><th class="num">${mix.previousMonth}</th><th class="num">${mix.today.slice(0, 7)}</th><th class="num">Change</th></tr></thead><tbody>${rows}</tbody></table></div>` : '<p>No dated usage in either month.</p>'}
     </section></div>`;
@@ -429,14 +500,20 @@ export function profilePage(
   const cardLinks = cards
     .map((card) => `<li><a href="/u/${login}/cards/${esc(card.key)}.txt">${esc(card.title)}</a></li>`)
     .join('');
+  const mine = viewer?.id === user.id;
+  const since = new Date(user.created_at);
+  const joined = Number.isNaN(since.getTime()) ? '' : `Joined ${since.toLocaleDateString('en-US', { month: 'short', year: 'numeric', timeZone: 'UTC' })}`;
+  const about = [user.name ? esc(user.name) : '', joined].filter(Boolean).join(' · ');
+  // A GitHub login is not an X handle, so the text names the profile without an @.
+  const share = `https://x.com/intent/post?text=${encodeURIComponent(`${mine ? 'My' : `${user.login}’s`} developer stats on ${SITE}`)}&url=${encodeURIComponent(url)}`;
   return layout(
     `@${user.login} on ${SITE}`,
-    `<div class="profile">${avatar(user.avatar_url, 64)}<div><h1>@${esc(user.login)}</h1>${user.name ? `<p>${esc(user.name)}</p>` : ''}${standing}</div>
-<div class="actions">${viewer?.id === user.id ? '<a class="button" href="/me#profile-header">Edit profile</a>' : ''}<a class="button" href="https://github.com/${login}" rel="noopener">${GITHUB_MARK}GitHub</a></div></div>
+    `<div class="profile">${avatar(user.avatar_url, 64)}<div><h1>@${esc(user.login)}</h1>${about ? `<p>${about}</p>` : ''}${standing}</div>
+<div class="actions">${mine ? '<a class="button" href="/me#profile-header">Edit profile</a>' : ''}<a class="button" href="https://github.com/${login}" rel="noopener">${GITHUB_MARK}GitHub</a><a class="button" href="#embed">Embed</a><a class="button" href="${esc(share)}" rel="noopener" title="Share on X">Share</a></div></div>
 <div class="dash">${svg}</div>
 ${activityPanels(tokens)}
 ${providerActivity(tokens)}
-<div class="panel">
+<div class="panel" id="embed">
   <h2>Add this to your GitHub profile</h2>
   ${embedCode(url, parts)}
   ${cards.length ? `<h2>Text cards</h2><ul>${cardLinks}</ul>` : ''}
