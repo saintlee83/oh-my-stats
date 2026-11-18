@@ -265,7 +265,7 @@ test('the landing page explains how it works in three steps and answers question
 
 test('the figures strip counts profiles and their tokens only once three are ranked', async () => {
   const context = app({}, PEOPLE);
-  const strip = async () => (/<ul class="figures wrap">(.*?)<\/ul>/s.exec(await text(context, '/')) ?? [])[1];
+  const strip = async () => (/<ul class="tally wrap">(.*?)<\/ul>/s.exec(await text(context, '/')) ?? [])[1];
   const tools = `<li><strong>${PROVIDERS.size}</strong> <span>AI tools the agent reads on its own</span></li>`;
   assert.equal(await strip(), tools, 'a new server still says what the agent reads');
 

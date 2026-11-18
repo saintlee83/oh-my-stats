@@ -292,7 +292,7 @@ function figures(board: LandingBoard): string {
     ? [[commas(board.participants), 'ranked public profiles'], [compact(board.tokens), 'AI tokens between them, all time']]
     : [];
   const items = [...ranked, [String(PROVIDERS.size), 'AI tools the agent reads on its own']];
-  return `<ul class="figures wrap">${items.map(([value, label]) => `<li><strong>${value}</strong> <span>${label}</span></li>`).join('')}</ul>`;
+  return `<ul class="tally wrap">${items.map(([value, label]) => `<li><strong>${value}</strong> <span>${label}</span></li>`).join('')}</ul>`;
 }
 
 export function landingPage(origin: string, viewer: UserRow | null, board: LandingBoard = { leaders: [], participants: 0, tokens: 0 }): string {

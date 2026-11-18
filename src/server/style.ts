@@ -295,10 +295,10 @@ const SOURCE = `
   /* Groups */
 
   /* Reading pages */
-  .figures { display: flex; flex-wrap: wrap; justify-content: center; gap: 4px 40px; padding-top: 20px; list-style: none; }
-  .figures li { display: flex; align-items: baseline; gap: 8px; }
-  .figures strong { font-size: 18px; letter-spacing: -0.01em; font-variant-numeric: tabular-nums; }
-  .figures span { font-size: 13px; color: var(--muted); }
+  .tally { display: flex; flex-wrap: wrap; justify-content: center; gap: 4px 40px; padding-top: 20px; list-style: none; }
+  .tally li { display: flex; align-items: baseline; gap: 8px; }
+  .tally strong { font-size: 18px; letter-spacing: -0.01em; font-variant-numeric: tabular-nums; }
+  .tally span { font-size: 13px; color: var(--muted); }
   .steps { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 24px; margin: 0; padding: 0; list-style: none; counter-reset: step; }
   .steps li { position: relative; counter-increment: step; }
   .steps li::before { content: counter(step); display: grid; place-items: center; width: 32px; height: 32px; margin: 0 0 14px; border-radius: 50%; font-size: 14px; font-weight: 700; color: var(--accent); background: var(--accent-soft); }
@@ -333,9 +333,9 @@ const SOURCE = `
   .reading th, .reading td { white-space: normal; vertical-align: top; }
   @media (max-width: 760px) {
     /* Stacked, the numbers share a column, so the lines start at one edge. */
-    .figures { display: grid; grid-template-columns: auto auto; gap: 2px 10px; }
-    .figures li { display: contents; }
-    .figures strong { text-align: right; }
+    .tally { display: grid; grid-template-columns: auto auto; gap: 2px 10px; }
+    .tally li { display: contents; }
+    .tally strong { text-align: right; }
     .steps { grid-template-columns: minmax(0, 1fr); gap: 20px; }
     .steps li { padding-left: 46px; }
     .steps li::before { position: absolute; left: 0; top: -4px; margin: 0; }
