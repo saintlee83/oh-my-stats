@@ -965,7 +965,9 @@ test('pages worth sharing name the preview image by its full address, and the im
   const session = await webLogin(context);
   for (const path of ['/', '/rankings', '/rankings?days=7&provider=codex', '/u/octo']) {
     const text = await (await context.call(path)).text();
-    assert.match(text, /<meta property="og:image" content="https:\/\/stats\.example\/og\.png">/, path);
+    // A profile names its own picture, drawn from its numbers. Every other page names the site's.
+    const image = path.startsWith('/u/') ? `${path.slice(1)}/og.png` : 'og.png';
+    assert.ok(text.includes(`<meta property="og:image" content="https://stats.example/${image}">`), path);
     assert.match(text, /<meta name="twitter:card" content="summary_large_image">/, path);
   }
   for (const [path, init] of [['/nope', {}], ['/me', { headers: { cookie: session } }], ['/me/rankings', { headers: { cookie: session } }]] as const) {
