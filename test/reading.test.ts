@@ -108,7 +108,8 @@ test('the privacy page names the cookies the server sets, and how long each last
     assert.equal((await other.call(path)).headers.get('set-cookie'), null, path);
   }
   assert.match(page, /A visitor who never signs in gets none/);
-  assert.match(page, /Pages run no scripts/);
+  assert.match(page, /Public pages run no scripts/);
+  assert.match(page, /signed-in dashboard loads a script from this server/);
 });
 
 test('the privacy page says what is stored and public, how to delete it, and invents no contact', async () => {

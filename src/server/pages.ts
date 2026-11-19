@@ -2,10 +2,9 @@ import type { Card } from '../shared/render/cards.ts';
 import type { ComponentKey } from '../shared/render/svg.ts';
 import { commas, compact, money, percent, PROVIDERS, providerName } from '../shared/format.ts';
 import { providerMix } from '../shared/insights.ts';
-import type { GitHubMetrics, GitHubProfile, TokenMetrics } from '../shared/metrics.ts';
+import type { TokenMetrics } from '../shared/metrics.ts';
 import { tokenMix, usageCalendar, usagePeriods, type CalendarDay, type CalendarView, type UsagePeriod } from '../shared/usage.ts';
-import { PROFILE_LIMITS, STATUS_CHOICES, type ManualProfile } from '../shared/profile.ts';
-import type { MachineRow, UserRow } from './db.ts';
+import type { UserRow } from './db.ts';
 import type { PublicPosition, RankingPeriod, Standing } from './rankings.ts';
 import { STYLE } from './style.ts';
 
@@ -44,6 +43,7 @@ export function avatar(url: string | null, size: number): string {
 export interface PageOptions {
   description?: string;
   bleed?: boolean;
+  dashboard?: boolean;
   origin?: string;
   /** A preview image of the page's own, by its full address, in place of the site's banner. */
   image?: { url: string; width: number; height: number; alt: string };
@@ -83,8 +83,9 @@ ${preview}
 <meta name="theme-color" content="#0d1117" media="(prefers-color-scheme: dark)">
 <link rel="icon" href="/favicon.svg" type="image/svg+xml">
 <style>${STYLE}</style>
+${page.dashboard ? '<link rel="stylesheet" href="/dashboard.css"><script src="/dashboard.js" defer></script>' : ''}
 </head>
-<body>
+<body${page.dashboard ? ' class="workspace"' : ''}>
 <a class="skip" href="#main">Skip to content</a>
 <header class="top"><div class="bar"><a class="brand" href="/"><img src="/favicon.svg" alt="" width="26" height="26">${SITE}</a><nav class="links" aria-label="Main navigation"><a href="/rankings">Rankings</a><a href="/groups">Groups</a>${account}</nav></div></header>
 <main id="main"${page.bleed ? ' class="bleed"' : ''}>${body}</main>
@@ -168,7 +169,7 @@ ${pane(`curl -fsSL ${origin}/install.sh | sh`)}${pane(`irm ${origin}/install.ps1
 </div>`;
 }
 
-const GITHUB_SETUP = `<details class="github-setup">
+export const GITHUB_SETUP = `<details class="github-setup">
 <summary>Add GitHub contribution stats (optional)</summary>
 <p><code>oms login</code> is enough to sync AI usage. To include commits and other repository activity, set up the <a href="https://cli.github.com/">GitHub CLI</a> on one machine.</p>
 <ol>
@@ -339,28 +340,28 @@ ${leaders}
   );
 }
 
-type Part = { key: ComponentKey; label: string };
+export type Part = { key: ComponentKey; label: string };
 
 /**
  * The whole dashboard as one image, then each part on its own for a README that wants only
  * some, then the two small images for one that has no room for either.
  */
-function embedCode(url: string, parts: Part[]): string {
+export function embedCode(url: string, parts: Part[]): string {
   const dashboard = `<pre><code>${esc(`![Developer stats](${url}/dashboard.svg)`)}</code></pre>`;
   if (parts.length === 0) return dashboard;
   // A blank line puts each image in its own paragraph, so GitHub spaces them evenly.
   const lines = parts.map((part) => `![${part.label}](${url}/components/${part.key}.svg)`).join('\n\n');
-  const small = `![Developer stats](${url}/card.svg)\n\n![AI tokens](${url}/badge.svg)`;
+  const small = `![Developer stats](${url}/card.svg)\n\n![Token ranking](${url}/ranking.svg)\n\n![AI tokens](${url}/badge.svg)`;
   return `${dashboard}
   <p>Or pick the parts you want, in any order:</p>
   <pre><code>${esc(lines)}</code></pre>
-  <p>Or something smaller, a card 495 pixels wide and a badge:</p>
+  <p>For a smaller embed, choose a stats card, a token ranking card, or a badge.</p>
   <pre><code>${esc(small)}</code></pre>
   <p class="muted">The card adds a calendar of the last 26 weeks with <code>?graph=1</code>. The badge shows another figure with <code>?metric=cost</code>, <code>rank</code>, <code>contributions</code> or <code>streak</code>.</p>
   <p class="muted">For Tokyo Night colors, add <code>?theme=tokyo-night</code> to any image address. The badge keeps its own colors.</p>`;
 }
 
-function providerActivity(tokens: TokenMetrics | null): string {
+export function providerActivity(tokens: TokenMetrics | null): string {
   if (!tokens) return '';
   const rows = tokens.tools.map(({ tool, activity: a }) => `<tr><td>${esc(providerName(tool))}</td>
     <td class="num">${compact(a.last7)}</td><td class="num">${compact(a.previous7)}</td>
@@ -455,9 +456,9 @@ function tokenMixPanel(tokens: TokenMetrics): string {
     <div class="table"><table><thead><tr><th>Kind</th><th class="num">Share</th><th class="num">Tokens</th></tr></thead><tbody>${rows}</tbody></table></div></section>`;
 }
 
-function activityPanels(tokens: TokenMetrics | null): string {
+export function activityPanels(tokens: TokenMetrics | null, calendars?: CalendarView[]): string {
   if (!tokens) return '';
-  const calendar = usageCalendar(tokens).map((view, index) => ({ key: view.key, label: view.label, body: calendarPane(view, index === 0) }));
+  const calendar = (calendars ?? usageCalendar(tokens)).map((view, index) => ({ key: view.key, label: view.label, body: calendarPane(view, index === 0) }));
   const periods = usagePeriods(tokens).map(period => ({ key: period.key, label: period.label, body: periodPane(period, tokens.undated) }));
   const mix = providerMix(tokens);
   const shareLabel = (value: number | null) => value === null ? '—' : percent(value);
@@ -513,118 +514,6 @@ ${providerActivity(tokens)}
 </div>`,
     viewer,
     { origin, image, description: `The developer stats of @${user.login}: AI tokens and GitHub contributions, counted across every machine.` },
-  );
-}
-
-function machineRows(machines: MachineRow[], tokens: TokenMetrics | null): string {
-  const totals = new Map(tokens?.machines.map(row => [row.id, row]));
-  return machines
-    .map((machine) => {
-      const id = esc(machine.id);
-      const usage = totals.get(machine.id);
-      return `<tr>
-  <td><form class="inline" method="post" action="/me/machines/${id}/rename"><input type="text" name="name" value="${esc(machine.name)}" aria-label="Machine name" maxlength="64"><button>Rename</button></form></td>
-  <td>${esc(machine.platform ?? '-')}</td>
-  <td class="num">${commas(usage?.last7 ?? 0)}</td>
-  <td class="num">${commas(usage?.last30 ?? 0)}</td>
-  <td class="num">${commas(usage?.total ?? 0)}</td>
-  <td>${esc(machine.last_seen_at.slice(0, 16).replace('T', ' '))} UTC</td>
-  <td><details class="confirm"><summary class="danger">Remove</summary><form class="inline" method="post" action="/me/machines/${id}/delete"><span class="muted">Deletes its data and signs it out.</span><button class="danger">Remove this machine</button></form></details></td>
-</tr>`;
-    })
-    .join('');
-}
-
-function githubStatus(github: GitHubProfile | null): string {
-  if (!github) return 'none read yet';
-  if (github.status) return [github.status.emoji, github.status.message ?? (github.status.busy ? 'Busy' : '')].filter(Boolean).join(' ') || 'set';
-  return github.hireable ? 'Available for hire' : 'none set';
-}
-
-/** Each field shows the GitHub value it falls back to as its placeholder. */
-function profileForm(manual: ManualProfile, github: GitHubProfile | null): string {
-  const field = (name: keyof typeof PROFILE_LIMITS, label: string, fallback: string | null | undefined, hint: string) => {
-    const attrs = `name="${name}" maxlength="${PROFILE_LIMITS[name]}" placeholder="${esc(fallback ?? hint)}" autocomplete="off"`;
-    return name === 'bio'
-      ? `<label class="wide">${label}<textarea ${attrs} rows="2">${esc(manual[name] ?? '')}</textarea></label>`
-      : `<label>${label}<input type="text" ${attrs} value="${esc(manual[name] ?? '')}"></label>`;
-  };
-  const choice = (value: string, label: string) => `<option value="${esc(value)}"${(manual.status ?? '') === value ? ' selected' : ''}>${esc(label)}</option>`;
-  return `<div class="panel" id="profile-header">
-  <h2>Profile header</h2>
-  <p>Shown at the top of your dashboard, and as its own <code>profile</code> part. Leave a field empty to use your GitHub profile, which your agent reads once a day.</p>
-  <form method="post" action="/me/profile">
-    <div class="fields">
-      ${field('name', 'Name', github?.name, 'Your name')}
-      ${field('title', 'Title', null, 'e.g. Backend engineer')}
-      ${field('company', 'Company', github?.company, 'e.g. Acme')}
-      ${field('location', 'Location', github?.location, 'e.g. Seoul')}
-      <label>Status<select name="status">${choice('', `From GitHub (${githubStatus(github)})`)}${Object.entries(STATUS_CHOICES)
-        .map(([value, label]) => choice(value, label))
-        .join('')}</select></label>
-      ${field('bio', 'Bio', github?.bio, 'One line about you')}
-    </div>
-    <button class="primary">Save profile</button>
-  </form>
-</div>`;
-}
-
-export function dashboardPage(
-  user: UserRow,
-  machines: MachineRow[],
-  svg: string | null,
-  tokens: TokenMetrics | null,
-  parts: Part[],
-  origin: string,
-  profile: { manual: ManualProfile; github: GitHubMetrics | null },
-): string {
-  const url = `${origin}/u/${encodeURIComponent(user.login)}`;
-  const isPublic = user.is_public === 1;
-  const githubSetup = profile.github ? '' : GITHUB_SETUP;
-  const empty = `<div class="panel"><h2>Connect your first machine</h2><p>Run this on each computer. The agent records usage continuously and uploads once a day.</p>${installCommands(origin)}${githubSetup}</div>`;
-  return layout(
-    `Your dashboard · ${SITE}`,
-    `<div class="page-head"><div><h1>Your dashboard</h1><p>Signed in as @${esc(user.login)}. ${isPublic ? 'Your profile is public.' : 'Only you can see these numbers.'}</p></div>
-<div class="actions"><a class="button" href="/me/rankings">My rankings</a>${isPublic ? `<a class="button" href="${esc(url)}">Public profile</a>` : ''}</div></div>
-${machines.length === 0 ? empty : ''}
-${svg ? `<div class="dash">${svg}</div>` : ''}
-${activityPanels(tokens)}
-${providerActivity(tokens)}
-<div class="panel">
-  <h2>Profile <span class="badge${isPublic ? ' live' : ''}">${isPublic ? 'Public' : 'Private'}</span></h2>
-  ${
-    isPublic
-      ? `<p>Anyone can see your profile at <a href="${esc(url)}">${esc(url)}</a>.</p>${embedCode(url, parts)}`
-      : '<p>Only you can see your stats. Publishing shows your totals, by model and by day. Machine names stay private.</p>'
-  }
-  <form method="post" action="/me/visibility"><input type="hidden" name="public" value="${isPublic ? '0' : '1'}"><button class="${isPublic ? '' : 'primary'}">${isPublic ? 'Make private' : 'Publish profile'}</button></form>
-</div>
-${profileForm(profile.manual, profile.github?.profile ?? null)}
-${
-  machines.length
-    ? `<div class="panel"><h2>Machines</h2><div class="table"><table>
-<thead><tr><th>Name</th><th>Platform</th><th class="num">Tokens · last 7d</th><th class="num">Tokens · last 30d</th><th class="num">Lifetime tokens</th><th>Last sync</th><th></th></tr></thead>
-<tbody>${machineRows(machines, tokens)}${tokens && Object.values(tokens.unassigned).some(n => n > 0) ? `<tr><td colspan="2">No matching device</td>
-  <td class="num">${commas(tokens.unassigned.last7)}</td><td class="num">${commas(tokens.unassigned.last30)}</td><td class="num">${commas(tokens.unassigned.total)}</td><td colspan="2"></td></tr>` : ''}</tbody></table></div>
-<p class="muted">Machines upload once a day, so numbers can be up to a day behind. Run <code>oms sync</code> on a machine to update it now. For providers with an account-wide total, device attribution uses local logs. Account usage with no matching machine record appears only in the account total. Removing a machine deletes its data and signs it out.</p>
-${githubSetup}</div>`
-    : ''
-}
-<div class="panel">
-  <h2>Account</h2>
-  <form method="post" action="/logout"><button>Sign out</button></form>
-  <details class="confirm" style="margin-top:12px">
-    <summary class="danger">Delete my account and data</summary>
-    <form method="post" action="/me/delete">
-      <p>This deletes everything on this server and signs out every machine. To confirm, type your GitHub username, <code>${esc(user.login)}</code>.</p>
-      <div style="display:flex;gap:8px;flex-wrap:wrap;align-items:center">
-        <input type="text" name="confirm" aria-label="Your GitHub username" maxlength="39" autocomplete="off" spellcheck="false" required>
-        <button class="danger">Delete everything</button>
-      </div>
-    </form>
-  </details>
-</div>`,
-    user,
   );
 }
 

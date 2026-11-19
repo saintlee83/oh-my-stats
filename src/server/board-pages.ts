@@ -256,7 +256,8 @@ export function myRankingsPage(period: RankingPeriod, personal: PersonalRankings
   const tiles = positions.map(({ days, rank, participants }) =>
     `<div class="tile"><span class="tile-label">${periodLabel(days)}</span><strong>${rank === null ? '—' : `#${rank}`}</strong><span>${rank === null ? 'Unranked · ' : 'of '}${profileCount(participants)}</span></div>`).join('');
   return layout(`My token rankings · ${SITE}`, `<div class="page-head"><div><h1>My token rankings</h1>
-<p>Where you stand, and how your own devices and providers compare. Only you can see this page.</p></div></div>
+<p>Where you stand, and how your own devices and providers compare. Only you can see this page.</p></div>
+${viewer.is_public ? `<a class="button" href="/u/${encodeURIComponent(viewer.login)}/ranking.svg">View ranking SVG</a>` : ''}</div>
 <div class="toolbar">${periodNav(period, (days) => address('/me/rankings', days))}${viewNav(period.days, false)}</div>
 ${dates(period)}
 <h2 class="sr">Your public position</h2><div class="tiles">${tiles}</div>

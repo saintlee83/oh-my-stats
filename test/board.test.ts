@@ -47,6 +47,7 @@ test('a board is read a page at a time, with its totals and the viewer’s place
   assert.deepEqual(first.users[0], { rank: 1, label: 'member-001', name: 'Member 1', tokens: 999 });
   assert.deepEqual(first.users[1], { rank: 2, label: 'member-002', name: null, tokens: 998 });
   assert.deepEqual(first.position, { days: 7, rank: 150, participants: 204 }, 'the viewer is on another page, and the private member is not counted');
+  assert.equal(first.viewerTokens, 850, 'the ranking card can read its own score past the first page');
   assert.deepEqual([first.page, first.pages], [1, 3]);
   assert.equal(first.tokens, Array.from({ length: 204 }, (_, i) => 999 - i).reduce((sum, value) => sum + value, 0));
   assert.deepEqual(first.providers, [{ tool: 'codex', tokens: first.tokens, profiles: 204 }]);

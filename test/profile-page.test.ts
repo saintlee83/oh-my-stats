@@ -40,6 +40,34 @@ function panel(page: string, opening: string): string {
   return page.slice(start, end === -1 ? undefined : end);
 }
 
+test('the private overview charts dated tokens and provider shares for the same window', async () => {
+  const { dashboard, profile, context, cookie } = await pages({
+    days: days({ '2026-09-12': { pi: 500 }, '2026-10-20': { codex: 200 }, '2026-11-09': { claude: 50 } }),
+    totals: { claude: { scope: 'machine', total: 1000, asOf: '2026-09-01' } },
+  });
+  const windows = [...dashboard.matchAll(/<div class="usage-window" data-window="(\d+)">([\s\S]*?)<\/section><\/div>/g)];
+  assert.deepEqual(windows.map(match => Number(match[1])), [7, 30, 60]);
+  for (const [index, expected] of [50, 250, 750].entries()) {
+    const [, size, body] = windows[index];
+    assert.ok(body.includes(`title="${expected} tokens"`));
+    assert.equal(count(body, /class="plot-slot"/g), Number(size));
+    assert.match(body, /title="2026-11-09 · 50 tokens"/);
+  }
+  assert.match(windows[1][2], /<strong>Codex<\/strong><span>80.0%<\/span>/);
+  assert.match(windows[1][2], /-50.0%<\/strong> vs prior 30 days/, 'compares dated tokens across adjacent windows');
+  assert.doesNotMatch(windows[0][2], /vs prior 7 days/, 'a missing baseline has no percent change');
+  assert.doesNotMatch(windows[1][2], /<strong>Pi<\/strong>/);
+  assert.ok(dashboard.includes('title="1,750"'), 'undated usage still counts in lifetime');
+  assert.doesNotMatch(profile, /dashboard\.js|me\/report\.svg|usage-window/);
+  await context.call('/me/visibility', webPost(cookie, 'public=0'));
+  assert.equal((await context.call('/me/report.svg')).headers.get('location'), '/login');
+  const report = await context.call('/me/report.svg', { headers: { cookie } });
+  assert.equal(report.status, 200);
+  assert.equal(report.headers.get('cache-control'), 'no-store');
+  assert.match(report.headers.get('content-type') ?? '', /image\/svg\+xml/);
+  assert.match(await report.text(), /@octo/);
+});
+
 const calendarOf = (page: string) => panel(page, '<section class="panel panes" role="group" aria-label="AI usage calendar">');
 const periodsOf = (page: string) => panel(page, '<section class="panel panes" id="periods"');
 const panesOf = (section: string) => section.split('<div class="pane">').slice(1);

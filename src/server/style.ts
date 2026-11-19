@@ -1,6 +1,6 @@
 /**
- * The website's stylesheet, sent inside every page. Pages run no scripts and load no
- * fonts, so everything here is plain CSS over the system typeface.
+ * The website's shared stylesheet, sent inside every page. The private dashboard adds
+ * its workspace styles from the static assets.
  *
  * Grays and blues are GitHub's, the same as the dashboard's default theme, so the
  * dashboard image sits on the page like any other panel. Greens are the logo's.

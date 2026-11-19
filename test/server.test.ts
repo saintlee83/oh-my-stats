@@ -948,8 +948,16 @@ test('pages load nothing the content policy would block, and share one frame', a
     const text = await response.text();
     const policy = response.headers.get('content-security-policy') ?? '';
     assert.match(policy, /default-src 'none'/, path);
+    const dashboardAssets = '<link rel="stylesheet" href="/dashboard.css"><script src="/dashboard.js" defer></script>';
+    if (path === '/me') {
+      assert.ok(text.includes(dashboardAssets));
+      assert.match(policy, /script-src 'self'(?:;|$)/);
+      assert.match(policy, /style-src 'self' 'unsafe-inline'/);
+    } else {
+      assert.doesNotMatch(policy, /script-src/);
+    }
     // A drawing may point at its own patterns. Anything else named by address would be fetched.
-    assert.doesNotMatch(text, /<script|<link rel="stylesheet"|@import|url\((?!#)|<iframe/i, `${path} needs only what the policy allows`);
+    assert.doesNotMatch(path === '/me' ? text.replace(dashboardAssets, '') : text, /<script|<link rel="stylesheet"|@import|url\((?!#)|<iframe/i, `${path} needs only what the policy allows`);
     for (const [, source] of text.matchAll(/<img src="([^"]+)"/g)) {
       assert.match(source, /^(\/(?!\/)|https:\/\/avatars\.githubusercontent\.com\/)/, `${path} loads ${source}`);
     }
