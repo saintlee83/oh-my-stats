@@ -45,6 +45,7 @@ src/worker.ts             The Worker's entry point
 src/server/               Routes, pages, queries and sign-in
   app.ts                  Every route, the cache, and the security headers
   pages.ts, style.ts      The page layout and the one stylesheet
+  provider-icons.ts       The mark of each AI tool, drawn beside its name
   rankings.ts, boards.ts  The queries behind the boards, and board-pages.ts draws them
   groups.ts, grouppages.ts, grouproutes.ts
   reading.ts              How we count, privacy, terms, robots.txt and the sitemap
@@ -147,7 +148,7 @@ A tool whose usage you can export needs no code at all: see [Add a provider with
 2. **Add the reader** to the `Reader` list in `agent/src/providers.rs`, with its provider ID in `provider()` and the file names it reads in `accepts()`. An ID is lowercase, such as `kilo-code`.
 3. **Parse it** in `agent/src/providers/native.rs`: `line` for a file of JSON lines, `snapshot` for a file that is rewritten whole, and `database` for SQLite.
 4. **Say where to look** in `default_roots` in `agent/src/scan.rs`, following the tool's own setting for its folder if it has one, and its location on Windows.
-5. **Name it** in `PROVIDERS` in `src/shared/format.ts`. That gives it its name on the website, and a place on the providers board, which lists only the tools named there.
+5. **Name it** in `PROVIDERS` in `src/shared/format.ts`. That gives it its name on the website, and a place on the providers board, which lists only the tools named there. Add its mark to `src/server/provider-icons.ts` under the same ID, which the website draws beside the name: one flat shape in a square of 24 units, with no color of its own, and a note of where it came from. A test fails for a tool that has none.
 6. **Test it** in `agent/tests/native_usage.rs`: write files as the tool would, scan twice, and check that each response counts once and that new usage is picked up.
 7. **Document it** in the README: a row in the table under [Automatically collected histories](README.md#automatically-collected-histories), any folder setting it follows, what it can't count, and the number of tools where the README and this guide state it.
 

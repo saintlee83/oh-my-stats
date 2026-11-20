@@ -7,7 +7,7 @@ import { COMPONENT_KEYS } from '../src/shared/render/svg.ts';
 import { testDb } from './sqlite-d1.ts';
 import { githubMetrics } from './fixtures.ts';
 import {
-  api, app, countingDb, fakeCache, fakeGitHub, MACHINE_A, MACHINE_B, machine, octo, ORIGIN, published, SECRET_NAME, signIn, upload, webLogin, webPost,
+  api, app, countingDb, fakeCache, fakeGitHub, MACHINE_A, MACHINE_B, machine, mark, octo, ORIGIN, published, SECRET_NAME, signIn, upload, webLogin, webPost,
   type GitHubUser,
 } from './harness.ts';
 
@@ -872,7 +872,7 @@ test('custom provider usage reaches status, the private dashboard and the publis
   const me = await (await context.call('/v1/me', api(token, 'GET'))).json() as { tokens: { tools: { activity: unknown }[] } };
   assert.deepEqual(me.tokens.tools[0].activity, { last7: 175, previous7: 0, responses30: 1, activeDays30: 1, tokensPerResponse30: 175 });
   const session = await webLogin(context);
-  const check = async (page: Response) => assert.match(await page.text(), /Provider activity[\s\S]*<td>local-ai<\/td>[\s\S]*>175<\/td>/);
+  const check = async (page: Response) => assert.match(await page.text(), new RegExp(`Provider activity[\\s\\S]*<td>${mark('other')}local-ai</td>[\\s\\S]*>175</td>`));
   await check(await context.call('/me', { headers: { cookie: session } }));
   assert.equal((await context.call('/u/octo')).status, 404);
   await context.call('/v1/me', api(token, 'PATCH', { public: true }));
@@ -1164,18 +1164,18 @@ test('the public board ranks one provider at a time, with the scores each profil
   assert.deepEqual(week.position, { days: 7, rank: 1, participants: 2 });
 
   const all = await (await context.call('/rankings')).text();
-  assert.match(all, /<nav class="filters" aria-label="Providers"><a href="\/rankings\?days=all" aria-current="page">All providers<\/a><a href="\/rankings\?days=all&amp;provider=codex">Codex<\/a><a href="\/rankings\?days=all&amp;provider=claude">Claude Code<\/a><a href="\/rankings\?days=all&amp;provider=pi">Pi<\/a><\/nav>/);
+  assert.ok(all.includes(`<nav class="filters" aria-label="Providers"><a href="/rankings?days=all" aria-current="page">All providers</a><a href="/rankings?days=all&amp;provider=codex">${mark('codex')}Codex</a><a href="/rankings?days=all&amp;provider=claude">${mark('claude')}Claude Code</a><a href="/rankings?days=all&amp;provider=pi">${mark('pi')}Pi</a></nav>`));
   assert.doesNotMatch(all, /local-ai/, 'a provider ID someone made up is not offered to everyone');
   const board = await (await context.call('/rankings?days=7&provider=codex')).text();
-  assert.match(board, /<a href="\/rankings\?days=7&amp;provider=codex" aria-current="page">Codex<\/a>/);
+  assert.ok(board.includes(`<a href="/rankings?days=7&amp;provider=codex" aria-current="page">${mark('codex')}Codex</a>`));
   assert.match(board, /<a href="\/rankings\?days=30&amp;provider=codex">Last 30 days<\/a>/, 'changing the period keeps the provider');
   assert.match(board, /Places 1–2 · Codex<\/h2><p class="muted"><span title="800 tokens">800 tokens<\/span> from 2 ranked public profiles<\/p>/);
   assert.match(board, /@alpha<\/a>[\s\S]*<strong>500<\/strong>[\s\S]*@octo<\/small><\/span><\/a>[\s\S]*<strong>300<\/strong>/);
   assert.doesNotMatch(board, /@beta/);
   const custom = await (await context.call('/rankings?provider=local-ai')).text();
-  assert.match(custom, /aria-current="page">local-ai<\/a>[\s\S]*@octo<\/small><\/span><\/a>[\s\S]*<strong>7<\/strong>/, 'it can still be asked for by address');
+  assert.match(custom, new RegExp(`aria-current="page">${mark('other')}local-ai</a>[\\s\\S]*@octo</small></span></a>[\\s\\S]*<strong>7</strong>`), 'it can still be asked for by address');
   const unused = await context.call('/rankings?provider=amp');
-  assert.match(await unused.text(), /aria-current="page">Amp<\/a>[\s\S]*0 ranked public profiles[\s\S]*No token usage for this period/);
+  assert.match(await unused.text(), new RegExp(`aria-current="page">${mark('amp')}Amp</a>[\\s\\S]*0 ranked public profiles[\\s\\S]*No token usage for this period`));
   for (const bad of ['Codex', 'codex%20', '<b>', 'a'.repeat(33)]) assert.equal((await context.call(`/rankings?provider=${bad}`)).status, 400, bad);
   const cookie = await webLogin(context);
   assert.match(await (await context.call('/rankings?provider=pi', { headers: { cookie } })).text(), /1 ranked public profile · No ranked usage in these periods\./);

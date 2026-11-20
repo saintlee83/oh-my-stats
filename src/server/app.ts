@@ -659,7 +659,8 @@ async function handleApi(request: Request, path: string, deps: Deps): Promise<Re
     // Older v1 clients requesting no period expect a seven-day range with start and end dates.
     const period = rankingPeriod(new URL(request.url).searchParams.get('days') ?? '7', now);
     const [{ users, position }, personal] = await Promise.all([publicRankings(deps.db, period, session.user_id), personalRankings(deps.db, session.user_id, period)]);
-    return json({ period, users, position, ...personal });
+    // A client prints each provider by its name. The ID beside it is for this server's own pages.
+    return json({ period, users, position, machines: personal.machines, providers: personal.providers.map(({ tool: _, ...row }) => row) });
   }
 
   if (path === '/v1/usage' && request.method === 'PUT') {

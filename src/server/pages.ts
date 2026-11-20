@@ -5,6 +5,7 @@ import { providerMix } from '../shared/insights.ts';
 import type { TokenMetrics } from '../shared/metrics.ts';
 import { tokenMix, usageCalendar, usagePeriods, type CalendarDay, type CalendarView, type UsagePeriod } from '../shared/usage.ts';
 import type { UserRow } from './db.ts';
+import { OTHER_PROVIDER_ICON, PROVIDER_ICONS } from './provider-icons.ts';
 import type { PublicPosition, RankingPeriod, Standing } from './rankings.ts';
 import { STYLE } from './style.ts';
 
@@ -34,6 +35,23 @@ export function avatar(url: string | null, size: number): string {
   } catch {
     return '';
   }
+}
+
+/**
+ * A tool's mark, by reference: `layout` draws each mark a page uses once, however many rows
+ * show it. A provider ID that someone made up gets the mark for any other tool.
+ */
+export const providerIcon = (id: string) =>
+  `<svg class="provider-icon" aria-hidden="true"><use href="#provider-${PROVIDER_ICONS.has(id) ? id : 'other'}"/></svg>`;
+
+/** A tool's mark, then its name. The mark is decoration: the name says the same to a screen reader. */
+export const providerLabel = (id: string) => `${providerIcon(id)}${esc(providerName(id))}`;
+
+/** The drawings behind the marks in a page's body. They take no room of their own. */
+function providerMarks(body: string): string {
+  const used = new Set([...body.matchAll(/<use href="#provider-([a-z0-9_-]+)"\/>/g)].map(([, id]) => id));
+  const symbols = [...used].map(id => `<symbol id="provider-${id}" viewBox="0 0 24 24">${PROVIDER_ICONS.get(id) ?? OTHER_PROVIDER_ICON}</symbol>`);
+  return symbols.length ? `<svg class="marks" width="0" height="0" aria-hidden="true">${symbols.join('')}</svg>\n` : '';
 }
 
 /**
@@ -87,7 +105,7 @@ ${page.dashboard ? '<link rel="stylesheet" href="/dashboard.css"><script src="/d
 </head>
 <body${page.dashboard ? ' class="workspace"' : ''}>
 <a class="skip" href="#main">Skip to content</a>
-<header class="top"><div class="bar"><a class="brand" href="/"><img src="/favicon.svg" alt="" width="26" height="26">${SITE}</a><nav class="links" aria-label="Main navigation"><a href="/rankings">Rankings</a><a href="/groups">Groups</a>${account}</nav></div></header>
+${providerMarks(body)}<header class="top"><div class="bar"><a class="brand" href="/"><img src="/favicon.svg" alt="" width="26" height="26">${SITE}</a><nav class="links" aria-label="Main navigation"><a href="/rankings">Rankings</a><a href="/groups">Groups</a>${account}</nav></div></header>
 <main id="main"${page.bleed ? ' class="bleed"' : ''}>${body}</main>
 <footer class="bottom"><div class="bar"><p>${SITE} is open source, under the MIT license.</p><nav aria-label="Footer"><a href="/rankings">Rankings</a><a href="/how-we-count">How we count</a><a href="${REPO_URL}#get-started">Install</a><a href="/privacy">Privacy</a><a href="/terms">Terms</a><a href="${REPO_URL}">GitHub</a></nav></div></footer>
 </body>
@@ -125,7 +143,7 @@ const costCells = (cost: number, tokens: number) =>
  * scan, the exact one beneath it, and a bar comparing it with the leader.
  */
 export function standings(
-  rows: (Standing & { name?: string | null; cost?: number })[],
+  rows: (Standing & { name?: string | null; cost?: number; tool?: string })[],
   column: string,
   tokenColumn: string,
   profiles: ProfileRows | null = null,
@@ -140,7 +158,7 @@ export function standings(
     const handle = `@${esc(row.label)}`;
     const who = profiles
       ? `<a href="/u/${login}"><img src="${AVATARS}/${login}?s=56" alt="" width="28" height="28" loading="lazy">${profiles.names && row.name ? `<span><b>${esc(row.name)}</b><small>${handle}</small></span>` : handle}</a>${mine ? '<span class="badge">You</span>' : ''}`
-      : esc(row.label);
+      : row.tool ? providerLabel(row.tool) : esc(row.label);
     return `<tr${mine ? ' class="me"' : ''}><td class="rank"><span class="place"${profiles && row.rank <= 3 ? ` data-place="${row.rank}"` : ''}>${row.rank}</span></td><td class="who">${who}</td>
 <td class="meter" aria-hidden="true"><span style="--share:${((100 * score(row)) / most).toFixed(1)}%"></span></td>
 ${byCost ? costCells(row.cost ?? 0, row.tokens) : `<td class="num">${figure(compact(row.tokens), commas(row.tokens))}</td>`}</tr>`;
@@ -322,7 +340,7 @@ ${showcase}
 </section>
 <section class="section wrap">
 <div class="section-head"><h2>Reads the tools you already use</h2><p><code>oms</code> finds these histories on its own. Any other tool can be added with a JSONL export.</p></div>
-<ul class="chips">${[...PROVIDERS.values()].map(name => `<li>${esc(name)}</li>`).join('')}</ul>
+<ul class="chips">${[...PROVIDERS.keys()].map(id => `<li>${providerLabel(id)}</li>`).join('')}</ul>
 </section>
 <section class="section wrap">
 <div class="section-head"><h2>What leaves your machine</h2><p>Only totals. Run <code>oms preview</code> to see exactly what would be uploaded, without sending anything.</p></div>
@@ -363,7 +381,7 @@ export function embedCode(url: string, parts: Part[]): string {
 
 export function providerActivity(tokens: TokenMetrics | null): string {
   if (!tokens) return '';
-  const rows = tokens.tools.map(({ tool, activity: a }) => `<tr><td>${esc(providerName(tool))}</td>
+  const rows = tokens.tools.map(({ tool, activity: a }) => `<tr><td>${providerLabel(tool)}</td>
     <td class="num">${compact(a.last7)}</td><td class="num">${compact(a.previous7)}</td>
     <td class="num">${a.activeDays30}</td><td class="num">${commas(a.responses30)}</td>
     <td class="num">${a.tokensPerResponse30 === null ? '—' : compact(a.tokensPerResponse30)}</td></tr>`).join('');
@@ -464,7 +482,7 @@ export function activityPanels(tokens: TokenMetrics | null, calendars?: Calendar
   const shareLabel = (value: number | null) => value === null ? '—' : percent(value);
   const rows = mix.rows.map(({ tool, share, priorShare }) => {
     const delta = share === null || priorShare === null ? null : (share - priorShare) * 100;
-    return `<tr><td>${esc(providerName(tool))}</td><td class="num">${shareLabel(priorShare)}</td><td class="num">${shareLabel(share)}</td>
+    return `<tr><td>${providerLabel(tool)}</td><td class="num">${shareLabel(priorShare)}</td><td class="num">${shareLabel(share)}</td>
       <td class="num">${delta === null ? '—' : `${delta > 0 ? '+' : ''}${delta.toFixed(1)} pp`}</td></tr>`;
   }).join('');
   return `${tabbedPanel('range', 'AI usage calendar', calendar)}

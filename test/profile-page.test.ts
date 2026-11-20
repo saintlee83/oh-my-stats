@@ -4,7 +4,7 @@ import { STYLE } from '../src/server/style.ts';
 import { computeTokens } from '../src/shared/tokens.ts';
 import type { MachineUsage, UsageTuple } from '../src/shared/types.ts';
 import { tokenMix, usageCalendar, usagePeriods } from '../src/shared/usage.ts';
-import { api, app, MACHINE_A, octo, ORIGIN, SECRET_NAME, signIn, upload, webLogin, webPost } from './harness.ts';
+import { api, app, MACHINE_A, mark, octo, ORIGIN, SECRET_NAME, signIn, upload, webLogin, webPost } from './harness.ts';
 
 const TZ = 'Asia/Seoul';
 
@@ -53,7 +53,7 @@ test('the private overview charts dated tokens and provider shares for the same 
     assert.equal(count(body, /class="plot-slot"/g), Number(size));
     assert.match(body, /title="2026-11-09 · 50 tokens"/);
   }
-  assert.match(windows[1][2], /<strong>Codex<\/strong><span>80.0%<\/span>/);
+  assert.ok(windows[1][2].includes(`<strong>${mark('codex')}Codex</strong><span>80.0%</span>`));
   assert.match(windows[1][2], /-50.0%<\/strong> vs prior 30 days/, 'compares dated tokens across adjacent windows');
   assert.doesNotMatch(windows[0][2], /vs prior 7 days/, 'a missing baseline has no percent change');
   assert.doesNotMatch(windows[1][2], /<strong>Pi<\/strong>/);
@@ -350,6 +350,19 @@ test('a profile without a name still says when it joined', async () => {
   await context.call('/v1/usage', api(token, 'PUT', upload(MACHINE_A)));
   await context.call('/v1/me', api(token, 'PATCH', { public: true }));
   assert.match(await (await context.call('/u/octo')).text(), /<h1>@octo<\/h1><p>Joined Nov 2026<\/p>/);
+});
+
+test('a page draws each mark it shows once, and a made-up provider gets the mark for other tools', async () => {
+  const { context, profile, dashboard } = await pages({ days: days({ '2026-11-08': { claude: 30, 'local-ai': 20 }, '2026-11-09': { claude: 50 } }) });
+  const drawn = (page: string, id: string) => page.split(`<symbol id="provider-${id}" viewBox="0 0 24 24">`).length - 1;
+  for (const [name, page] of Object.entries({ profile, dashboard })) {
+    assert.ok(page.split(`${mark('claude')}Claude Code`).length > 2, `${name}: more than one table names the tool`);
+    assert.ok(page.includes(`${mark('other')}local-ai`), `${name}: a made-up provider has a mark too`);
+    assert.deepEqual([drawn(page, 'claude'), drawn(page, 'other'), drawn(page, 'codex')], [1, 1, 0], `${name}: only the marks it shows, once each`);
+    assert.ok(!page.includes('provider-local-ai'), `${name}: an ID from an upload is never part of a reference`);
+  }
+  assert.ok(dashboard.includes(`<strong>${mark('claude')}Claude Code</strong>`), 'the breakdown on the private overview');
+  assert.doesNotMatch(await (await context.call('/privacy')).text(), /<symbol|class="marks"/, 'a page that names no tool draws none');
 });
 
 test('the public page shows nothing private, and a private profile shows none of the panels', async () => {

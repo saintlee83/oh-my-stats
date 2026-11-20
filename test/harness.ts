@@ -64,6 +64,9 @@ export function app(overrides: Partial<Deps> = {}, tokens: Record<string, GitHub
   return { deps, call, github, setTime: (next: string) => (time = new Date(next)) };
 }
 
+/** A tool's mark as a page writes it, before the tool's name. `other` is the mark of a tool `oms` doesn't read on its own. */
+export const mark = (id: string) => `<svg class="provider-icon" aria-hidden="true"><use href="#provider-${id}"/></svg>`;
+
 export const api = (token: string | null, method: string, body?: unknown): RequestInit => ({
   method,
   headers: { 'content-type': 'application/json', ...(token ? { authorization: `Bearer ${token}` } : {}) },

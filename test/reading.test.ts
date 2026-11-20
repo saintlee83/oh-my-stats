@@ -1,7 +1,8 @@
 import assert from 'node:assert/strict';
 import { test } from 'node:test';
+import { PROVIDER_ICONS } from '../src/server/provider-icons.ts';
 import { PROVIDERS } from '../src/shared/format.ts';
-import { api, app, countingDb, fakeCache, MACHINE_A, machine, octo, ORIGIN, published, SECRET_NAME, upload, webLogin, webPost } from './harness.ts';
+import { api, app, countingDb, fakeCache, MACHINE_A, machine, mark, octo, ORIGIN, published, SECRET_NAME, upload, webLogin, webPost } from './harness.ts';
 
 const READING = ['/how-we-count', '/privacy', '/terms'];
 const NOINDEX = '<meta name="robots" content="noindex">';
@@ -262,6 +263,17 @@ test('the landing page explains how it works in three steps and answers question
   assert.doesNotMatch(page, /<script/i);
   assert.equal(page.match(/<h1[ >]/g)?.length, 1);
   assert.match(page, /<h2>Numbers you can stand behind<\/h2>[\s\S]*<h2>Reads the tools you already use<\/h2>[\s\S]*<h2>What leaves your machine<\/h2>/, 'the sections it had are still there');
+});
+
+test('the landing page shows the mark of every tool oms reads beside its name', async () => {
+  const page = await text(app(), '/');
+  assert.deepEqual([...PROVIDER_ICONS.keys()].sort(), [...PROVIDERS.keys()].sort(), 'each tool has a mark, and each mark a tool');
+  for (const [id, name] of PROVIDERS) {
+    assert.ok(page.includes(`<li>${mark(id)}${name}</li>`), name);
+    assert.equal(page.split(`<symbol id="provider-${id}" viewBox="0 0 24 24">${PROVIDER_ICONS.get(id)}</symbol>`).length - 1, 1, `${name}’s mark is drawn once`);
+  }
+  // A mark takes the color of the name beside it, so it reads in light and in dark.
+  for (const [id, drawing] of PROVIDER_ICONS) assert.doesNotMatch(drawing, /fill=|stroke=|style=|<script|href=/, id);
 });
 
 test('the figures strip counts profiles and their tokens only once three are ranked', async () => {

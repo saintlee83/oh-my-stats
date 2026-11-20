@@ -1,11 +1,11 @@
-import { commas, compact, percent, providerName } from '../shared/format.ts';
+import { commas, compact, percent } from '../shared/format.ts';
 import type { GitHubProfile, Metrics, TokenMetrics } from '../shared/metrics.ts';
 import { PROFILE_LIMITS, STATUS_CHOICES, type ManualProfile } from '../shared/profile.ts';
 import { niceMax } from '../shared/render/svg.ts';
 import { lastDays } from '../shared/time.ts';
 import { usageCalendar, type CalendarView } from '../shared/usage.ts';
 import type { MachineRow, UserRow } from './db.ts';
-import { activityPanels, embedCode, esc, GITHUB_SETUP, installCommands, layout, providerActivity, SITE, type Part } from './pages.ts';
+import { activityPanels, embedCode, esc, GITHUB_SETUP, installCommands, layout, providerActivity, providerLabel, SITE, type Part } from './pages.ts';
 
 function machineRows(machines: MachineRow[], tokens: TokenMetrics | null): string {
   const totals = new Map(tokens?.machines.map(row => [row.id, row]));
@@ -82,7 +82,7 @@ function usageWindow(tokens: TokenMetrics, size: number, series: Map<string, num
   const providers = [...shares].sort((a, b) => b[1] - a[1] || a[0].localeCompare(b[0]));
   const rows = providers.map(([tool, count]) => {
     const share = percent(count / total);
-    return `<li style="--series:var(--series-${series.get(tool)})"><div><strong>${esc(providerName(tool))}</strong><span>${share}</span></div>
+    return `<li style="--series:var(--series-${series.get(tool)})"><div><strong>${providerLabel(tool)}</strong><span>${share}</span></div>
       <small title="${commas(count)} tokens">${compact(count)} tokens</small></li>`;
   }).join('');
   const mix = providers.map(([tool, count]) => `<i style="flex-grow:${count};background:var(--series-${series.get(tool)})"></i>`).join('');
