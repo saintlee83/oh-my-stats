@@ -1,7 +1,7 @@
 import { commas, compact, money, percent, PROVIDERS, providerName } from '../shared/format.ts';
 import { CHANGE_BASE, type BoardSort, type Change, type CostBoard, type ModelBoard, type ProviderBoard } from './boards.ts';
 import type { UserRow } from './db.ts';
-import { costFigures, esc, figure, GITHUB_MARK, layout, periodLabel, profileCount, REPO_URL, SITE, standings, tokenColumnLabel } from './pages.ts';
+import { costFigures, esc, figure, GITHUB_MARK, layout, periodLabel, profileCount, providerLabel, REPO_URL, SITE, standings, tokenColumnLabel } from './pages.ts';
 import { BOARD_PAGE, type Board, type PersonalRankings, type PublicPosition, type RankingPeriod } from './rankings.ts';
 
 /** The pages of the boards under /rankings, and of the signed-in viewer's own rankings. */
@@ -104,7 +104,7 @@ export function rankingsPage(period: RankingPeriod, board: Board | CostBoard, vi
   if (provider !== null && !offered.includes(provider)) offered.push(provider);
   const providers = offered.length > 1 || provider !== null
     ? `<nav class="filters" aria-label="Providers"><a href="${link({ provider: null })}"${current(provider === null)}>All providers</a>${offered
-      .map(tool => `<a href="${link({ provider: tool })}"${current(provider === tool)}>${esc(providerName(tool))}</a>`).join('')}</nav>`
+      .map(tool => `<a href="${link({ provider: tool })}"${current(provider === tool)}>${providerLabel(tool)}</a>`).join('')}</nav>`
     : '';
   const order = `<nav class="segments" aria-label="Rank by"><a href="${link({ sort: 'tokens' })}"${current(!byCost)}>By tokens</a><a href="${link({ sort: 'cost' })}"${current(byCost)}>By estimated cost</a></nav>`;
 
@@ -198,7 +198,7 @@ export function providersPage(period: RankingPeriod, board: ProviderBoard, viewe
   if (board.compared) columns.push({ heading: 'Change in profiles', cell: (row) => changeFigure(row.change) });
   // Each provider leads to the profiles that use it.
   const table = board.providers.length
-    ? reachTable(board.providers, 'Provider', (row) => `<a href="${address('/rankings', period.days, { provider: row.tool })}">${esc(providerName(row.tool))}</a>`, columns)
+    ? reachTable(board.providers, 'Provider', (row) => `<a href="${address('/rankings', period.days, { provider: row.tool })}">${providerLabel(row.tool)}</a>`, columns)
     : '<p>No token usage for this period.</p>';
   const reading = board.providers.length
     ? `Active profiles are published profiles with usage of the provider in the period. Adoption is their share of all ${profileCount(board.profiles)}.${comparison(period, board.compared, 'provider')} `

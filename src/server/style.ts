@@ -124,6 +124,11 @@ const SOURCE = `
   .badge.live { color: var(--accent); border-color: transparent; background: var(--accent-soft); }
   a.badge { background: var(--surface); text-decoration: none; }
   a.badge:hover { color: var(--link); border-color: var(--link); }
+  /* A tool's mark goes before its name, in the name's color. The drawings the marks refer to take no room. */
+  .marks { position: absolute; }
+  .provider-icon { flex: none; width: 16px; height: 16px; margin-right: 8px; vertical-align: text-bottom; fill: currentColor; fill-rule: evenodd; }
+  /* A link in a board spaces what it holds by itself. */
+  .who a .provider-icon { margin-right: 0; }
 
   /* Page headings and their controls */
   .page-head { display: flex; align-items: flex-end; justify-content: space-between; flex-wrap: wrap; gap: 12px 24px; margin: 28px 0 16px; }

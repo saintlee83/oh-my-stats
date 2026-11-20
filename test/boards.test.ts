@@ -4,7 +4,7 @@ import { boardSort, CHANGE_BASE, costBoard, modelBoard, providerBoard } from '..
 import { rankBoard, rankingPeriod } from '../src/server/rankings.ts';
 import type { PriceTable } from '../src/shared/types.ts';
 import { BadRequest } from '../src/server/wire.ts';
-import { api, app, countingDb, MACHINE_A, MACHINE_B, machine, octo, signIn, upload, webLogin } from './harness.ts';
+import { api, app, countingDb, MACHINE_A, MACHINE_B, machine, mark, octo, signIn, upload, webLogin } from './harness.ts';
 import { testDb } from './sqlite-d1.ts';
 
 const NOW = new Date('2026-11-09T05:00:00Z');
@@ -133,7 +133,7 @@ test('the board by cost shows the cost, the logged tokens and what the estimate 
   assert.match(html, /at public API list prices\. It is not what anyone paid[\s\S]*lower than the cost on a profile’s own page when a tool reports more usage than its logs hold[\s\S]*A model without a list price adds its tokens here, but no cost\./);
   assert.match(html, /<b>Eve &lt;img src=x&gt; &amp; co<\/b><small>@epsilon<\/small>/, 'a name is text from GitHub, so it is escaped');
   assert.doesNotMatch(html, /<img src=x>|@delta|@hidden|Hidden One|secret-laptop|local-ai/);
-  assert.match(html, /<nav class="filters" aria-label="Providers"><a href="\/rankings\?days=7&amp;sort=cost" aria-current="page">All providers<\/a><a href="\/rankings\?days=7&amp;provider=kimi-cli&amp;sort=cost">Kimi Code CLI<\/a><a href="\/rankings\?days=7&amp;provider=claude&amp;sort=cost">Claude Code<\/a>/);
+  assert.ok(html.includes(`<nav class="filters" aria-label="Providers"><a href="/rankings?days=7&amp;sort=cost" aria-current="page">All providers</a><a href="/rankings?days=7&amp;provider=kimi-cli&amp;sort=cost">${mark('kimi-cli')}Kimi Code CLI</a><a href="/rankings?days=7&amp;provider=claude&amp;sort=cost">${mark('claude')}Claude Code</a>`));
   assert.match(html, /<a href="\/rankings\?days=30&amp;sort=cost">Last 30 days<\/a>/, 'changing the period keeps the order');
 
   const codex = await (await context.call('/rankings?days=7&provider=codex&sort=cost')).text();
@@ -328,7 +328,7 @@ test('the providers board lists the known tools, and writes each change plainly'
   assert.match(row('Claude Code'), /<strong>20<\/strong><\/td><td class="num wide"><strong>50\.0%<\/strong><\/td><td class="num"><strong>400<\/strong><\/td><td class="num wide"><strong class="down">−4<\/strong><\/td>$/, 'no percentage on a base under 25');
   assert.match(row('Pi'), /3 profiles \(7\.5%\) · <span class="up">new<\/span>[\s\S]*<strong class="up">new<\/strong><\/td>$/);
   assert.match(row('OpenCode'), /2 profiles \(5\.0%\)<\/small>[\s\S]*<td class="num wide"><strong>0<\/strong><\/td>$/);
-  assert.match(html, /<span class="place">1<\/span><\/td><td class="who"><a href="\/rankings\?days=7&amp;provider=codex">Codex<\/a>/, 'a provider leads to the profiles that use it');
+  assert.ok(html.includes(`<span class="place">1</span></td><td class="who"><a href="/rankings?days=7&amp;provider=codex">${mark('codex')}Codex</a>`), 'a provider leads to the profiles that use it');
   assert.deepEqual([...html.matchAll(/<span class="place">(\d+)<\/span>/g)].map(([, rank]) => Number(rank)), [1, 2, 3, 4, 5, 5]);
   assert.doesNotMatch(html, /local-ai|Cline CLI|cline-cli|Gemini CLI|\/u\/| data-place=/, 'no unknown provider, nothing only a private profile used, no provider without usage, no profiles, no medals');
   assert.match(html, /Adoption is their share of all 40 ranked public profiles\. Change is the difference in active profiles from 2026-10-27 through 2026-11-02\. It comes with a percentage when the provider had at least 25 active profiles then\. Only the tools <code>oms<\/code> reads on its own are listed/);

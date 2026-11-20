@@ -61,7 +61,8 @@ export interface Standing {
 type Score = Omit<Standing, 'rank'>;
 export interface PersonalRankings {
   machines: Standing[];
-  providers: Standing[];
+  /** `label` is the provider's name. `tool` is its ID, which a page needs to draw its mark. */
+  providers: (Standing & { tool: string })[];
 }
 
 // Queries already sort by score and a stable secondary key. Equal scores share a place.
@@ -297,9 +298,10 @@ export async function personalRankings(db: Db, userId: string, period: RankingPe
     SELECT 'provider' AS kind, tool AS id, tool AS label, TOTAL(tokens) AS tokens
     FROM usage GROUP BY tool HAVING TOTAL(tokens) > 0
     ORDER BY kind, tokens DESC, label COLLATE NOCASE, id`)
-    .bind(...bind.values).all<Score & { kind: 'machine' | 'provider' }>();
+    .bind(...bind.values).all<Score & { kind: 'machine' | 'provider'; id: string }>();
+  const tools = results.filter(row => row.kind === 'provider');
   return {
     machines: standings(results.filter(row => row.kind === 'machine')),
-    providers: standings(results.filter(row => row.kind === 'provider').map(row => ({ ...row, label: providerName(row.label) }))),
+    providers: standings(tools.map(row => ({ ...row, label: providerName(row.label) }))).map((row, i) => ({ ...row, tool: tools[i].id })),
   };
 }
