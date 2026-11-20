@@ -1,10 +1,10 @@
-# Installs the oh-my-stats agent, oms.exe, on Windows.
+# Installs oms.exe, the oh-my-stats program, on Windows.
 #
 #   irm https://ohmystats.dev/install.ps1 | iex
 #
 # It downloads the latest release from GitHub, checks it against the release's checksums,
-# and puts oms.exe in ~\.local\bin, which it adds to your PATH. Run it again to update: a
-# background agent that's already set up restarts on the new version.
+# and puts oms.exe in ~\.local\bin, which it adds to your PATH. Run it again to update: if
+# oms already runs in the background, it restarts on the new version.
 #
 #   $env:OMS_VERSION       a release to install instead of the latest, such as v0.1.0
 #   $env:OMS_INSTALL_DIR   where to put oms.exe, instead of ~\.local\bin
@@ -30,7 +30,7 @@
   $target = switch ($arch) {
     'AMD64' { 'x86_64-pc-windows-msvc' }
     'ARM64' { 'aarch64-pc-windows-msvc' }
-    default { throw "There's no prebuilt agent for $arch. Build it from source: https://github.com/$repo#build-from-source" }
+    default { throw "There's no prebuilt oms for $arch. Build it from source: https://github.com/$repo#build-from-source" }
   }
 
   $archive = "oms-$target.zip"
@@ -62,8 +62,8 @@
 
     Expand-Archive (Join-Path $tmp $archive) -DestinationPath (Join-Path $tmp 'files') -Force
 
-    # Windows can't replace a program while it runs, so stop the agent this would replace.
-    # A background agent that's set up starts again below.
+    # Windows can't replace a program while it runs, so stop the oms this would replace.
+    # If it runs in the background, it starts again below.
     $running = @(Get-Process oms, omsw -ErrorAction SilentlyContinue | Where-Object {
       $_.Path -and ((Split-Path $_.Path -Parent) -eq $installDir)
     })
@@ -73,7 +73,7 @@
     }
 
     New-Item -ItemType Directory -Force $installDir | Out-Null
-    # omsw.exe runs the agent in the background with no console window.
+    # omsw.exe runs oms in the background with no console window.
     Copy-Item (Join-Path $tmp 'files\oms.exe'), (Join-Path $tmp 'files\omsw.exe') $installDir -Force
   } finally {
     Remove-Item $tmp -Recurse -Force -ErrorAction SilentlyContinue
@@ -81,7 +81,7 @@
 
   $oms = Join-Path $installDir 'oms.exe'
   $installed = & $oms --version
-  if ($LASTEXITCODE -ne 0) { throw "The agent was installed to $oms, but it didn't run." }
+  if ($LASTEXITCODE -ne 0) { throw "oms was installed to $oms, but it didn't run." }
   Write-Host "Installed $installed to $oms"
 
   $userPath = [Environment]::GetEnvironmentVariable('Path', 'User')
@@ -100,15 +100,15 @@
     Write-Host "Note: there's another oms at $($other.Path). Remove it, for example with ``cargo uninstall oh-my-stats``, so you run this one."
   }
 
-  # An agent that already runs in the background moves to the new version.
+  # If oms already runs in the background, it moves to the new version.
   $startup = Get-ItemProperty 'HKCU:\Software\Microsoft\Windows\CurrentVersion\Run' -Name 'oh-my-stats' -ErrorAction SilentlyContinue
   Write-Host ''
   if ($startup) {
     & $oms service install | Out-Null
     if ($LASTEXITCODE -eq 0) {
-      Write-Host 'The background agent restarted on the new version.'
+      Write-Host 'The background service restarted on the new version.'
     } else {
-      Write-Host "Couldn't restart the background agent. Run: oms service install"
+      Write-Host "Couldn't restart the background service. Run: oms service install"
     }
   } elseif (-not $env:OMS_UPDATING) {
     Write-Host 'Next, sign this machine in and keep it tracking:'

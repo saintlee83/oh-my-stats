@@ -169,7 +169,7 @@ fn update_restarts_a_background_agent_that_is_set_up() {
     fs::write(&service, "").unwrap();
     let update = setup.run(&["update"]);
     assert!(update.status.success(), "{}", text(&update.stderr));
-    assert!(text(&update.stdout).contains("The background agent restarted on the new version."), "{}", text(&update.stdout));
+    assert!(text(&update.stdout).contains("The background service restarted on the new version."), "{}", text(&update.stdout));
 }
 
 #[test]

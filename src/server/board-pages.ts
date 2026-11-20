@@ -45,11 +45,11 @@ function joining(viewer: UserRow | null): string {
 <p>Your profile is public, so it counts on these boards wherever it has usage. Machines upload once a day. Run <code>oms sync</code> to update your numbers now.</p></section>`;
   }
   const how = viewer
-    ? 'Your profile is private, so it is not counted here. To publish it, use <a href="/me">your dashboard</a>, or run this on a computer where the agent is signed in:'
-    : 'The boards count published profiles only. To publish yours, run this on a computer where the agent is signed in:';
+    ? 'Your profile is private, so it is not counted here. To publish it, use <a href="/me">your dashboard</a>, or run this on a computer where <code>oms</code> is signed in:'
+    : 'The boards count published profiles only. To publish yours, run this on a computer where <code>oms</code> is signed in:';
   const start = viewer
     ? ''
-    : `<p>New here? Sign in with GitHub, and your dashboard shows how to install the agent.</p>
+    : `<p>New here? Sign in with GitHub, and your dashboard shows how to install <code>oms</code>.</p>
 <div class="actions"><a class="button primary" href="/login">${GITHUB_MARK}Sign in with GitHub</a><a class="button" href="${REPO_URL}#get-started">Read the guide</a></div>`;
   return `<section class="panel"><h2>Appear on the boards</h2>
 <p>${how}</p>
@@ -211,7 +211,7 @@ export function providersPage(period: RankingPeriod, board: ProviderBoard, viewe
     link: (days) => address('/rankings/providers', days),
     body: `<section class="panel">${panelHead('Providers by active profiles', `${board.profiles ? `${compact(board.tokens)} tokens from ` : ''}${profileCount(board.profiles)}`)}
 ${table}</section>
-<p class="muted">${reading}Only the tools the agent reads on its own are listed, because a provider ID is chosen by whoever uploads it.</p>`,
+<p class="muted">${reading}Only the tools <code>oms</code> reads on its own are listed, because a provider ID is chosen by whoever uploads it.</p>`,
   });
 }
 

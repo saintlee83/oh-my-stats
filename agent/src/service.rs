@@ -59,7 +59,7 @@ pub fn launchd_plist(binary: &str, log_file: &str, path: &str) -> String {
 
 pub fn systemd_unit(binary: &str, path: &str) -> String {
     format!(
-        "[Unit]\nDescription=oh-my-stats agent\nAfter=network-online.target\n\n[Service]\nExecStart=\"{binary}\" daemon\nEnvironment=\"PATH={path}\"\nRestart=always\nRestartSec=60\nNice=10\n\n[Install]\nWantedBy=default.target\n"
+        "[Unit]\nDescription=oh-my-stats (oms)\nAfter=network-online.target\n\n[Service]\nExecStart=\"{binary}\" daemon\nEnvironment=\"PATH={path}\"\nRestart=always\nRestartSec=60\nNice=10\n\n[Install]\nWantedBy=default.target\n"
     )
 }
 
@@ -117,9 +117,9 @@ pub fn install() -> Result<()> {
         let plist_text = plist.to_string_lossy().to_string();
         run_quietly("launchctl", &["bootout", &target, &plist_text]);
         if !run_quietly("launchctl", &["bootstrap", &target, &plist_text]) {
-            bail!("launchctl could not start the agent. See {plist_text}");
+            bail!("launchctl could not start oms. See {plist_text}");
         }
-        println!("The agent now runs in the background and starts when you log in.\nLogs: {}", log_file.display());
+        println!("oms now runs in the background and starts when you log in.\nLogs: {}", log_file.display());
     } else if cfg!(target_os = "linux") {
         let unit = unit_path()?;
         fs::create_dir_all(unit.parent().context("no parent")?)?;
@@ -127,13 +127,13 @@ pub fn install() -> Result<()> {
         run_quietly("systemctl", &["--user", "daemon-reload"]);
         // Restart rather than start, so an agent that's already running moves to this binary.
         if !run_quietly("systemctl", &["--user", "enable", SYSTEMD_UNIT]) || !run_quietly("systemctl", &["--user", "restart", SYSTEMD_UNIT]) {
-            bail!("systemctl could not start the agent. See {}", unit.display());
+            bail!("systemctl could not start oms. See {}", unit.display());
         }
-        println!("The agent now runs in the background.\nLogs: journalctl --user -u {SYSTEMD_UNIT}");
+        println!("oms now runs in the background.\nLogs: journalctl --user -u {SYSTEMD_UNIT}");
     } else if cfg!(windows) {
         let launcher = std::env::current_exe()?.with_file_name(LAUNCHER);
         if !launcher.exists() {
-            bail!("{LAUNCHER} should be next to oms.exe, where the installer and `cargo install` put it. Install the agent again.");
+            bail!("{LAUNCHER} should be next to oms.exe, where the installer and `cargo install` put it. Install oms again.");
         }
         let log_file = state_dir()?.join("agent.log");
         let entry = run_entry(&launcher.to_string_lossy(), &log_file.to_string_lossy());
@@ -142,7 +142,7 @@ pub fn install() -> Result<()> {
         }
         stop_launcher();
         start_launcher(&launcher, &log_file).with_context(|| format!("could not start {}", launcher.display()))?;
-        println!("The agent now runs in the background and starts when you log in.\nLogs: {}", log_file.display());
+        println!("oms now runs in the background and starts when you log in.\nLogs: {}", log_file.display());
     } else {
         bail!("Background service isn't supported on this platform yet. Run `oms daemon` yourself.");
     }

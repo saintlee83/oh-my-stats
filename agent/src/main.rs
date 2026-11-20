@@ -86,7 +86,7 @@ enum Commands {
 
 #[derive(Subcommand)]
 enum ServiceAction {
-    /// Run the agent in the background, starting at login
+    /// Run oms in the background, starting at login
     Install,
     /// Stop and remove the background service
     Uninstall,

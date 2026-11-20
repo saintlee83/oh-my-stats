@@ -43,7 +43,7 @@ function profileForm(manual: ManualProfile, github: GitHubProfile | null): strin
   const choice = (value: string, label: string) => `<option value="${esc(value)}"${(manual.status ?? '') === value ? ' selected' : ''}>${esc(label)}</option>`;
   return `<div class="panel" id="profile-header">
   <h2>Profile header</h2>
-  <p>Shown at the top of your dashboard, and as its own <code>profile</code> part. Leave a field empty to use your GitHub profile, which your agent reads once a day.</p>
+  <p>Shown at the top of your dashboard, and as its own <code>profile</code> part. Leave a field empty to use your GitHub profile, which <code>oms</code> reads once a day.</p>
   <form method="post" action="/me/profile">
     <div class="fields">
       ${field('name', 'Name', github?.name, 'Your name')}
@@ -161,7 +161,7 @@ export function dashboardPage(
   const url = `${origin}/u/${encodeURIComponent(user.login)}`;
   const isPublic = user.is_public === 1;
   const githubSetup = github ? '' : GITHUB_SETUP;
-  const setup = `<section class="panel setup-card" id="connect"><div><h2>Connect your first machine</h2><p>Install the agent on your computer to start counting AI usage. It uploads your totals once a day.</p></div>${installCommands(origin)}${githubSetup}</section>`;
+  const setup = `<section class="panel setup-card" id="connect"><div><h2>Connect your first machine</h2><p>Install <code>oms</code> on your computer to start counting AI usage. It uploads your totals once a day.</p></div>${installCommands(origin)}${githubSetup}</section>`;
   const lastSeen = machines[0]?.last_seen_at;
   const syncLabel = lastSeen ? new Date(lastSeen).toLocaleString('en-US', {
     month: 'short', day: 'numeric', hour: 'numeric', minute: '2-digit', timeZone: user.timezone, timeZoneName: 'short',

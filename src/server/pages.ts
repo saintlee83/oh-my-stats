@@ -174,7 +174,7 @@ export const GITHUB_SETUP = `<details class="github-setup">
 <p><code>oms login</code> is enough to sync AI usage. To include commits and other repository activity, set up the <a href="https://cli.github.com/">GitHub CLI</a> on one machine.</p>
 <ol>
   <li>Run <code>gh auth status</code> to check the active GitHub account. If you need to sign in, run <code>gh auth login</code> with the account you use for OMS.</li>
-  <li>Run <code>oms sync --github</code> to update your contribution stats now. The agent uses the repository token on this machine to read from GitHub.</li>
+  <li>Run <code>oms sync --github</code> to update your contribution stats now. <code>oms</code> uses the repository token on this machine to read from GitHub.</li>
   <li>If the sync reports that your GitHub CLI login is missing <code>repo</code> or <code>read:org</code>, run <code>gh auth refresh -s repo,read:org</code>, approve the request, and retry the sync. The <code>repo</code> scope includes read and write access to repositories you can access. OMS uses it to read activity. The <code>read:org</code> scope allows reading organization and team membership.</li>
 </ol>
 </details>`;
@@ -214,7 +214,7 @@ const HERO_ART = (() => {
 
 const FEATURES: [icon: string, title: string, text: string][] = [
   ['<circle cx="12" cy="12" r="8.5"/><path d="M12 7.5V12l3 2"/>', 'Always recording',
-    'A background agent records usage as you work and keeps its own record, so your history survives when AI tools delete their logs.'],
+    '<code>oms</code> records usage in the background as you work, and keeps its own record, so your history survives when AI tools delete their logs.'],
   ['<rect x="2.5" y="5" width="13" height="9.5" rx="1.5"/><path d="M1 18h12"/><rect x="16.5" y="8.5" width="5" height="10.5" rx="1.2"/>', 'Every machine, counted once',
     'Sign in on each computer. Per-machine logs are added together, and an account-wide total is counted a single time.'],
   ['<circle cx="12" cy="12" r="3.5"/><path d="M2.5 12h6M15.5 12h6"/>', 'Private work included',
@@ -234,7 +234,7 @@ const UPLOADED = [
 const KEPT = ['Prompts, responses and code', 'Commit messages and file paths', 'Private repository and organization names', 'The token that reads your repositories'];
 
 const STEPS: [title: string, text: string][] = [
-  ['The agent reads, on your machine',
+  ['Read on your machine',
     'Run <code>oms</code> on each computer. It reads the usage records your AI tools already keep there. One computer with GitHub access also walks your repositories, and that access never leaves it.'],
   ['Only totals are uploaded',
     'Tokens per day and model, and aggregated GitHub numbers. Prompts, code, commit messages and private repository names stay where they are.'],
@@ -245,7 +245,7 @@ const STEPS: [title: string, text: string][] = [
 const QUESTIONS: [question: string, answer: string][] = [
   ['Is anything public by default?',
     'No. Your profile stays hidden until you publish it, and a private profile looks the same as one that doesn’t exist. Publishing shows your totals per model and per day, and lists you in the public rankings. Machine names are never public.'],
-  ['What does the agent read, and what does it send?',
+  ['What does <code>oms</code> read, and what does it send?',
     'It reads the usage records your AI tools keep on that machine, and your GitHub repositories with a token that stays there. It sends totals: tokens per day and model, each tool’s lifetime total, aggregated GitHub numbers, your public GitHub profile, your timezone, and the machine’s name and platform, which only you see. Run <code>oms preview</code> to see exactly what would be uploaded, without sending anything.'],
   ['What can this server do with my GitHub sign-in?',
     'Only tell who you are. The token it receives comes from a GitHub App with no permissions, so it can’t read your repositories. The server uses it once and doesn’t store it.'],
@@ -254,11 +254,11 @@ const QUESTIONS: [question: string, answer: string][] = [
   ['What if I use several machines?',
     'Sign in on each one. Per-machine figures and logs are added together, and an account-wide total, such as Codex’s, is counted once. A machine’s id comes from its hardware, so reinstalling doesn’t register it twice.'],
   ['How often do the numbers update?',
-    'The agent reads new log lines every 5 minutes and uploads once a day, so your numbers can be up to a day behind. Run <code>oms sync</code> to update right away. Public pages are cached for 5 minutes.'],
+    '<code>oms</code> reads new log lines every 5 minutes and uploads once a day, so your numbers can be up to a day behind. Run <code>oms sync</code> to update right away. Public pages are cached for 5 minutes.'],
   ['How do I delete everything?',
     'On your dashboard. Removing a machine deletes its data and signs it out. Deleting your account removes everything on the server, after you confirm with your username. Each machine keeps its local history, so signing in again brings your usage back. <a href="/privacy#deleting">Privacy</a> has the details.'],
   ['Can I run my own server?',
-    `Yes. The server is a single Cloudflare Worker with a D1 database, and has no runtime dependencies. <a href="${REPO_URL}#run-your-own-server">The README</a> has the steps, and how to point your agents at it.`],
+    `Yes. The server is a single Cloudflare Worker with a D1 database, and has no runtime dependencies. <a href="${REPO_URL}#run-your-own-server">The README</a> has the steps, and how to sign your machines in to it.`],
 ];
 
 /** What the landing page shows of the public rankings. */
@@ -277,7 +277,7 @@ function figures(board: LandingBoard): string {
   const ranked = board.participants >= FIGURES_FROM
     ? [[commas(board.participants), 'ranked public profiles'], [compact(board.tokens), 'AI tokens between them, all time']]
     : [];
-  const items = [...ranked, [String(PROVIDERS.size), 'AI tools the agent reads on its own']];
+  const items = [...ranked, [String(PROVIDERS.size), 'AI tools read automatically']];
   return `<ul class="tally wrap">${items.map(([value, label]) => `<li><strong>${value}</strong> <span>${label}</span></li>`).join('')}</ul>`;
 }
 
@@ -304,10 +304,10 @@ export function landingPage(origin: string, viewer: UserRow | null, board: Landi
   return layout(`${SITE} · Your real developer stats, from every machine`, `<section class="hero">${HERO_ART}<div class="wrap">
 <p class="eyebrow">Open source · macOS, Linux and Windows</p>
 <h1>Your real developer stats,<br> from every machine.</h1>
-<p class="lead">Sign in with GitHub, run a small agent on each computer, and see your AI tokens and contributions in one place, with private work included.</p>
+<p class="lead">Sign in with GitHub, run <code>oms</code> on each computer, and see your AI tokens and contributions in one place, with private work included.</p>
 <div class="actions">${start}<a class="button lg" href="/rankings">See the rankings</a></div>
 ${installCommands(origin)}
-<p class="muted">The agent records usage continuously and uploads once a day. Run <code>oms sync</code> to update right away.</p>
+<p class="muted"><code>oms</code> records usage continuously and uploads once a day. Run <code>oms sync</code> to update right away.</p>
 ${GITHUB_SETUP}
 </div></section>
 ${figures(board)}
@@ -321,7 +321,7 @@ ${showcase}
 <div class="grid">${FEATURES.map(([icon, title, text]) => `<div class="feature"><div class="icon"><svg viewBox="0 0 24 24" aria-hidden="true">${icon}</svg></div><h3>${title}</h3><p>${text}</p></div>`).join('')}</div>
 </section>
 <section class="section wrap">
-<div class="section-head"><h2>Reads the tools you already use</h2><p>The agent finds these histories on its own. Any other tool can be added with a JSONL export.</p></div>
+<div class="section-head"><h2>Reads the tools you already use</h2><p><code>oms</code> finds these histories on its own. Any other tool can be added with a JSONL export.</p></div>
 <ul class="chips">${[...PROVIDERS.values()].map(name => `<li>${esc(name)}</li>`).join('')}</ul>
 </section>
 <section class="section wrap">
@@ -333,7 +333,7 @@ ${leaders}
 <div class="section-head"><h2>Questions</h2><p>Short answers. <a href="/how-we-count">How we count</a> and <a href="/privacy">Privacy</a> have the long ones.</p></div>
 <div class="panel faq">${QUESTIONS.map(([question, answer]) => `<details><summary>${question}</summary><p>${answer}</p></details>`).join('')}</div>
 </section>
-<div class="wrap"><section class="cta"><h2>Start counting</h2><p>Install the agent, sign in with GitHub, and run <code>oms sync</code> to see your first numbers.</p>
+<div class="wrap"><section class="cta"><h2>Start counting</h2><p>Install <code>oms</code>, sign in with GitHub, and run <code>oms sync</code> to see your first numbers.</p>
 <div class="actions">${start}<a class="button lg" href="${REPO_URL}#get-started">Read the guide</a></div></section></div>`,
     viewer,
     { bleed: true, origin },

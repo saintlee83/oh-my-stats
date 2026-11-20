@@ -338,7 +338,7 @@ function tokensCard(tokens: TokenMetrics): Card {
     '',
     'HOW THIS IS COUNTED',
     "Claude Code: each signed-in machine's lifetime statistics, added together. They survive",
-    'log cleanup, but a machine without the agent is not counted.',
+    'log cleanup, but a machine without oms is not counted.',
     "Codex: your account's lifetime total, the figure behind /usage, counted once.",
     "Codex's model split comes from local logs, so tokens outside them have no known model.",
     'Without those sources, this falls back to counting local logs, once per model response.',

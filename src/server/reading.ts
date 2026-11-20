@@ -28,11 +28,11 @@ const HOW_WE_COUNT: ReadingPage = {
   lead: 'What each number means, where it comes from, and where it stops being reliable.',
   description: `What the numbers on ${SITE} mean: tokens, cost at list price, contributions and rankings, and where each one stops being reliable.`,
   sections: [
-    ['source', 'Where it comes from', `<p>Every number starts on your own machines. The agent, <code>oms</code>, runs on each computer you sign in. It reads the usage records your AI tools already keep there, and one machine with GitHub access walks your repositories.</p>
-<p>The agent keeps its own record, so your history survives when a tool deletes its logs. Only totals are uploaded. This server adds up what your machines send, and never sees a prompt, a response or a line of code.</p>
-<p>The agent finds ${PROVIDERS.size} tools on its own: ${TOOLS}. Any other tool can be added with a <a href="${REPO_URL}#add-a-provider-with-jsonl">JSONL export</a>.</p>`],
+    ['source', 'Where it comes from', `<p>Every number starts on your own machines. A small program, <code>oms</code>, runs on each computer you sign in. It reads the usage records your AI tools already keep there, and one machine with GitHub access walks your repositories.</p>
+<p><code>oms</code> keeps its own record, so your history survives when a tool deletes its logs. Only totals are uploaded. This server adds up what your machines send, and never sees a prompt, a response or a line of code.</p>
+<p><code>oms</code> finds ${PROVIDERS.size} tools on its own: ${TOOLS}. Any other tool can be added with a <a href="${REPO_URL}#add-a-provider-with-jsonl">JSONL export</a>.</p>`],
     ['tokens', 'Tokens', `<p>A token total is the sum of four kinds: input, output, cache reads and cache writes. Lifetime totals and rankings include all four.</p>
-<p>Tools report these in different ways, and the agent sorts them into the same four. For Gemini CLI, for example, cached input is counted once, tool-prompt tokens count as input and thinking tokens count as output. Where a tool gives one figure of its own, such as Codex’s account total, that figure is used as the tool reports it.</p>
+<p>Tools report these in different ways, and <code>oms</code> sorts them into the same four. For Gemini CLI, for example, cached input is counted once, tool-prompt tokens count as input and thinking tokens count as output. Where a tool gives one figure of its own, such as Codex’s account total, that figure is used as the tool reports it.</p>
 <p>The cache hit rate is cache reads as a share of input, cache reads and cache writes together. Response counts, and tokens per response, come only from local logs, with one count per model response.</p>`],
     ['machines', 'How machines combine', `<p>Adding every number together would be wrong, because the sources have different reach.</p>
 <div class="table"><table><thead><tr><th>Source</th><th>Reach</th><th>Combined by</th></tr></thead><tbody>
@@ -41,7 +41,7 @@ const HOW_WE_COUNT: ReadingPage = {
 <tr><td>Local logs, one count per model response</td><td>One machine</td><td>Adding across machines</td></tr>
 </tbody></table></div>
 <p>Usage logged after a tool’s figure was last updated is added on top. Where a machine’s logs add up to more than the tool’s own figure, the larger number is used.</p>
-<p>A machine’s id comes from its hardware, so reinstalling the agent doesn’t register it twice. An account can have 50 machines.</p>
+<p>A machine’s id comes from its hardware, so reinstalling <code>oms</code> doesn’t register it twice. An account can have 50 machines.</p>
 <p>The split by machine is shown only to its owner. Account-wide tokens with no matching machine record are listed apart, as “No matching device”.</p>`],
     ['dated', 'Dated and undated usage', `<p>Charts, calendars, weekly figures and rankings over a number of days use dated usage: tokens that belong to a day.</p>
 <p>Logged usage is dated in the timezone of the machine that recorded it. Where a tool keeps daily figures of its own, those are used up to the last day they cover and logs fill in after that, because mixing the two would count the same usage twice.</p>
@@ -51,7 +51,7 @@ const HOW_WE_COUNT: ReadingPage = {
 <p>Each kind of token has its own price. Where the list has no cache price for a model, cache reads and writes are priced as input.</p>
 <p>Cost is a minimum, marked ≥, whenever some tokens have no known model or price, because those are left out. Codex’s split by model comes from logs, so usage outside them shows as “Model unknown” and adds nothing to cost.</p>
 <p>The current list is applied to all usage, old and new. A price change moves the cost of past usage too.</p>`],
-    ['contributions', 'Contributions', `<p>GitHub’s contribution API hides the breakdown of private work, even from your own token. So the agent counts commits by walking each repository, on your machine, with a token that stays there.</p>
+    ['contributions', 'Contributions', `<p>GitHub’s contribution API hides the breakdown of private work, even from your own token. So <code>oms</code> counts commits by walking each repository, on your machine, with a token that stays there.</p>
 <p>Private work is included because only numbers are uploaded, such as commits per month and lines per language. Private repository and organization names, commit messages and file paths stay on the machine.</p>
 <p>The headline count is the one on your GitHub graph. Commits, pull requests, reviews and issues are what could be itemized, and can add up to less: the graph also counts activity GitHub does not list per repository, such as work in repositories that were later deleted.</p>
 <p>Only default branches are walked, which matches how GitHub counts contributions. Line counts read the first 300 files of a commit, and a commit over 20,000 lines is treated as a bulk import.</p>`],
@@ -60,16 +60,16 @@ const HOW_WE_COUNT: ReadingPage = {
 <p>All time ranks lifetime totals, undated usage included. A period ranks dated usage: the last 7 or 30 days or this month, through today’s date in UTC, or the whole of last month. Your dashboard’s own windows end today in your timezone, so the two can differ by a day.</p>
 <p>Account-wide usage counts once in a profile’s score. Ranking by one provider counts that tool alone. On My rankings, a device is credited with the usage attributable to it, and only you see that table.</p>
 <p>Sorted by estimated cost, a profile is ranked by what its logged responses in the period would cost at public list prices. Only usage found in logs is priced, so the figure can be lower than the cost on the profile’s own page, and a model without a list price adds no cost.</p>
-<p>The providers board counts, for each tool the agent reads on its own, the published profiles that used it in the period, and their share of all ranked profiles. The models board does the same from logged responses, and lists a model only when it has a public list price. Both compare a period with the stretch right before it, and give a percentage only when that stretch had at least 25 profiles, because a percentage on a small base says little.</p>
+<p>The providers board counts, for each tool <code>oms</code> reads on its own, the published profiles that used it in the period, and their share of all ranked profiles. The models board does the same from logged responses, and lists a model only when it has a public list price. Both compare a period with the stretch right before it, and give a percentage only when that stretch had at least 25 profiles, because a percentage on a small base says little.</p>
 <p>A group’s board ranks its members by the same score as the public rankings.</p>
-<p>Rankings rest on what agents report. The server checks that an upload is well formed and within limits. It cannot check that the usage happened, so read a ranking as what profiles report, not as an audit.</p>`],
-    ['freshness', 'How fresh it is', `<p>The agent reads new log lines every 5 minutes and uploads once a day, so numbers can be up to a day behind. A machine that was asleep or offline catches up when it comes back. Run <code>oms sync</code> to update right away.</p>
+<p>Rankings rest on what each machine reports. The server checks that an upload is well formed and within limits. It cannot check that the usage happened, so read a ranking as what profiles report, not as an audit.</p>`],
+    ['freshness', 'How fresh it is', `<p><code>oms</code> reads new log lines every 5 minutes and uploads once a day, so numbers can be up to a day behind. A machine that was asleep or offline catches up when it comes back. Run <code>oms sync</code> to update right away.</p>
 <p>GitHub numbers are collected by one machine at a time, when it uploads and the last collection is more than six hours old. With the daily upload, that is once a day.</p>
 <p>Public profile pages and images are cached for 5 minutes. So are the home page’s preview of the rankings and the rank on a profile page, which can lag by up to five minutes. Your own dashboard is never cached.</p>`],
     ['limits', 'Known limits', `<ul>
-<li>Claude Code has no account-wide figure for individual plans, so a machine without the agent isn’t counted. Its statistics file isn’t a public format. If a future version changes it, the agent keeps the last known total and uses logs.</li>
+<li>Claude Code has no account-wide figure for individual plans, so a machine without <code>oms</code> isn’t counted. Its statistics file isn’t a public format. If a future version changes it, <code>oms</code> keeps the last known total and uses logs.</li>
 <li>Codex’s account total assumes all your machines use one Codex account.</li>
-<li>Tools read from local logs, such as Gemini CLI, and imported usage cover only the machines running the agent.</li>
+<li>Tools read from local logs, such as Gemini CLI, and imported usage cover only the machines running <code>oms</code>.</li>
 <li>Hermes keeps running counters, so a first scan, or a gap between scans, can place several days of its usage on one day.</li>
 <li>Copilot sessions without per-request token records, and Amp installations without local thread snapshots, can be incomplete.</li>
 <li>Uploads are capped at 20,000 changed rows per account per day. Anything over that goes through the next day.</li>
@@ -97,19 +97,19 @@ const PRIVACY: ReadingPage = {
 <li>The token that reads your repositories</li>
 </ul>
 <p>GitHub stats are aggregated on your machine first, so no commit-level data is sent. Emails are never uploaded.</p>
-<p>The agent keeps its own record of your usage, and its sign-in for this server, in <code>~/.oh-my-stats</code> on each machine. Run <code>oms preview</code> to see exactly what would be uploaded, without sending anything.</p>`],
+<p><code>oms</code> keeps its own record of your usage, and its sign-in for this server, in <code>~/.oh-my-stats</code> on each machine. Run <code>oms preview</code> to see exactly what would be uploaded, without sending anything.</p>`],
     ['stored', 'What this server stores', `<h3>Your account</h3>
 <p>Your GitHub user id, username, name and avatar address, as GitHub gives them when you sign in. Whether your profile is public. Your timezone. What you write in the profile header on your dashboard. When the account was created and last changed, and how many rows it uploaded today, which enforces the daily cap.</p>
 <p>The database has no place for an email address, a password or an IP address.</p>
 <h3>Sign-ins</h3>
 <p>For each website sign-in and each signed-in machine: a hash of its token, when it was created and when it expires. The tokens themselves are not stored.</p>
 <h3>Machines</h3>
-<p>For each machine: an id, its name, its platform, the agent’s version, and when it was first and last seen. The id is a hash made on the machine from its hardware id, which itself never leaves it. The name is the machine’s own name unless you give it another.</p>
+<p>For each machine: an id, its name, its platform, its version of <code>oms</code>, and when it was first and last seen. The id is a hash made on the machine from its hardware id, which itself never leaves it. The name is the machine’s own name unless you give it another.</p>
 <h3>Usage</h3>
 <p>For each machine, day, tool and model: input, output, cache-read and cache-write tokens, and the number of model responses. And each tool’s own lifetime figure as that machine last reported it, with its totals per model and per day where the tool gives them.</p>
 <h3>GitHub aggregates</h3>
 <p>One set of numbers per account, worked out on a machine. Among them: commits, pull requests, reviews and issues by month and year, when in the week you commit, lines per language, lines added and removed, streaks, times to merge and review, and counts of stars, followers and organizations. It holds no repository names. With it comes your public GitHub profile: name, bio, company, location and status.</p>
-<p>It also counts who you co-author commits with. AI assistants are named. Bots are too, except a custom bot in a private repo, because its name can include an organization’s. People are named only if they have a GitHub account and co-authored in a public repo, counting those public commits only, or if you list them in the agent’s settings. Everyone else is an anonymous count.</p>
+<p>It also counts who you co-author commits with. AI assistants are named. Bots are too, except a custom bot in a private repo, because its name can include an organization’s. People are named only if they have a GitHub account and co-authored in a public repo, counting those public commits only, or if you list them in your <code>oms</code> settings. Everyone else is an anonymous count.</p>
 <h3>Groups</h3>
 <p>For each group you start: its name, its description, whether it is public, its invite code and when it was made. For each group you are in: that you are a member, and since when.</p>
 <h3>Not about you</h3>
@@ -127,16 +127,16 @@ const PRIVACY: ReadingPage = {
 <p>Both are kept from scripts (<code>HttpOnly</code>) and travel only over HTTPS. With <code>SameSite=Lax</code>, another site can’t use them in a request of its own. They are sent from elsewhere only when you follow a link here.</p>
 <p>Public pages run no scripts. The signed-in dashboard loads a script from this server. It switches between sections and shows the selected day’s token count using data already on the page. The content policy allows images from GitHub’s avatar server and blocks frames, external fonts and third-party scripts. There is no analytics code, no advertising and no tracking pixel.</p>`],
     ['others', 'Who else is involved', `<h3>GitHub, to sign in</h3>
-<p>On the website you are sent to GitHub to approve the sign-in. On a machine, <code>oms login</code> shows a code that you approve at GitHub. Either way the server only ever receives a token that proves who you are. It comes from a GitHub App with no permissions, so it can’t read your repositories. The server uses it once and doesn’t store it, and the agent refuses to send a GitHub token with more access than that.</p>
+<p>On the website you are sent to GitHub to approve the sign-in. On a machine, <code>oms login</code> shows a code that you approve at GitHub. Either way the server only ever receives a token that proves who you are. It comes from a GitHub App with no permissions, so it can’t read your repositories. The server uses it once and doesn’t store it, and <code>oms</code> refuses to send a GitHub token with more access than that.</p>
 <h3>GitHub, for avatars</h3>
 <p>Pages show avatars straight from GitHub’s avatar server, so your browser asks GitHub for those images. The page tells the browser not to say which page it came from. For the dashboard image, the server fetches the avatar itself, keeps that copy for a day, and draws it in.</p>
-<h3>GitHub, for the agent</h3>
-<p>The install scripts download the agent from this project’s releases on GitHub. The agent reads your repositories through GitHub with your own token, on your machine. When you run <code>oms status</code>, <code>oms sync</code> or <code>oms rankings</code> in a terminal, it checks GitHub for a newer release, up to once a day. Set <code>OMS_NO_UPDATE_CHECK=1</code> to turn that off.</p>
+<h3>GitHub, for <code>oms</code></h3>
+<p>The install scripts download <code>oms</code> from this project’s releases on GitHub. <code>oms</code> reads your repositories through GitHub with your own token, on your machine. When you run <code>oms status</code>, <code>oms sync</code> or <code>oms rankings</code> in a terminal, it checks GitHub for a newer release, up to once a day. Set <code>OMS_NO_UPDATE_CHECK=1</code> to turn that off.</p>
 <h3>The price list</h3>
 <p>About once a day the server fetches a public price list from GitHub. The request carries nothing about you.</p>
 <h3>The host</h3>
 <p>The server is built to run on Cloudflare Workers with a D1 database. Run that way, Cloudflare carries every request and holds the database, and like any host it sees the IP address a request comes from.</p>
-<p>The server’s own code stores no IP address. To slow down floods, it hands the host’s rate limiter that address, or your account’s id when a signed-in agent calls. When a request fails unexpectedly, it logs the page’s path and the error. This project’s deployment settings also turn on the host’s request logs and traces. What those hold, and for how long, is decided by the host and by whoever runs this server, not by this code.</p>
+<p>The server’s own code stores no IP address. To slow down floods, it hands the host’s rate limiter that address, or your account’s id when a signed-in <code>oms</code> calls. When a request fails unexpectedly, it logs the page’s path and the error. This project’s deployment settings also turn on the host’s request logs and traces. What those hold, and for how long, is decided by the host and by whoever runs this server, not by this code.</p>
 <p>The server makes no other outside requests, and sends your data to nobody else.</p>`],
     ['groups', 'What joining a group shows', `<p>Joining a group shows its members your GitHub username and your token total for each period its board covers, even while your profile is private. It shows no models, no day-by-day history and no machine names.</p>
 <p>A private group is shown to its members only. To anyone else it gives the same answer as a group that doesn’t exist. A public group can be opened by anyone and joined by any signed-in account; people outside it see only the members whose profiles are public.</p>
@@ -145,7 +145,7 @@ const PRIVACY: ReadingPage = {
 <p>When you unpublish or delete your account, everything public about you answers “not found” from then on. The server removes your pages, your images and your sitemap entry from the cache at the location that handled the request. Copies at other locations and in browsers can stay visible for up to five minutes.</p>
 <p>Copies that others made are beyond this server’s reach. A search engine’s index, or an image proxy such as the one GitHub uses for READMEs, keeps what it fetched by its own rules.</p>`],
     ['deleting', 'Removing your data', `<h3>A machine</h3>
-<p>On your dashboard, under Machines, choose Remove. Its usage, its lifetime figures and its sign-in are deleted from the database at once, and the agent on it is signed out at its next sync.</p>
+<p>On your dashboard, under Machines, choose Remove. Its usage, its lifetime figures and its sign-in are deleted from the database at once, and <code>oms</code> on it is signed out at its next sync.</p>
 <h3>Your account</h3>
 <p>On your dashboard, under Account, choose “Delete my account and data” and type your GitHub username to confirm. Everything this server holds about the account is deleted at once: usage, lifetime figures, GitHub aggregates, machines, sign-ins, your group memberships, the groups you own and the account itself. This can’t be undone.</p>
 <h3>What remains</h3>
