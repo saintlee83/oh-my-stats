@@ -5,6 +5,7 @@ import { BADGE_METRICS, badgeFor, badgeMetricNamed, DEFAULT_BADGE_METRIC, render
 import { buildCards, cardContent, type Card } from '../shared/render/cards.ts';
 import { previewData, PREVIEW_HEIGHT, PREVIEW_WIDTH, renderPreview } from '../shared/render/preview.ts';
 import { renderSmallCard } from '../shared/render/small-card.ts';
+import { renderRankingCard } from '../shared/render/ranking-card.ts';
 import {
   availableComponents,
   COMPONENT_KEYS,
@@ -59,8 +60,9 @@ import {
 import { modelsPage, myRankingsPage, providersPage, rankingsPage } from './board-pages.ts';
 import { boardSort, costBoard, modelBoard, providerBoard } from './boards.ts';
 import { groupGet, groupPost } from './grouproutes.ts';
-import { dashboardPage, errorPage, landingPage, profilePage, REPO_URL, type LandingBoard } from './pages.ts';
-import { personalRankings, publicRankings, rankBoard, rankingPage, rankingPeriod, rankingProvider } from './rankings.ts';
+import { dashboardPage } from './dashboard.ts';
+import { errorPage, landingPage, profilePage, REPO_URL, type LandingBoard } from './pages.ts';
+import { personalRankings, publicRankings, rankBoard, rankingPage, rankingPeriod, rankingProvider, recentRankingDays } from './rankings.ts';
 import { crawlerFile, publicLogins, READING_PAGES, robotsTxt, sitemapXml } from './reading.ts';
 import { loadPrices } from './prices.ts';
 import { LOGO_SVG } from './logo.ts';
@@ -102,14 +104,15 @@ export const LATEST_RELEASE = `${REPO_URL}/releases/latest/download`;
 const INSTALL_SCRIPTS = new Set(['/install.sh', '/install.ps1']);
 
 const HTML_CSP =
-  "default-src 'none'; img-src 'self' data: https://avatars.githubusercontent.com; style-src 'unsafe-inline'; form-action 'self' https://github.com; base-uri 'none'; frame-ancestors 'none'";
+  "default-src 'none'; img-src 'self' data: https://avatars.githubusercontent.com; form-action 'self' https://github.com; base-uri 'none'; frame-ancestors 'none'";
+const DASHBOARD_CSP = `${HTML_CSP}; style-src 'self' 'unsafe-inline'; script-src 'self'`;
 
 function html(body: string, status = 200, headers: Record<string, string> = {}): Response {
   return new Response(body, {
     status,
     headers: {
       'content-type': 'text/html; charset=utf-8',
-      'content-security-policy': HTML_CSP,
+      'content-security-policy': `${HTML_CSP}; style-src 'unsafe-inline'`,
       'x-content-type-options': 'nosniff',
       'referrer-policy': 'same-origin',
       'cache-control': 'no-store',
@@ -354,7 +357,7 @@ async function purgeProfile(request: Request, deps: Deps, login: string): Promis
   if (!cache) return;
   const origin = new URL(request.url).origin;
   const base = `${origin}/u/${login.toLowerCase()}`;
-  const images = [`${base}/dashboard.svg`, ...COMPONENT_KEYS.map((key) => `${base}/components/${key}.svg`)];
+  const images = [`${base}/dashboard.svg`, `${base}/ranking.svg`, ...COMPONENT_KEYS.map((key) => `${base}/components/${key}.svg`)];
   const urls = [
     base,
     landingBoardKey(origin).url,
@@ -437,6 +440,17 @@ async function serveSmallCard(login: string, theme: Theme, graph: boolean, deps:
   if (!user) return svgNotFound();
   const [{ metrics }, position] = await Promise.all([buildMetrics(user, deps), lifetimePosition(user, deps)]);
   return svg(renderSmallCard(metrics, position, theme, graph), hasData(metrics));
+}
+
+async function serveRankingCard(login: string, theme: Theme, deps: Deps): Promise<Response> {
+  const user = await publicProfile(login, deps);
+  if (!user) return svgNotFound();
+  const now = deps.now();
+  const [board, days] = await Promise.all([
+    rankBoard(deps.db, rankingPeriod('all', now), { kind: 'public' }, { viewerId: user.id }),
+    recentRankingDays(deps.db, user.id, now),
+  ]);
+  return svg(renderRankingCard(user.login, board.position, board.viewerTokens, days, theme), board.position.rank !== null);
 }
 
 async function serveCard(login: string, key: string, deps: Deps): Promise<Response> {
@@ -549,14 +563,17 @@ async function finishLogin(request: Request, deps: Deps): Promise<Response> {
 
 // The signed-in dashboard.
 
-async function serveMe(request: Request, deps: Deps): Promise<Response> {
+async function serveMe(request: Request, deps: Deps, report: boolean): Promise<Response> {
   const viewer = await viewerFromCookie(request, deps);
   if (!viewer) return redirect('/login');
-  const [machines, { metrics, github }] = await Promise.all([listMachines(deps.db, viewer.id), buildMetrics(viewer, deps)]);
   const origin = new URL(request.url).origin;
-  const dashboard = hasData(metrics) ? renderDashboard(await withAvatar(metrics, viewer, origin, deps)) : null;
-  const profile = { manual: manualProfileFromJson(viewer.profile), github };
-  return html(dashboardPage(viewer, machines, dashboard, metrics.tokens, availableComponents(metrics), origin, profile));
+  if (report) {
+    const { metrics } = await buildMetrics(viewer, deps);
+    return svg(renderDashboard(await withAvatar(metrics, viewer, origin, deps)), false);
+  }
+  const [machines, { metrics }] = await Promise.all([listMachines(deps.db, viewer.id), buildMetrics(viewer, deps)]);
+  return html(dashboardPage(viewer, machines, metrics, availableComponents(metrics), origin, manualProfileFromJson(viewer.profile)),
+    200, { 'content-security-policy': DASHBOARD_CSP });
 }
 
 async function handleWebPost(request: Request, path: string, deps: Deps): Promise<Response> {
@@ -576,12 +593,12 @@ async function handleWebPost(request: Request, path: string, deps: Deps): Promis
     const isPublic = form.get('public') === '1';
     await setPublic(deps.db, viewer.id, isPublic, now);
     if (!isPublic) await purgeProfile(request, deps, viewer.login);
-    return redirect('/me');
+    return redirect('/me#settings');
   }
   if (path === '/me/profile') {
     await saveProfile(deps.db, viewer.id, manualProfileJson(manualProfileFromForm(form)), now);
     await purgeProfile(request, deps, viewer.login);
-    return redirect('/me');
+    return redirect('/me#profile-header');
   }
   if (path === '/me/delete') {
     // This can't be undone, so it takes more than a stray click.
@@ -597,7 +614,7 @@ async function handleWebPost(request: Request, path: string, deps: Deps): Promis
     const [, machineId, action] = machineAction;
     if (action === 'delete') await deleteMachine(deps.db, viewer.id, machineId);
     else await renameMachine(deps.db, viewer.id, machineId, cleanMachineName(form.get('name')));
-    return redirect('/me');
+    return redirect('/me#machines');
   }
   if (path === '/groups' || path.startsWith('/groups/')) {
     // Starting and joining are what an account could repeat, to fill the tables or to guess an invite code.
@@ -734,7 +751,7 @@ async function route(request: Request, deps: Deps): Promise<Response> {
   }
   if (path === '/login') return startLogin(request, deps);
   if (path === '/auth/callback') return finishLogin(request, deps);
-  if (path === '/me') return serveMe(request, deps);
+  if (path === '/me' || path === '/me/report.svg') return serveMe(request, deps, path === '/me/report.svg');
 
   // Boards under /rankings.
   if (path === '/rankings' || path === '/rankings/providers' || path === '/rankings/models' || path === '/me/rankings') {
@@ -788,6 +805,7 @@ async function route(request: Request, deps: Deps): Promise<Response> {
     const theme = themeNamed(url.searchParams.get('theme'));
     if (resource === undefined) return serveProfile(login, request, deps);
     if (resource === 'dashboard.svg') return cachedPublic(request, deps, () => serveDashboardSvg(login, theme, url.origin, deps));
+    if (resource === 'ranking.svg') return cachedPublic(request, deps, () => serveRankingCard(login, theme, deps));
     if (resource === PREVIEW_IMAGE) return cachedPublic(request, deps, () => servePreview(login, deps));
     if (resource === 'badge.svg') {
       // A metric that doesn't exist is refused here, before the cache or the profile is read.

@@ -156,15 +156,19 @@ The `year` part shows the current year, in your timezone, once it has usage, and
 
 A year counts the tokens whose day is known, so it leaves out what a tool used before it kept daily figures. Models, responses and the list price come from synced logs, so they can cover less than the year's total. The price is a minimum when it starts with `≥`.
 
-For a README with less room, there is a card 495 pixels wide, and a badge:
+For a README with less room, choose a 495-pixel stats or ranking card, or a badge.
 
 ```markdown
 ![Developer stats](https://ohmystats.dev/u/<login>/card.svg)
+
+![Token ranking](https://ohmystats.dev/u/<login>/ranking.svg)
 
 ![AI tokens](https://ohmystats.dev/u/<login>/badge.svg)
 ```
 
 The card shows your lifetime AI tokens, your place among published profiles, your contributions this year, your current streak and the provider you use most, from whichever of these your profile has. Add `?graph=1` for a calendar of the last 26 weeks of AI tokens.
+
+The ranking card shows your lifetime rank among public profiles and your token totals for all time, the last 30 days and the last 7 days. Its chart shows daily usage through the current UTC date. The most recent seven days are highlighted.
 
 The badge shows one figure. Choose it with `?metric=`:
 
@@ -284,6 +288,8 @@ The owner can rename the group, change who can see it, remove a member, and dele
 An account can own 5 groups and be in 20, and a group holds 200 members. A group's address is its name followed by a few random characters, so starting a group never tells you whether another one already has that name. Group pages are not cached, so a change shows on the next visit.
 
 ## Provider activity
+
+On your personal dashboard (`/me`), **Overview** compares daily tokens and provider shares over the last 7, 30 or 60 days in your profile timezone. Hover or tap the chart to inspect a day, or focus it and use the arrow keys. **Activity** holds the calendar and detailed usage tables. **Machines** shows your devices, and **Settings** controls your profile and its visibility.
 
 The dashboard and published profiles include an AI usage calendar of the last 53 weeks, which can switch to each calendar year with usage, up to the newest four. In the last 53 weeks, select a day to see its exact token total and provider breakdown. **Usage by period** shows tokens, active days, the most used provider and the busiest day for your lifetime, the last 30 and 7 days, this month and last month. Lifetime includes tokens from before a tool's daily records begin. They have no date, so the calendar and the other periods leave them out. **Token mix** splits tokens into input, output, cache reads and cache writes, and covers only tokens with a known breakdown. The provider share table compares the previous calendar month with the current month to date in the profile timezone. The weekly card also appears in `oms status`. A missing comparison period has no percentage change.
 

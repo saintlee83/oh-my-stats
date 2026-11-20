@@ -174,10 +174,10 @@ const datedUsage = `official_days AS (
     LEFT JOIN accounts a ON a.user_id = l.user_id AND a.tool = l.tool
     LEFT JOIN figures f ON f.user_id = l.user_id AND f.tool = l.tool AND f.machine_id = l.device
   ), usage AS (
-    SELECT user_id, tool, device, tokens, CASE WHEN device IS NOT NULL THEN tokens ELSE 0 END AS device_tokens
+    SELECT user_id, tool, device, day, tokens, CASE WHEN device IS NOT NULL THEN tokens ELSE 0 END AS device_tokens
     FROM official_days
     UNION ALL
-    SELECT user_id, tool, device,
+    SELECT user_id, tool, device, day,
       CASE WHEN day <= through_day THEN 0 ELSE tokens END,
       CASE WHEN day <= through_day AND NOT account_wide THEN 0 ELSE tokens END
     FROM covered_logs
@@ -227,7 +227,7 @@ export async function rankBoard(
   period: RankingPeriod,
   members: Membership,
   options: { viewerId?: string | null; provider?: string | null; page?: number } = {},
-): Promise<Board> {
+): Promise<Board & { viewerTokens: number }> {
   const { viewerId = null, provider = null, page = 1 } = options;
   const { sql, bind } = rankingUsage(period, members);
   const byOne = provider === null ? '' : `WHERE by_provider.tool = ${bind.add(provider)}`;
@@ -262,12 +262,23 @@ export async function rankBoard(
     users: profiles.filter(row => row.row_num > (page - 1) * BOARD_PAGE && row.row_num <= page * BOARD_PAGE)
       .map(({ rank, label, name, tokens }) => ({ rank, label, name, tokens })),
     position: { days: period.days, rank: own?.rank ?? null, participants },
+    viewerTokens: own?.tokens ?? 0,
     providers: results.filter(row => row.kind === 'provider').map(({ label, tokens, count }) => ({ tool: label, tokens, profiles: count })),
     tokens: total?.tokens ?? 0,
     page,
     pages: Math.max(1, Math.ceil(participants / BOARD_PAGE)),
     viewerPage: own ? Math.ceil(own.row_num / BOARD_PAGE) : null,
   };
+}
+
+/** One public profile's 30 daily scores, using the same reconciliation as the token board. */
+export async function recentRankingDays(db: Db, userId: string, now: Date) {
+  const dates = lastDays(now.toISOString().slice(0, 10), 30);
+  const { sql, bind } = rankingUsage({ days: 30, start: dates[0], end: dates[29] }, { kind: 'user', id: userId });
+  const { results } = await db.prepare(`${sql} SELECT day, TOTAL(tokens) AS tokens FROM usage GROUP BY day`)
+    .bind(...bind.values).all<{ day: string; tokens: number }>();
+  const totals = new Map(results.map(row => [row.day, row.tokens]));
+  return dates.map(date => ({ date, tokens: totals.get(date) ?? 0 }));
 }
 
 /** The first page of the public board, as the agent's API has always given it. */

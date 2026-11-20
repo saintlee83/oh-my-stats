@@ -192,7 +192,7 @@ function legend(x: number, y: number, items: { label: string; fill: string }[]):
   return out;
 }
 
-function niceMax(value: number): number {
+export function niceMax(value: number): number {
   if (value <= 0) return 1;
   const magnitude = 10 ** Math.floor(Math.log10(value));
   for (const step of [1, 1.5, 2, 2.5, 3, 4, 5, 6, 8, 10]) {

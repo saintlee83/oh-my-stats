@@ -7,7 +7,7 @@ import { renderComponent, reviewYear, THEME_NAMES } from '../src/shared/render/s
 import { computeTokens } from '../src/shared/tokens.ts';
 import type { MachineUsage } from '../src/shared/types.ts';
 import { githubMetrics } from './fixtures.ts';
-import { api, app, countingDb, fakeCache, MACHINE_A, ORIGIN, published, SECRET_NAME, signIn, upload, webLogin, webPost } from './harness.ts';
+import { api, app, countingDb, fakeCache, MACHINE_A, MACHINE_B, ORIGIN, published, SECRET_NAME, signIn, upload, webLogin, webPost } from './harness.ts';
 
 const SHARED = 'public, max-age=300';
 
@@ -162,6 +162,46 @@ test('the rank badge reads only the ranking, and the other badges never rank any
   from = db.sql.length;
   assert.equal((await context.call('/u/octo/badge.svg?metric=streak')).status, 200);
   assert.ok(!db.sql.slice(from).some((sql) => sql.includes('RANK() OVER')), 'ranking every profile is left to the badge that shows it');
+});
+
+test('the ranking SVG shows lifetime public rank and reconciled 7- and 30-day totals ending today in UTC', async () => {
+  const context = app({ cache: fakeCache() });
+  context.setTime('2026-11-09T23:30:00Z'); // Already November 10 in the profile timezone.
+  const token = await signIn(context);
+  const path = '/u/octo/ranking.svg';
+  assert.equal((await context.call(path)).status, 404);
+  assert.equal((await context.call('/u/missing/ranking.svg')).status, 404);
+  await context.call('/v1/me', api(token, 'PATCH', { public: true }));
+  const empty = await context.call(path);
+  assert.equal(empty.headers.get('cache-control'), 'no-store');
+  assert.match(await empty.text(), />Unranked<\/text>/);
+
+  // Both machines carry the same account report. Daily figures cover their logs up to November 3.
+  const totals = { codex: { scope: 'account', total: 2000, asOf: '2026-11-03',
+    daily: { '2026-10-10': 1000, '2026-10-11': 10, '2026-11-02': 20, '2026-11-03': 30 } } };
+  const days = { '2026-11-03': { 'codex/m': [12, 0, 0, 0, 1] }, '2026-11-09': { 'codex/m': [40, 0, 0, 0, 1] },
+    '2026-11-10': { 'codex/m': [50, 0, 0, 0, 1] } };
+  const second = await signIn(context, MACHINE_B);
+  for (const [machine, session, usage] of [[MACHINE_A, token, days], [MACHINE_B, second, {}]] as const) {
+    assert.equal((await context.call('/v1/usage', api(session, 'PUT', { ...upload(machine), days: usage, totals }))).status, 200);
+  }
+  const response = await context.call(path);
+  assert.match(response.headers.get('content-type') ?? '', /image\/svg\+xml/);
+  assert.match(response.headers.get('content-security-policy') ?? '', /default-src 'none'/);
+  assert.equal(response.headers.get('cache-control'), SHARED);
+  const image = await response.text();
+  assert.match(image, /Lifetime public rank #1 among 1 ranked public profile\. 2,090 lifetime tokens, 100 in the last 30 days and 70 in the last 7 days/);
+  assert.match(image, /<title>2026-11-03 · 30 tokens<\/title>/);
+  assert.doesNotMatch(image, /2026-11-10|2026-10-10/);
+  assert.equal(await (await context.call('/u/OCTO/ranking.svg?extra=1')).text(), image);
+  assert.match(await (await context.call(path + '?theme=tokyo-night')).text(), /--surface:#1a1b26/);
+  const publishedPage = await (await context.call('/u/octo')).text();
+  assert.ok(publishedPage.includes(`![Token ranking](${ORIGIN}${path})`));
+  const cookie = await webLogin(context);
+  assert.match(await (await context.call('/me/rankings', { headers: { cookie } })).text(), /href="\/u\/octo\/ranking.svg"/);
+  await context.call('/v1/me', api(token, 'PATCH', { public: false }));
+  assert.equal((await context.call(path)).status, 404);
+  assert.equal((await context.call(path + '?theme=tokyo-night')).status, 404);
 });
 
 test('the small card shows who it is, lifetime tokens, rank, this year on GitHub and the most used provider', async () => {
@@ -444,7 +484,7 @@ test('going private takes few enough cache calls for the smallest plan, and stil
   const { context, token } = await publishedWithGitHub({ cache: counted });
   const everything = async () => {
     const paths = ['/u/octo', '/u/octo/dashboard.svg', '/u/octo/og.png', '/u/octo/badge.svg', '/u/octo/badge.svg?metric=rank', '/u/octo/card.svg?graph=1&theme=tokyo-night',
-      '/u/octo/components/tokens.svg', '/u/octo/components/year.svg', '/sitemap.xml', '/'];
+      '/u/octo/ranking.svg', '/u/octo/ranking.svg?theme=tokyo-night', '/u/octo/components/tokens.svg', '/u/octo/components/year.svg', '/sitemap.xml', '/'];
     for (const path of paths) assert.equal((await context.call(path)).status, 200, path);
     assert.equal((await context.call('/u/octo/cards/tokens.txt')).headers.get('cache-control'), 'no-store', 'a text card is not kept, so it needs no removing');
   };
@@ -467,11 +507,11 @@ test('going private takes few enough cache calls for the smallest plan, and stil
   assert.equal((await context.call('/u/octo/badge.svg?metric=cost')).status, 404, 'and nothing new is drawn for it');
 });
 
-test('the badge, the card and the year in review never show machine names or ids', async () => {
+test('the badges and cards never show machine names or ids', async () => {
   const { context } = await publishedWithGitHub();
   const paths = [
     ...BADGE_METRICS.map((metric) => `/u/octo/badge.svg?metric=${metric}`),
-    '/u/octo/card.svg', '/u/octo/card.svg?graph=1', '/u/octo/components/year.svg', '/u/octo/components/year.svg?year=2026&theme=tokyo-night',
+    '/u/octo/card.svg', '/u/octo/card.svg?graph=1', '/u/octo/ranking.svg', '/u/octo/components/year.svg', '/u/octo/components/year.svg?year=2026&theme=tokyo-night',
   ];
   for (const path of paths) {
     const response = await context.call(path);
