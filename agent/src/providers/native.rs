@@ -265,11 +265,22 @@ impl<'de> Deserialize<'de> for ZedMessage {
                 Ok(ZedMessage(false))
             }
 
-            fn visit_map<A: MapAccess<'de>>(self, mut kinds: A) -> Result<Self::Value, A::Error> {
+            fn visit_map<A: MapAccess<'de>>(self, mut fields: A) -> Result<Self::Value, A::Error> {
                 let mut reply = false;
-                while let Some(kind) = kinds.next_key::<String>()? {
-                    reply |= kind == "Agent";
-                    kinds.next_value::<IgnoredAny>()?;
+                while let Some(field) = fields.next_key::<String>()? {
+                    match field.as_str() {
+                        // A message is stored under the name of its kind.
+                        "Agent" => {
+                            reply = true;
+                            fields.next_value::<IgnoredAny>()?;
+                        }
+                        // A thread saved before version 0.3.0 gives each message a role
+                        // instead, and Zed loads an assistant's message as a reply.
+                        "role" => reply |= fields.next_value::<Value>()? == "assistant",
+                        _ => {
+                            fields.next_value::<IgnoredAny>()?;
+                        }
+                    }
                 }
                 Ok(ZedMessage(reply))
             }

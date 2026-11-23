@@ -754,11 +754,20 @@ fn zed_threads_count_their_growth_once_and_keep_what_a_cut_back_thread_used() {
     // A thread that has not called a model yet, and one that cannot be read.
     save("t3", day, "zstd", packed(&thread(json!({}), 0, "m")));
     save("t4", day, "zstd", b"not a thread".to_vec());
+    // A thread saved before version 0.3.0 gives each message a role. Zed loads an assistant's
+    // message as a reply and leaves out a system message.
+    let message = |role: &str| json!({"id":0,"role":role,"segments":[{"type":"text","text":"PRIVATE"}],
+        "tool_uses":[],"tool_results":[],"context":"","creases":[],"is_hidden":false});
+    let legacy = json!({"version":"0.2.0","summary":"PRIVATE","updated_at":"2025-01-01T18:00:00Z",
+        "messages":[message("system"),message("user"),message("assistant"),message("user"),message("assistant")],
+        "cumulative_token_usage":usage(9, 2, 0, 0),"request_token_usage":[],
+        "detailed_summary_state":"NotGenerated","model":{"provider":"anthropic","model":"l"}});
+    save("t5", day, "zstd", packed(&legacy));
 
     let first = preview(path);
     assert_eq!(
         first,
-        json!({"2025-01-02":{"zed/m":[100,20,300,5,2],"zed/n":[7,1,0,0,1]}})
+        json!({"2025-01-02":{"zed/l":[9,2,0,0,2],"zed/m":[100,20,300,5,2],"zed/n":[7,1,0,0,1]}})
     );
     assert_eq!(preview(path), first);
 
