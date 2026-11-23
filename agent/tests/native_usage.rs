@@ -536,3 +536,253 @@ fn kilo_steps_count_once_across_forks_and_long_turns() {
     );
     assert_eq!(preview(path), first);
 }
+
+#[test]
+fn openclaw_entries_count_once_across_files_databases_and_forks() {
+    let home = Home::new();
+    let path = &home.0;
+    let at = "2025-01-01T18:00:00.000Z";
+    let ms: i64 = 1_735_754_400_000;
+    let usage = |input: u64, output: u64, read: u64, write: u64| json!({"input":input,"output":output,"cacheRead":read,"cacheWrite":write,"totalTokens":input + output + read + write,"cost":{"total":0.01}});
+    let reply = |id: &str, sent: Option<i64>, model: &str, usage: Value| {
+        let mut message = json!({"role":"assistant","content":[{"type":"text","text":"PRIVATE"}],
+            "api":"anthropic-messages","provider":"anthropic","model":model,"usage":usage});
+        if let Some(sent) = sent {
+            message["timestamp"] = json!(sent);
+        }
+        json!({"type":"message","id":id,"parentId":null,"timestamp":at,"message":message})
+    };
+    let lines = |entries: &[Value]| entries.iter().map(|v| format!("{v}\n")).collect::<String>();
+    let header = json!({"type":"session","version":3,"id":"s1","timestamp":at,"cwd":"/PRIVATE"});
+    let prompt = json!({"type":"message","id":"u0000001","timestamp":at,
+        "message":{"role":"user","content":"PRIVATE, with \"usage\" in it","timestamp":ms}});
+    let turn = reply("aaaa1111", Some(ms), "m", usage(8, 3, 4, 5));
+    // OpenClaw writes the record of a delivered reply itself.
+    let mut delivered = reply("dddd0000", Some(ms), "delivery-mirror", usage(7, 7, 7, 7));
+    delivered["message"]["provider"] = json!("openclaw");
+    delivered["message"]["api"] = json!("openclaw-transcript");
+    // A turn run through Codex is mirrored with its last response only.
+    let mut mirrored = reply("cccc0000", Some(ms), "gpt", usage(50, 5, 0, 0));
+    mirrored["message"]["idempotencyKey"] = json!("codex-app-server:thread-1:turn-1:assistant");
+    let sessions = ".openclaw/agents/main/sessions";
+    let live = format!("{sessions}/s1.jsonl");
+    write(
+        path,
+        &live,
+        &[header.clone(), prompt, turn.clone(), delivered, mirrored],
+    );
+    // A fork starts as a copy of the session it left.
+    write(
+        path,
+        &format!("{sessions}/fork.jsonl"),
+        &[header.clone(), turn.clone()],
+    );
+    // A checkpoint, a backup and a trajectory are not sessions of their own.
+    let other = [reply("eeee0000", Some(ms), "m", usage(900, 900, 0, 0))];
+    for name in [
+        "s1.checkpoint.0b0f3a52-6c1e-4d57-9d0a-3c1f2f4a5b6c.jsonl",
+        "s1.trajectory.jsonl",
+        "s1.jsonl.bak.2025-01-01T18-00-00.000Z",
+    ] {
+        write(path, &format!("{sessions}/{name}"), &other);
+    }
+    // A deleted session keeps its file under a longer name. This entry has no time in its
+    // message, so the time of the entry is used.
+    write(
+        path,
+        &format!("{sessions}/gone.jsonl.deleted.2025-01-01T18-00-00.000Z"),
+        &[reply("bbbb2222", None, "m", usage(1, 1, 0, 0))],
+    );
+    // A reset session's file can be compressed.
+    let reset = lines(&[reply("cccc3333", Some(ms), "n", usage(2, 2, 0, 0))]);
+    fs::write(
+        path.join(format!(
+            "{sessions}/old.jsonl.reset.2025-01-01T18-00-00.000Z.zst"
+        )),
+        zstd::stream::encode_all(reset.as_bytes(), 0).unwrap(),
+    )
+    .unwrap();
+    // A named profile has a folder of its own.
+    write(
+        path,
+        ".openclaw-work/agents/helper/sessions/p.jsonl",
+        &[reply("abab7777", Some(ms), "n", usage(5, 5, 0, 0))],
+    );
+    // Codex logs every response of the turns an agent runs through it.
+    write(
+        path,
+        ".openclaw/agents/main/agent/codex-home/sessions/2025/01/02/rollout-2025-01-02T03-00-00-thread-1.jsonl",
+        &[
+            json!({"type":"turn_context","payload":{"model":"gpt"}}),
+            json!({"type":"token_usage_record","timestamp":at,"payload":{"response_id":"r1",
+                "usage":{"input_tokens":10,"cached_input_tokens":4,"output_tokens":1}}}),
+        ],
+    );
+
+    let agent = database(
+        path,
+        ".openclaw/agents/main/agent/openclaw-agent.sqlite",
+        "CREATE TABLE transcript_events (session_id TEXT NOT NULL, seq INTEGER NOT NULL, event_json TEXT,
+           created_at INTEGER NOT NULL, event_zstd BLOB, event_utf8_bytes INTEGER, PRIMARY KEY (session_id, seq)) STRICT;
+         CREATE TABLE session_transcript_archives (session_id TEXT NOT NULL, generation TEXT NOT NULL,
+           encoding TEXT NOT NULL, archive_blob BLOB NOT NULL, archive_sha256 TEXT NOT NULL,
+           created_at INTEGER NOT NULL, PRIMARY KEY (session_id, generation)) STRICT;",
+    );
+    // The database stamps an entry when it takes it in, here a day after it was written.
+    let taken = ms + 86_400_000;
+    let event = |session: &str, seq: i64, entry: &Value| {
+        agent
+            .execute(
+                "INSERT INTO transcript_events (session_id, seq, event_json, created_at) VALUES (?1, ?2, ?3, ?4)",
+                rusqlite::params![session, seq, entry.to_string(), taken],
+            )
+            .unwrap();
+    };
+    // A session brought over from its file is in both places.
+    event("s1", 1, &turn);
+    event("s2", 1, &reply("dddd4444", Some(ms), "m", usage(10, 2, 0, 0)));
+    event(
+        "s2",
+        2,
+        &json!({"type":"message","id":"u0000002","timestamp":at,
+            "message":{"role":"user","content":"PRIVATE \"usage\"","timestamp":ms}}),
+    );
+    // A long entry is stored compressed, and one in cold storage is not stored here at all.
+    let long = reply("eeee5555", None, "m", usage(3, 1, 0, 0)).to_string();
+    agent
+        .execute(
+            "INSERT INTO transcript_events (session_id, seq, created_at, event_zstd, event_utf8_bytes)
+             VALUES ('s2', 3, ?1, ?2, ?3), ('s3', 1, ?1, NULL, NULL)",
+            rusqlite::params![
+                taken,
+                zstd::bulk::compress(long.as_bytes(), 0).unwrap(),
+                long.len() as i64
+            ],
+        )
+        .unwrap();
+    // Deleted and reset sessions are kept whole, and one of them was a fork.
+    let kept = lines(&[
+        header.clone(),
+        reply("ffff6666", Some(ms), "m", usage(4, 1, 0, 0)),
+    ]);
+    agent
+        .execute(
+            "INSERT INTO session_transcript_archives VALUES
+             ('s4', 'g1', 'identity', ?1, 'x', ?3), ('s5', 'g1', 'zstd', ?2, 'x', ?3)",
+            rusqlite::params![
+                kept.as_bytes(),
+                zstd::stream::encode_all(lines(&[header, turn]).as_bytes(), 0).unwrap(),
+                taken
+            ],
+        )
+        .unwrap();
+
+    let first = preview(path);
+    assert_eq!(
+        first,
+        json!({"2025-01-02":{"openclaw/m":[26,8,4,5,5],"openclaw/n":[7,7,0,0,2],"codex/gpt":[6,1,4,0,1]}})
+    );
+    assert_eq!(preview(path), first);
+
+    // OpenClaw keeps the database open, and only the WAL grows. The file grows too.
+    let next = taken;
+    event("s2", 4, &reply("9999aaaa", Some(next), "m", usage(5, 1, 0, 0)));
+    use std::io::Write;
+    write!(
+        fs::OpenOptions::new()
+            .append(true)
+            .open(path.join(&live))
+            .unwrap(),
+        "{}",
+        lines(&[reply("8888bbbb", Some(next), "m", usage(6, 2, 0, 0))])
+    )
+    .unwrap();
+    let updated = preview(path);
+    assert_eq!(updated["2025-01-02"], first["2025-01-02"]);
+    assert_eq!(updated["2025-01-03"], json!({"openclaw/m":[11,3,0,0,2]}));
+    assert_eq!(preview(path), updated);
+}
+
+#[test]
+fn zed_threads_count_their_growth_once_and_keep_what_a_cut_back_thread_used() {
+    let home = Home::new();
+    let path = &home.0;
+    let file = if cfg!(windows) {
+        "AppData/Local/Zed/threads/threads.db"
+    } else if cfg!(target_os = "macos") {
+        "Library/Application Support/Zed/threads/threads.db"
+    } else {
+        ".local/share/zed/threads/threads.db"
+    };
+    let zed = database(
+        path,
+        file,
+        "CREATE TABLE threads (id TEXT PRIMARY KEY, summary TEXT NOT NULL, updated_at TEXT NOT NULL,
+           data_type TEXT NOT NULL, data BLOB NOT NULL);",
+    );
+    let usage = |input: u64, output: u64, read: u64, write: u64| json!({"input_tokens":input,"output_tokens":output,"cache_creation_input_tokens":write,"cache_read_input_tokens":read});
+    let thread = |total: Value, replies: usize, model: &str| {
+        let mut messages = vec![json!({"User":{"id":"u1","content":[{"Text":"PRIVATE"}]}})];
+        messages.extend(std::iter::repeat_n(
+            json!({"Agent":{"content":[{"Text":"PRIVATE"}],"tool_results":{}}}),
+            replies,
+        ));
+        messages.push(json!("Resume"));
+        // Zed also keeps the last request of each turn, which is less than the turn used.
+        json!({"title":"PRIVATE","messages":messages,"updated_at":"2025-01-01T18:00:00Z",
+            "cumulative_token_usage":total,"request_token_usage":{"u1":usage(40, 5, 100, 0)},
+            "model":{"provider":"anthropic","model":model}})
+    };
+    let packed = |thread: &Value| zstd::stream::encode_all(thread.to_string().as_bytes(), 0).unwrap();
+    let save = |id: &str, updated: &str, kind: &str, data: Vec<u8>| {
+        zed.execute(
+            "INSERT OR REPLACE INTO threads VALUES (?1, 'PRIVATE', ?2, ?3, ?4)",
+            rusqlite::params![id, updated, kind, data],
+        )
+        .unwrap();
+    };
+    let day = "2025-01-01T18:00:00+00:00";
+    save(
+        "t1",
+        day,
+        "zstd",
+        packed(&thread(usage(100, 20, 300, 5), 2, "m")),
+    );
+    // An earlier thread is plain JSON, and a count of zero is left out of it.
+    let plain = thread(json!({"input_tokens":7,"output_tokens":1}), 1, "n");
+    save("t2", day, "json", plain.to_string().into_bytes());
+    // A thread that has not called a model yet, and one that cannot be read.
+    save("t3", day, "zstd", packed(&thread(json!({}), 0, "m")));
+    save("t4", day, "zstd", b"not a thread".to_vec());
+
+    let first = preview(path);
+    assert_eq!(
+        first,
+        json!({"2025-01-02":{"zed/m":[100,20,300,5,2],"zed/n":[7,1,0,0,1]}})
+    );
+    assert_eq!(preview(path), first);
+
+    // The next day the thread is cut back to its first reply, and goes on from there.
+    save(
+        "t1",
+        "2025-01-02T18:00:00+00:00",
+        "zstd",
+        packed(&thread(usage(150, 30, 300, 5), 1, "m")),
+    );
+    let cut = preview(path);
+    assert_eq!(cut["2025-01-02"], first["2025-01-02"]);
+    assert_eq!(cut["2025-01-03"], json!({"zed/m":[50,10,0,0,0]}));
+    // Later that day it is switched to another model.
+    save(
+        "t1",
+        "2025-01-02T19:00:00+00:00",
+        "zstd",
+        packed(&thread(usage(160, 31, 300, 5), 3, "o")),
+    );
+    let grown = preview(path);
+    assert_eq!(
+        grown["2025-01-03"],
+        json!({"zed/m":[50,10,0,0,0],"zed/o":[10,1,0,0,1]})
+    );
+    assert_eq!(preview(path), grown);
+}

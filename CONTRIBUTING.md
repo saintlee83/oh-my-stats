@@ -15,7 +15,7 @@ Thank you for helping. This guide covers how the code is laid out, how to run it
 ## What to work on
 
 - **Bugs.** [Open an issue](https://github.com/saintlee83/oh-my-stats/issues) with what you ran, what you expected and what happened. Include `oms --version` and your operating system. When a number is wrong, the output of `oms preview` shows what `oms` counted, and holds only totals. Take out anything you would rather not share.
-- **A tool that isn't read yet.** `oms` reads fifteen AI tools on its own. Adding one is the most common contribution, and [has its own steps below](#add-an-ai-tool).
+- **A tool that isn't read yet.** `oms` reads seventeen AI tools on its own. Adding one is the most common contribution, and [has its own steps below](#add-an-ai-tool).
 - **Something larger**, such as a new page, a new board or a change to what is uploaded. Open an issue first, so the idea can be discussed before you write it.
 
 A small fix can go straight to a pull request.

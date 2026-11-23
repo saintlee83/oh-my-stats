@@ -28,6 +28,9 @@ pub enum Reader {
     RooCode,
     KiloCode,
     Kilo,
+    OpenClaw,
+    OpenClawDb,
+    Zed,
     Export,
 }
 
@@ -45,10 +48,12 @@ impl Reader {
             Self::KiloCode | Self::Kilo => "kilo-code",
             Self::Kimi => "kimi-cli",
             Self::OhMyPi => "oh-my-pi",
+            Self::OpenClaw | Self::OpenClawDb => "openclaw",
             Self::OpenCode | Self::OpenCodeJson => "opencode",
             Self::Pi => "pi",
             Self::Qwen => "qwen-code",
             Self::RooCode => "roo-code",
+            Self::Zed => "zed",
             Self::Export => return None,
         })
     }
@@ -59,6 +64,16 @@ impl Reader {
         };
         match self {
             Self::Claude | Self::Pi | Self::Export => name.ends_with(".jsonl"),
+            // OpenClaw counts a session's own file, and the file a deleted or reset session
+            // is kept in, which can be compressed. A checkpoint is a copy, and a trajectory
+            // is not a transcript.
+            Self::OpenClaw => {
+                let name = name.strip_suffix(".zst").unwrap_or(name);
+                let session = name.ends_with(".jsonl")
+                    && !name.ends_with(".trajectory.jsonl")
+                    && !name.contains(".checkpoint.");
+                session || name.contains(".jsonl.reset.") || name.contains(".jsonl.deleted.")
+            }
             // Its cleanup leaves copies of sessions in scratch folders while it compresses them.
             Self::OhMyPi => {
                 name.ends_with(".jsonl")
@@ -91,6 +106,8 @@ impl Reader {
             Self::Hermes => name == "state.db",
             Self::Goose => name == "sessions.db",
             Self::Kilo => name == "kilo.db",
+            Self::OpenClawDb => name == "openclaw-agent.sqlite",
+            Self::Zed => name == "threads.db",
             Self::RooCode | Self::KiloCode => name == "ui_messages.json",
             Self::Codex => name.ends_with(".jsonl") || name.ends_with(".jsonl.zst"),
             Self::Gemini => {
@@ -110,7 +127,12 @@ impl Reader {
     pub fn database(self) -> bool {
         matches!(
             self,
-            Self::OpenCode | Self::Hermes | Self::Goose | Self::Kilo
+            Self::OpenCode
+                | Self::Hermes
+                | Self::Goose
+                | Self::Kilo
+                | Self::OpenClawDb
+                | Self::Zed
         )
     }
 
