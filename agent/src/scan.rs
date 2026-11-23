@@ -37,6 +37,14 @@ pub fn default_roots(skip_native_logs: &[String]) -> Result<LogRoots> {
         None => data.join("goose"),
     };
     let pi = setting("PI_CODING_AGENT_DIR", home.join(".pi/agent")).join("sessions");
+    // Zed keeps its threads with its other data, which each system puts somewhere else.
+    let zed = if cfg!(windows) {
+        setting("LOCALAPPDATA", home.join("AppData/Local")).join("Zed")
+    } else if cfg!(target_os = "macos") {
+        home.join("Library/Application Support/Zed")
+    } else {
+        data.join("zed")
+    };
     let mut roots: LogRoots = claude.into_iter().map(|path| (Reader::Claude, path)).collect();
     roots.extend([
         (Reader::Codex, codex_base.join("sessions")),
@@ -53,6 +61,7 @@ pub fn default_roots(skip_native_logs: &[String]) -> Result<LogRoots> {
         (Reader::Hermes, hermes.join("state.db")),
         (Reader::Goose, goose.join("sessions/sessions.db")),
         (Reader::Kilo, data.join("kilo/kilo.db")),
+        (Reader::Zed, zed.join("threads/threads.db")),
         (Reader::Export, state_dir()?.join("imports")),
     ]);
     if let Ok(profiles) = fs::read_dir(hermes.join("profiles")) {
@@ -69,6 +78,18 @@ pub fn default_roots(skip_native_logs: &[String]) -> Result<LogRoots> {
         }
     }
     roots.extend(oh_my_pi.into_iter().filter(|sessions| *sessions != pi).map(|sessions| (Reader::OhMyPi, sessions)));
+    // OpenClaw keeps a folder per agent, under ~/.openclaw, under ~/.openclaw-<profile> for
+    // a named profile, and under ~/.clawdbot from before it was renamed.
+    let mut openclaw = vec![setting("OPENCLAW_STATE_DIR", home.join(".openclaw")), home.join(".clawdbot")];
+    openclaw.extend(fs::read_dir(&home).into_iter().flatten().flatten().filter(|entry| entry.file_name().to_string_lossy().starts_with(".openclaw-")).map(|entry| entry.path()));
+    for state in openclaw {
+        for agent in fs::read_dir(state.join("agents")).into_iter().flatten().flatten().map(|agent| agent.path()) {
+            roots.push((Reader::OpenClaw, agent.join("sessions")));
+            roots.push((Reader::OpenClawDb, agent.join("agent/openclaw-agent.sqlite")));
+            // Codex keeps its own log of the turns an agent runs through it, in a folder the agent owns.
+            roots.extend(["sessions", "archived_sessions"].map(|logs| (Reader::Codex, agent.join("agent/codex-home").join(logs))));
+        }
+    }
     for storage in editor_storage_dirs(&home, roaming, setting("XDG_CONFIG_HOME", home.join(".config"))) {
         roots.push((Reader::RooCode, storage.join("rooveterinaryinc.roo-cline/tasks")));
         roots.push((Reader::KiloCode, storage.join("kilocode.kilo-code/tasks")));
@@ -149,7 +170,10 @@ pub fn discover(roots: &LogRoots) -> Vec<LogFile> {
                 // SQLite can commit usage to the WAL without touching the main file.
                 let stamp = |m: &fs::Metadata| m.modified().ok().and_then(|t| t.duration_since(UNIX_EPOCH).ok()).map_or(0, |t| t.as_nanos() as i64);
                 let mut identity = file_identity(&meta);
-                if let Ok(wal) = fs::metadata(path.with_extension("db-wal")) {
+                // The WAL has the database's whole name, which does not always end in `.db`.
+                let mut wal = path.clone().into_os_string();
+                wal.push("-wal");
+                if let Ok(wal) = fs::metadata(wal) {
                     identity.push_str(&format!(":{}:{}:{}", file_identity(&wal), wal.len(), stamp(&wal)));
                 }
                 out.push(LogFile { path: path.clone(), reader: *reader, identity, size: meta.len() as i64, mtime: stamp(&meta) });
@@ -283,11 +307,11 @@ fn read_file(store: &mut Store, file: &LogFile, path_hash: &str, tz: Tz, saved: 
         Reader::Claude => events.extend(parse_claude_line(line)),
         Reader::Codex => parse_codex_line(line, &mut cursor.codex, &mut chunk),
         Reader::Gemini => providers::read_gemini_line(line, &mut events),
-        Reader::Pi | Reader::Qwen | Reader::Kimi | Reader::Copilot =>
+        Reader::Pi | Reader::Qwen | Reader::Kimi | Reader::Copilot | Reader::OpenClaw =>
             events.extend(providers::native::line(file.reader, line, &file.path, start as u64 + position)),
         Reader::OhMyPi if providers::native::import_marker(line) => events.clear(),
         Reader::OhMyPi => events.extend(providers::native::line(file.reader, line, &file.path, start as u64 + position)),
-        Reader::Cline | Reader::Amp | Reader::OpenCode | Reader::OpenCodeJson | Reader::Hermes | Reader::Goose | Reader::RooCode | Reader::KiloCode | Reader::Kilo => unreachable!("snapshot reader"),
+        Reader::Cline | Reader::Amp | Reader::OpenCode | Reader::OpenCodeJson | Reader::Hermes | Reader::Goose | Reader::RooCode | Reader::KiloCode | Reader::Kilo | Reader::OpenClawDb | Reader::Zed => unreachable!("snapshot reader"),
         Reader::Export => match providers::export_line(line) {
             Some(event) => events.push(event),
             None => invalid_exports += 1,

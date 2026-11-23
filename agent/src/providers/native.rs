@@ -1,14 +1,14 @@
 //! Persisted CLI formats. Terminal streams and session summaries can describe the
 //! same calls as these records, so each reader uses one source of usage.
 use std::fmt;
-use std::io::Read;
+use std::io::{BufRead, BufReader, Read};
 use std::path::Path;
 
 use anyhow::{Context, Result};
 use chrono::DateTime;
 use rusqlite::{Connection, OpenFlags};
 use serde::Deserialize;
-use serde::de::{Deserializer, SeqAccess, Visitor};
+use serde::de::{Deserializer, IgnoredAny, MapAccess, SeqAccess, Visitor};
 use serde_json::Value;
 
 use super::{MAX_TOKENS, Reader, model_name};
@@ -89,6 +89,9 @@ const CAMEL: [&str; 4] = [
 ];
 
 pub fn line(reader: Reader, line: &str, path: &Path, offset: u64) -> Option<UsageEvent> {
+    if reader == Reader::OpenClaw {
+        return openclaw(line, None);
+    }
     let row: Value = serde_json::from_str(line).ok()?;
     match (reader, row["type"].as_str()?) {
         (Reader::Pi | Reader::OhMyPi, "message") if row["message"]["role"] == "assistant" => {
@@ -178,6 +181,143 @@ pub fn line(reader: Reader, line: &str, path: &Path, offset: u64) -> Option<Usag
             .event(reader, key, at, &row["model"])
         }
         _ => None,
+    }
+}
+
+/// One entry of an OpenClaw transcript. A session's file, its agent's database and the copy
+/// a fork makes can all hold the same entry, so it is known by its own ID, time and counts,
+/// wherever it is found. `stored` is when a database took the entry in.
+fn openclaw(entry: &str, stored: Option<i64>) -> Option<UsageEvent> {
+    // Most entries are prompts and tool results, which can be long.
+    if !entry.contains("\"usage\"") {
+        return None;
+    }
+    let row: Value = serde_json::from_str(entry).ok()?;
+    let msg = &row["message"];
+    if row["type"] != "message" || msg["role"] != "assistant" {
+        return None;
+    }
+    // OpenClaw writes some assistant entries itself, such as the record of a delivered
+    // reply. A turn it ran through Codex is mirrored with the counts of its last response
+    // only, and Codex keeps every response in the agent's Codex folder, read as Codex.
+    let mirrored = |key: &str| key.starts_with("codex-app-server:");
+    if msg["provider"] == "openclaw" || msg["idempotencyKey"].as_str().is_some_and(mirrored) {
+        return None;
+    }
+    let tokens = Tokens::parse(
+        &msg["usage"],
+        ["input", "output", "cacheRead", "cacheWrite"],
+    )?;
+    let sent = msg["timestamp"].as_i64();
+    // A database stamps an entry when it takes it in, which for an imported session is later
+    // than when the entry was written.
+    let at = timestamp(&msg["timestamp"])
+        .or_else(|| timestamp(&row["timestamp"]))
+        .or_else(|| timestamp(&Value::from(stored?)))?;
+    let key = format!(
+        "{}:{}:{}:{}",
+        id(&row["id"])?,
+        sent.map(|ms| ms.to_string()).unwrap_or_default(),
+        tokens.input,
+        tokens.output
+    );
+    tokens.event(Reader::OpenClaw, key, at, &msg["model"])
+}
+
+/// A whole transcript, as OpenClaw keeps a deleted or reset session in its database.
+fn openclaw_transcript(input: impl Read, stored: Option<i64>, events: &mut Vec<UsageEvent>) {
+    for entry in BufReader::new(input).lines().map_while(|line| line.ok()) {
+        events.extend(openclaw(&entry, stored));
+    }
+}
+
+/// OpenClaw compresses no event past this size, and no transcript is read past it.
+const OPENCLAW_EVENT_BYTES: usize = 4 << 20;
+const OPENCLAW_TRANSCRIPT_BYTES: u64 = 1 << 30;
+
+/// What a Zed thread keeps of its usage. The conversation itself is skipped.
+#[derive(Deserialize)]
+struct ZedThread {
+    #[serde(default)]
+    cumulative_token_usage: Value,
+    #[serde(default)]
+    model: Value,
+    #[serde(default)]
+    messages: Vec<ZedMessage>,
+}
+
+/// Whether a message of a Zed thread is one of the agent's replies.
+struct ZedMessage(bool);
+
+impl<'de> Deserialize<'de> for ZedMessage {
+    fn deserialize<D: Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
+        struct Kind;
+
+        impl<'de> Visitor<'de> for Kind {
+            type Value = ZedMessage;
+
+            fn expecting(&self, f: &mut fmt::Formatter) -> fmt::Result {
+                f.write_str("a thread message")
+            }
+
+            // A message with nothing in it, such as `Resume`, is stored as its name alone.
+            fn visit_str<E>(self, _: &str) -> Result<Self::Value, E> {
+                Ok(ZedMessage(false))
+            }
+
+            fn visit_map<A: MapAccess<'de>>(self, mut fields: A) -> Result<Self::Value, A::Error> {
+                let mut reply = false;
+                while let Some(field) = fields.next_key::<String>()? {
+                    match field.as_str() {
+                        // A message is stored under the name of its kind.
+                        "Agent" => {
+                            reply = true;
+                            fields.next_value::<IgnoredAny>()?;
+                        }
+                        // A thread saved before version 0.3.0 gives each message a role
+                        // instead, and Zed loads an assistant's message as a reply.
+                        "role" => reply |= fields.next_value::<Value>()? == "assistant",
+                        _ => {
+                            fields.next_value::<IgnoredAny>()?;
+                        }
+                    }
+                }
+                Ok(ZedMessage(reply))
+            }
+        }
+
+        deserializer.deserialize_any(Kind)
+    }
+}
+
+const ZED_THREAD_BYTES: u64 = 256 << 20;
+
+impl ZedThread {
+    fn read(kind: &str, data: &[u8]) -> Option<Self> {
+        match kind {
+            "zstd" => {
+                let thread = zstd::stream::read::Decoder::new(data).ok()?;
+                serde_json::from_reader(thread.take(ZED_THREAD_BYTES)).ok()
+            }
+            "json" => serde_json::from_slice(data).ok(),
+            _ => None,
+        }
+    }
+
+    /// Zed adds up every request of a thread here. It also keeps the last request of each
+    /// turn, which leaves out the earlier requests of a turn that called tools.
+    fn event(self, thread: String, updated: String) -> Option<UsageEvent> {
+        let usage = &self.cumulative_token_usage;
+        let tokens = Tokens {
+            input: optional_count(usage, "input_tokens")?,
+            output: optional_count(usage, "output_tokens")?,
+            read: optional_count(usage, "cache_read_input_tokens")?,
+            write: optional_count(usage, "cache_creation_input_tokens")?,
+        };
+        let mut event = tokens.event(Reader::Zed, thread, updated, &self.model["model"])?;
+        let replies = self.messages.iter().filter(|message| message.0).count();
+        event.cumulative_responses = Some(replies.max(1) as i64);
+        Some(event)
     }
 }
 
@@ -391,6 +531,14 @@ fn has_table(db: &Connection, name: &str) -> rusqlite::Result<bool> {
     )
 }
 
+fn has_column(db: &Connection, table: &str, column: &str) -> rusqlite::Result<bool> {
+    db.query_row(
+        "SELECT EXISTS(SELECT 1 FROM pragma_table_info(?1) WHERE name=?2)",
+        [table, column],
+        |r| r.get(0),
+    )
+}
+
 pub fn database(reader: Reader, path: &Path) -> Result<Vec<UsageEvent>> {
     let mut db = Connection::open_with_flags(path, OpenFlags::SQLITE_OPEN_READ_ONLY)?;
     let tx = db.transaction()?;
@@ -468,6 +616,68 @@ pub fn database(reader: Reader, path: &Path) -> Result<Vec<UsageEvent>> {
                     write,
                 };
                 events.extend(tokens.event(reader, key, at.to_rfc3339(), &model.into()));
+            }
+        }
+    } else if reader == Reader::OpenClawDb {
+        if has_table(&tx, "transcript_events")? {
+            // A long event is stored compressed, in columns an earlier database lacks. An
+            // event of a session moved to cold storage has neither form here.
+            let packed = if has_column(&tx, "transcript_events", "event_zstd")? {
+                "event_zstd, event_utf8_bytes"
+            } else {
+                "NULL, NULL"
+            };
+            let mut stmt = tx.prepare(&format!(
+                "SELECT event_json, created_at, {packed} FROM transcript_events
+                WHERE event_json IS NULL OR instr(event_json, '\"usage\"') > 0"
+            ))?;
+            let mut rows = stmt.query([])?;
+            while let Some(row) = rows.next()? {
+                let stored = row.get::<_, Option<i64>>(1).ok().flatten();
+                let entry = match row.get::<_, Option<String>>(0)? {
+                    Some(entry) => Some(entry),
+                    None => {
+                        let packed: Option<Vec<u8>> = row.get(2)?;
+                        let size = row.get::<_, Option<i64>>(3)?.unwrap_or(0) as usize;
+                        packed
+                            .filter(|_| (1..=OPENCLAW_EVENT_BYTES).contains(&size))
+                            .and_then(|bytes| zstd::bulk::decompress(&bytes, size).ok())
+                            .and_then(|bytes| String::from_utf8(bytes).ok())
+                    }
+                };
+                events.extend(entry.and_then(|entry| openclaw(&entry, stored)));
+            }
+        }
+        if has_table(&tx, "session_transcript_archives")? {
+            let mut stmt = tx.prepare(
+                "SELECT encoding, archive_blob, created_at FROM session_transcript_archives",
+            )?;
+            let mut rows = stmt.query([])?;
+            while let Some(row) = rows.next()? {
+                let encoding: String = row.get(0)?;
+                let transcript: Vec<u8> = row.get(1)?;
+                let stored = row.get::<_, Option<i64>>(2).ok().flatten();
+                if encoding == "identity" {
+                    openclaw_transcript(&transcript[..], stored, &mut events);
+                } else if encoding == "zstd"
+                    && let Ok(plain) = zstd::stream::read::Decoder::new(&transcript[..])
+                {
+                    let plain = plain.take(OPENCLAW_TRANSCRIPT_BYTES);
+                    openclaw_transcript(plain, stored, &mut events);
+                }
+            }
+        }
+    } else if reader == Reader::Zed {
+        if has_table(&tx, "threads")? {
+            let mut stmt = tx.prepare("SELECT id, updated_at, data_type, data FROM threads")?;
+            let mut rows = stmt.query([])?;
+            while let Some(row) = rows.next()? {
+                let kind: String = row.get(2)?;
+                let data: Vec<u8> = row.get(3)?;
+                // One thread that cannot be read is left out, and the rest still count.
+                if let Some(thread) = ZedThread::read(&kind, &data) {
+                    events.extend(thread.event(row.get(0)?, row.get(1)?));
+                }
             }
         }
     } else if reader == Reader::Kilo {

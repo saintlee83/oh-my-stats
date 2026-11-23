@@ -70,7 +70,7 @@ const HOW_WE_COUNT: ReadingPage = {
 <li>Claude Code has no account-wide figure for individual plans, so a machine without <code>oms</code> isn’t counted. Its statistics file isn’t a public format. If a future version changes it, <code>oms</code> keeps the last known total and uses logs.</li>
 <li>Codex’s account total assumes all your machines use one Codex account.</li>
 <li>Tools read from local logs, such as Gemini CLI, and imported usage cover only the machines running <code>oms</code>.</li>
-<li>Hermes keeps running counters, so a first scan, or a gap between scans, can place several days of its usage on one day.</li>
+<li>Hermes and Zed keep running counters, so a first scan, or a gap between scans, can place several days of their usage on one day.</li>
 <li>Copilot sessions without per-request token records, and Amp installations without local thread snapshots, can be incomplete.</li>
 <li>Uploads are capped at 20,000 changed rows per account per day. Anything over that goes through the next day.</li>
 </ul>

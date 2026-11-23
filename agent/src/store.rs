@@ -110,26 +110,30 @@ impl Store {
                 // Keys come from response ids; hashing keeps the table small and opaque.
                 let key = &sha256_hex(&event.key)[..24];
                 if let Some(responses) = event.cumulative_responses {
-                    // Hermes stores cumulative session/model counters. Add only the
-                    // growth since the last scan, on the latest recorded call's day.
-                    let current = [event.input, event.output, event.cache_read, event.cache_write, responses];
+                    // Hermes and Zed store counters that add up a whole session. Add only
+                    // the growth since the last scan, on the latest recorded call's day.
+                    let mut current = [event.input, event.output, event.cache_read, event.cache_write, responses];
                     let previous: [i64; 5] = tx.query_row(
                         "SELECT input, output, cache_read, cache_write, responses FROM usage_counters WHERE key=?1",
                         [key], |r| Ok([r.get(0)?, r.get(1)?, r.get(2)?, r.get(3)?, r.get(4)?])
                     ).optional()?.unwrap_or_default();
+                    // A conversation that was cut back has fewer responses than before, and
+                    // the tokens it used still stand. Only tokens that fell are a new counter.
+                    current[4] = current[4].max(previous[4]);
                     if current == previous || current.iter().zip(previous).any(|(now, old)| *now < old) {
                         continue;
                     }
                     let delta: [i64; 5] = std::array::from_fn(|i| current[i] - previous[i]);
                     tx.execute("INSERT OR REPLACE INTO usage_counters VALUES (?1,?2,?3,?4,?5,?6)",
                         params![key, current[0], current[1], current[2], current[3], current[4]])?;
+                    // A day has a row per model, because a Zed thread can change its model.
                     changed += tx.execute(
                         "INSERT INTO events (key,file,tool,model,day,input,output,cache_read,cache_write,responses)
                          VALUES (?1,?2,?3,?4,?5,?6,?7,?8,?9,?10)
                          ON CONFLICT(key) DO UPDATE SET input=input+excluded.input, output=output+excluded.output,
                          cache_read=cache_read+excluded.cache_read, cache_write=cache_write+excluded.cache_write,
                          responses=responses+excluded.responses",
-                        params![format!("{key}:{day}"), path_hash, event.tool, event.model, day,
+                        params![format!("{key}:{day}:{}", event.model), path_hash, event.tool, event.model, day,
                             delta[0], delta[1], delta[2], delta[3], delta[4]])?;
                     continue;
                 }
