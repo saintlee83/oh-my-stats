@@ -41,10 +41,15 @@ agent/                    `oms`, in Rust
   src/updates.rs          `oms update` and the notice of a newer release
   tests/                  Tests that run the built program against files on disk
 
-src/worker.ts             The Worker's entry point
-src/server/               Routes, pages, queries and sign-in
-  app.ts                  Every route, the cache, and the security headers
-  pages.ts, style.ts      The page layout and the one stylesheet
+proxy.ts                  The front door: each page's checks and nonce, and every POST to the server
+app/                      The routes vinext serves: one page.tsx per page, the rest to the server
+src/web/                  The website's pages, in React
+  routes.ts               Which address is which page, and what is checked before one is drawn
+  layout.tsx, common.tsx  The frame every page shares, and the pieces several pages use
+  pages/                  Each page: what it loads, and how it is drawn
+src/server/               The API, images, sign-in, forms and queries
+  app.ts                  Every route that isn't a page, the cache, and the security headers
+  pages.ts, style.ts      The error pages the server draws itself, and the one stylesheet
   provider-icons.ts       The mark of each AI tool, drawn beside its name
   rankings.ts, boards.ts  The queries behind the boards, and board-pages.ts draws them
   groups.ts, grouppages.ts, grouproutes.ts
@@ -130,9 +135,9 @@ These are what the project promises its users. A change that breaks one is a bug
 
 **On the server**
 
-- **No runtime dependencies.** The Worker is plain TypeScript. Pages and images are built as strings. `package.json` has development tools only.
-- **Pages run no scripts.** The content security policy is `default-src 'none'` with inline styles, the site's own images and GitHub avatars. Menus, tabs and dialogs are made with CSS and HTML alone. Pages load no fonts and nothing from another site.
-- **Everything shown is escaped.** Names, descriptions and model names come from users and from uploads. Put them in a page through `esc` in `src/server/pages.ts`, and in an image through `esc` in `src/shared/render/svg.ts`.
+- **The pages are React, served by vinext; everything else is plain TypeScript.** The runtime dependencies are React and vinext. Images, the API and the server's own error pages are built as strings.
+- **Pages run only React's scripts.** The content security policy is `default-src 'none'`, with inline styles, the site's own images and GitHub avatars, and scripts that carry the nonce `proxy.ts` gives each response. Menus, tabs and dialogs still work with CSS and HTML alone, so a page reads the same before its scripts run. Pages load no fonts and nothing from another site.
+- **Everything shown is escaped.** Names, descriptions and model names come from users and from uploads. React escapes what a page shows; `dangerouslySetInnerHTML` is only for constants in the code, such as a tool's mark. In an image, put them through `esc` in `src/shared/render/svg.ts`, and in a page the server draws, through `esc` in `src/server/pages.ts`.
 - **Everything `oms` sends is checked** in `src/server/wire.ts`, with a limit on its size. Model and provider names end up on public pages.
 - **A private profile answers exactly like a missing one**, on every address. So does a private group, to everyone but its members. Machine names are never public.
 - **Going private takes effect at once.** Public pages are cached for 5 minutes, and `purgeProfile` in `app.ts` removes a profile's cached copies when it is unpublished. A new cached address under `/u/<login>` has to be added to that list. One request may make 50 calls to the cache and the database together on Cloudflare's free plan, so a test keeps the list at 40 or fewer. When there is no room, serve the new address uncached.
@@ -156,12 +161,12 @@ Say in the pull request whether you ran the tool and compared the numbers, or wo
 
 ### Add a page
 
-1. Write a function that returns the page's body as a string, and wrap it in `layout` from `src/server/pages.ts`. Pass `origin` only for a page search engines should list. Without it, the page is marked `noindex`.
-2. Route it in `route` in `src/server/app.ts`. A form posts to `handleWebPost`.
+1. Write it in `src/web/pages/` as a `PageModule`: `load` reads what the page shows, or sends the visitor elsewhere, or finds nothing; `View` draws it inside `Layout` from `src/web/layout.tsx`. Pass `origin` only for a page search engines should list. Without it, the page is marked `noindex`. Name every tool the page marks in `icons`.
+2. Give it an address: a pattern in `ROUTES` in `src/web/routes.ts`, with any rate limit and any check of its query in `gate`, and a `page.tsx` under `app/` that calls `serve`. A form posts to `handleWebPost` in `src/server/app.ts`.
 3. Add its styles to `src/server/style.ts`, with the colors already defined there, which have light and dark values.
-4. Decide whether it is cached. A page that shows a profile's data and is cached has to be removed when that profile goes private. See the rule above.
+4. Decide whether what it loads is kept. Anything kept that shows a profile's data has to be removed when that profile goes private. See the rule above.
 5. Add a page that search engines should find to `INDEXED_PATHS` in `src/server/reading.ts`, which is what the sitemap lists.
-6. Test it through `app()` in `test/harness.ts`, which gives you a server over a new database and a stand-in for GitHub.
+6. List it in `PAGES` in `test/site.tsx`, and test it through `app()` in `test/harness.ts`, which gives you the website over a new database and a stand-in for GitHub. The tests draw each page the way vinext does, without a browser.
 
 ### Add or change a README image
 
@@ -200,7 +205,7 @@ Maintainers release `oms`. The website is deployed separately.
 
 The release workflow builds six targets, installs each build with the install script, and publishes the release with its checksums and build provenance. The install scripts and `oms update` then find it as the latest release. A tag with a suffix, such as `v0.4.0-rc.1`, becomes a prerelease. The install scripts skip it unless `OMS_VERSION` names it, and `oms update` never installs one.
 
-To deploy the website, apply any new migrations first, then deploy: `npx wrangler d1 migrations apply DB --remote`, then `npx wrangler deploy`.
+To deploy the website, apply any new migrations first, then build and deploy: `npx wrangler d1 migrations apply DB --remote`, then `pnpm run deploy`.
 
 ## Security problems
 
