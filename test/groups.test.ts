@@ -165,8 +165,10 @@ test('a private group answers exactly like a missing one to everyone but its mem
   for (const who of [null, 'mallory'] as const) {
     for (const query of ['', '?days=7', '?days=never', '?invite=', '?invite=wrong', `?invite=${inviteOf(path).slice(1)}`]) {
       const [hidden, absent] = [await told(await get(path + query, who)), await told(await get(missing + query, who))];
-      assert.equal(hidden.status, 404, `${who} ${query}`);
-      assert.match(hidden.body, HIDDEN);
+      // A period that doesn't exist is refused before any group is looked for, so it says nothing about one either.
+      const badPeriod = query === '?days=never';
+      assert.equal(hidden.status, badPeriod ? 400 : 404, `${who} ${query}`);
+      assert.match(hidden.body, badPeriod ? /<p class="code">400<\/p><h1>Choose all time, 7 days, 30 days, this month or last month\.<\/h1>/ : HIDDEN);
       assert.deepEqual(hidden, absent, `${who ?? 'signed out'} can't tell ${query || 'the page'} from a missing group's`);
       assert.doesNotMatch(hidden.body, /Secret project|Nobody may know|@octo|@beta|og:image/);
     }
@@ -270,12 +272,12 @@ test('an invite link shows a signed-in visitor the name and a join button, and s
   assert.match(html, /<h1>Friday pairing<\/h1>\s*<p>Every Friday\.<\/p>/);
   assert.match(html, /<span class="badge">Private<\/span><span>1 member · You have an invite link\.<\/span>/);
   assert.ok(html.includes(`<p>${JOIN_NOTE}</p>`), 'the join form says what joining shows');
-  assert.ok(html.includes(`<form method="post" action="${path}/join"><input type="hidden" name="invite" value="${code}"><button class="primary">Join group</button></form>`));
+  assert.ok(html.includes(`<form action="${path}/join" method="post"><input type="hidden" name="invite" value="${code}"/><button class="primary">Join group</button></form>`));
   assert.doesNotMatch(html, /@octo|4,321|4\.3k|<table|og:image/, 'who is in it and what they used stay inside');
 
   const signedOut = await get(`${path}?invite=${code}`);
   const back = `/login?next=${encodeURIComponent(`${path}?invite=${code}`)}`;
-  assert.deepEqual([signedOut.status, signedOut.headers.get('location'), signedOut.headers.get('cache-control')], [303, back, 'no-store']);
+  assert.deepEqual([signedOut.status, signedOut.headers.get('location'), signedOut.headers.get('cache-control')], [307, back, 'no-store']);
   assert.equal(await signedOut.text(), '', 'signed out, not even the name is shown');
   for (const who of [null, 'mallory'] as const) {
     assert.deepEqual(await told(await get(`${path}?invite=${code}x`, who)), await told(await get(`${missing}?invite=${code}x`, who)), 'a wrong code opens nothing');
@@ -417,7 +419,7 @@ test('every way into a group says what joining shows', async () => {
   const visitor = await page(open, 'mallory');
   assert.ok(visitor.includes(`<p>${JOIN_NOTE}</p>`));
   assert.match(visitor, /This group is public: any signed-in account can join it\. People outside the group see you on its board only while your profile is public\./);
-  assert.ok(visitor.includes(`<form method="post" action="${open}/join"><button class="primary">Join group</button></form>`));
+  assert.ok(visitor.includes(`<form action="${open}/join" method="post"><button class="primary">Join group</button></form>`));
 
   const signedOut = await page(open);
   assert.ok(signedOut.includes(`<p>Sign in to join. ${JOIN_NOTE}</p>`));
@@ -561,7 +563,7 @@ test('a member can leave at once, and the owner only when nobody else remains', 
   const path = await start('octo', 'Friday pairing', 'private');
   for (const who of ['alpha', 'beta'] as const) await join(path, who);
 
-  assert.match(await page(path, 'beta'), new RegExp(`action="${path}/leave"><span class="muted">Your totals stop showing here at once\\. To come back, you need an invite link\\.</span>`));
+  assert.match(await page(path, 'beta'), new RegExp(`action="${path}/leave" method="post"><span class="muted">Your totals stop showing here at once\\. To come back, you need an invite link\\.</span>`));
   const left = await post(`${path}/leave`, 'beta');
   assert.deepEqual([left.status, left.headers.get('location')], [303, '/groups']);
   assert.equal(count('group_members'), 2);
@@ -675,7 +677,7 @@ test('group pages are never kept by a cache, load only what the policy allows, a
   const refusal = await post(`${closed}/leave`, 'octo');
   assert.equal(refusal.headers.get('cache-control'), 'no-store');
   assert.doesNotMatch(await refusal.text(), /og:image/);
-  assert.match(await (await get(open)).text(), /<meta property="og:image" content="https:\/\/stats\.example\/og\.png">/);
+  assert.match(await (await get(open)).text(), /<meta property="og:image" content="https:\/\/stats\.example\/og\.png"\/>/);
   assert.equal((await get(open, null)).headers.get('referrer-policy'), 'same-origin', 'an invite link is not passed on to other sites');
 });
 
@@ -702,7 +704,7 @@ test('the groups page lists public groups, largest first, and shows a signed-in 
   assert.match(mine, /3 of 20 · Only you can see this list\./);
   assert.deepEqual([...mine.matchAll(/<a href="[^"]+">([^<]+)<\/a>((?:<span class="badge[^"]*">[^<]+<\/span>)*)/g)].map(([, name, badges]) => [name, badges.replace(/<[^>]+>/g, ' ').replace(/\s+/g, ' ').trim()]),
     [['Also small', 'Public Owner'], ['Closed', 'Private'], ['Large', 'Public']]);
-  assert.match(own, /<details class="group-start"><summary class="button">Start a group<\/summary>\s*<form method="post" action="\/groups">/);
+  assert.match(own, /<details class="group-start"><summary class="button">Start a group<\/summary>\s*<form action="\/groups" method="post">/);
   assert.doesNotMatch(await page('/groups', 'mallory'), /Closed|Not listed/);
   assert.match(await page('/groups', 'mallory'), /You are not in a group yet\./);
 
