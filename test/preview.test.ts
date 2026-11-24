@@ -268,12 +268,12 @@ test('making a profile private, or deleting the account, removes its preview fro
 test('the profile page names its preview as the image to show, at 1200 by 630, and that address serves it', async () => {
   const { context } = await published();
   const page = await (await context.call('/u/octo')).text();
-  const meta = (property: string) => new RegExp(`<meta property="${property}" content="([^"]*)">`).exec(page)?.[1];
+  const meta = (property: string) => new RegExp(`<meta property="${property}" content="([^"]*)"\\/?>`).exec(page)?.[1];
   assert.equal(meta('og:image'), 'https://stats.example/u/octo/og.png', 'by its full address, which sites that draw previews need');
   assert.deepEqual([meta('og:image:width'), meta('og:image:height')], [String(PREVIEW_WIDTH), String(PREVIEW_HEIGHT)]);
   assert.deepEqual([PREVIEW_WIDTH, PREVIEW_HEIGHT], [1200, 630]);
   assert.match(meta('og:image:alt') ?? '', /@octo/);
-  assert.match(page, /<meta name="twitter:card" content="summary_large_image">/);
+  assert.match(page, /<meta name="twitter:card" content="summary_large_image"\/?>/);
   assert.equal(page.match(/og:image"/g)?.length, 1, 'one image, not the site banner as well');
   const png = decode((await preview(context, new URL(meta('og:image') as string).pathname)).file);
   assert.deepEqual([png.width, png.height], [Number(meta('og:image:width')), Number(meta('og:image:height'))]);
