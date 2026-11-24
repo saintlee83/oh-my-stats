@@ -1,6 +1,6 @@
 import { PROVIDERS } from '../shared/format.ts';
-import type { Db, UserRow } from './db.ts';
-import { esc, layout, REPO_URL, SITE } from './pages.ts';
+import type { Db } from './db.ts';
+import { esc, REPO_URL, SITE } from './pages.ts';
 
 /**
  * The pages that explain the service in words, and the two files search engines ask for.
@@ -141,7 +141,7 @@ const PRIVACY: ReadingPage = {
     ['groups', 'What joining a group shows', `<p>Joining a group shows its members your GitHub username and your token total for each period its board covers, even while your profile is private. It shows no models, no day-by-day history and no machine names.</p>
 <p>A private group is shown to its members only. To anyone else it gives the same answer as a group that doesn’t exist. A public group can be opened by anyone and joined by any signed-in account; people outside it see only the members whose profiles are public.</p>
 <p>A group’s name and description are written by its owner and, for a public group, shown to everyone. When you leave a group, your totals stop showing there at once.</p>`],
-    ['caching', 'Caching and unpublishing', `<p>Public pages and images are cached for 5 minutes, by the host and by browsers.</p>
+    ['caching', 'Caching and unpublishing', `<p>What public profile pages show is cached for 5 minutes by the host, and images for 5 minutes by the host and by browsers.</p>
 <p>When you unpublish or delete your account, everything public about you answers “not found” from then on. The server removes your pages, your images and your sitemap entry from the cache at the location that handled the request. Copies at other locations and in browsers can stay visible for up to five minutes.</p>
 <p>Copies that others made are beyond this server’s reach. A search engine’s index, or an image proxy such as the one GitHub uses for READMEs, keeps what it fetched by its own rules.</p>`],
     ['deleting', 'Removing your data', `<h3>A machine</h3>
@@ -179,26 +179,13 @@ const TERMS: ReadingPage = {
   ],
 };
 
-type Render = (origin: string, viewer: UserRow | null) => string;
-
-/** Each section has its heading beside it, so a long page can be scanned down one edge. */
-const readingPage = (page: ReadingPage): Render => (origin, viewer) => {
-  const updated = page.updated ? `<p class="muted">Last updated <time datetime="${page.updated}">${page.updated}</time></p>` : '';
-  const jumps = page.sections.map(([id, title]) => `<a href="#${id}">${title}</a>`).join('');
-  const sections = page.sections.map(([id, title, body]) => `<section id="${id}"><h2>${title}</h2><div>${body}</div></section>`).join('\n');
-  return layout(`${page.title} · ${SITE}`, `<div class="page-head"><div><h1>${page.title}</h1><p>${page.lead}</p>${updated}</div></div>
-<nav class="filters jump" aria-label="On this page">${jumps}</nav>
-<article class="reading">${sections}</article>`, viewer, { origin, description: page.description });
-};
-
-/** Every reading page by its address. */
-export const READING_PAGES: ReadonlyMap<string, Render> = new Map([
-  ['/how-we-count', readingPage(HOW_WE_COUNT)],
-  ['/privacy', readingPage(PRIVACY)],
-  ['/terms', readingPage(TERMS)],
+/** The words of each reading page by its address, for the pages drawn with React. */
+export const READING: ReadonlyMap<string, ReadingPage> = new Map([
+  ['/how-we-count', HOW_WE_COUNT],
+  ['/privacy', PRIVACY],
+  ['/terms', TERMS],
 ]);
 
-/** A file for crawlers. The lifetime is the caller's, so the edge cache keeps it like any public page. */
 export const crawlerFile = (body: string, type: 'text/plain' | 'application/xml', cacheControl: string) =>
   new Response(body, { headers: { 'content-type': `${type}; charset=utf-8`, 'cache-control': cacheControl, 'x-content-type-options': 'nosniff' } });
 
@@ -212,7 +199,7 @@ Disallow: /auth/
 Sitemap: ${origin}/sitemap.xml
 `;
 
-const INDEXED_PATHS = ['/', '/rankings', '/rankings/providers', '/rankings/models', '/groups', ...READING_PAGES.keys()];
+const INDEXED_PATHS = ['/', '/rankings', '/rankings/providers', '/rankings/models', '/groups', ...READING.keys()];
 /** One sitemap file may list 50,000 addresses. This keeps the file, and the query behind it, small. */
 const SITEMAP_PROFILES = 5000;
 /** What a profile's address accepts. An account whose login passed to someone else has no address until it signs in again. */
@@ -235,10 +222,3 @@ ${addresses.map((address) => `<url><loc>${esc(address)}</loc></url>`).join('\n')
 </urlset>
 `;
 }
-
-/** The words of each reading page by its address, for the pages drawn with React. */
-export const READING: ReadonlyMap<string, ReadingPage> = new Map([
-  ['/how-we-count', HOW_WE_COUNT],
-  ['/privacy', PRIVACY],
-  ['/terms', TERMS],
-]);

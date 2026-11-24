@@ -3,7 +3,7 @@ import { weeklyUsage } from '../shared/insights.ts';
 import { manualProfileFromForm, manualProfileFromJson, manualProfileJson, profileOf } from '../shared/profile.ts';
 import { BADGE_METRICS, badgeFor, badgeMetricNamed, DEFAULT_BADGE_METRIC, renderBadge, type BadgeMetric } from '../shared/render/badge.ts';
 import { buildCards, cardContent, type Card } from '../shared/render/cards.ts';
-import { previewData, PREVIEW_HEIGHT, PREVIEW_WIDTH, renderPreview } from '../shared/render/preview.ts';
+import { previewData, renderPreview } from '../shared/render/preview.ts';
 import { renderSmallCard } from '../shared/render/small-card.ts';
 import { renderRankingCard } from '../shared/render/ranking-card.ts';
 import {
@@ -13,7 +13,6 @@ import {
   isComponentKey,
   renderComponent,
   renderDashboard,
-  reviewYear,
   THEME_NAMES,
   themeNamed,
   type Theme,
@@ -57,13 +56,10 @@ import {
   type SessionRow,
   type UserRow,
 } from './db.ts';
-import { modelsPage, myRankingsPage, providersPage, rankingsPage } from './board-pages.ts';
-import { boardSort, costBoard, modelBoard, providerBoard } from './boards.ts';
-import { groupGet, groupPost } from './grouproutes.ts';
-import { dashboardPage } from './dashboard.ts';
-import { errorPage, landingPage, profilePage, REPO_URL, type LandingBoard } from './pages.ts';
-import { personalRankings, publicRankings, rankBoard, rankingPage, rankingPeriod, rankingProvider, recentRankingDays } from './rankings.ts';
-import { crawlerFile, publicLogins, READING_PAGES, robotsTxt, sitemapXml } from './reading.ts';
+import { groupPost } from './grouproutes.ts';
+import { errorPage, REPO_URL, type LandingBoard } from './pages.ts';
+import { personalRankings, publicRankings, rankBoard, rankingPeriod, recentRankingDays } from './rankings.ts';
+import { crawlerFile, publicLogins, robotsTxt, sitemapXml } from './reading.ts';
 import { loadPrices } from './prices.ts';
 import { LOGO_SVG } from './logo.ts';
 import { BadRequest, cleanMachineName, parseGitHubMetrics, parseMachine, parseUsageUpload } from './wire.ts';
@@ -105,7 +101,6 @@ const INSTALL_SCRIPTS = new Set(['/install.sh', '/install.ps1']);
 
 export const HTML_CSP =
   "default-src 'none'; img-src 'self' data: https://avatars.githubusercontent.com; form-action 'self' https://github.com; base-uri 'none'; frame-ancestors 'none'";
-const DASHBOARD_CSP = `${HTML_CSP}; style-src 'self' 'unsafe-inline'; script-src 'self'`;
 
 function html(body: string, status = 200, headers: Record<string, string> = {}): Response {
   return new Response(body, {
@@ -487,32 +482,7 @@ async function servePreview(login: string, deps: Deps): Promise<Response> {
   });
 }
 
-async function renderProfile(login: string, request: Request, deps: Deps, viewer: UserRow | null): Promise<Response> {
-  const user = await publicProfile(login, deps);
-  if (!user) return html(errorPage(404, 'This profile is private or does not exist.', viewer), 404);
-  const [{ metrics }, { position }] = await Promise.all([buildMetrics(user, deps), publicRankings(deps.db, rankingPeriod('all', deps.now()), user.id)]);
-  const origin = new URL(request.url).origin;
-  // The page names whoever is signed in, so only signed-out visits share a cached copy.
-  const shared = !viewer && hasData(metrics);
-  const image = {
-    url: `${origin}/u/${encodeURIComponent(user.login)}/${PREVIEW_IMAGE}`,
-    width: PREVIEW_WIDTH,
-    height: PREVIEW_HEIGHT,
-    alt: `The stats of @${user.login}: AI tokens, rank, contributions and a calendar of AI usage over the last year.`,
-  };
-  const page = profilePage(user, renderDashboard(await withAvatar(metrics, user, origin, deps)), metrics.tokens, buildCards(metrics), availableComponents(metrics), origin, viewer, position, image);
-  return html(page, 200, shared ? { 'cache-control': PUBLIC_CACHE } : {});
-}
 
-async function serveProfile(login: string, request: Request, deps: Deps): Promise<Response> {
-  // A cookie alone proves nothing, so it can't be used to skip the cache or the limit.
-  if (readCookie(request, SESSION_COOKIE)) {
-    if (deps.allow && !(await deps.allow('public', `session:${clientIp(request)}`))) return tooMany();
-    const viewer = await viewerFromCookie(request, deps);
-    if (viewer) return renderProfile(login, request, deps, viewer);
-  }
-  return cachedPublic(request, deps, () => renderProfile(login, request, deps, null));
-}
 
 // Website sign-in.
 
@@ -571,17 +541,12 @@ async function finishLogin(request: Request, deps: Deps): Promise<Response> {
 
 // The signed-in dashboard.
 
-async function serveMe(request: Request, deps: Deps, report: boolean): Promise<Response> {
+/** The private dashboard as one image, for its owner only. The page itself is drawn under app/. */
+async function serveReport(request: Request, deps: Deps): Promise<Response> {
   const viewer = await viewerFromCookie(request, deps);
   if (!viewer) return redirect('/login');
-  const origin = new URL(request.url).origin;
-  if (report) {
-    const { metrics } = await buildMetrics(viewer, deps);
-    return svg(renderDashboard(await withAvatar(metrics, viewer, origin, deps)), false);
-  }
-  const [machines, { metrics }] = await Promise.all([listMachines(deps.db, viewer.id), buildMetrics(viewer, deps)]);
-  return html(dashboardPage(viewer, machines, metrics, availableComponents(metrics), origin, manualProfileFromJson(viewer.profile)),
-    200, { 'content-security-policy': DASHBOARD_CSP });
+  const { metrics } = await buildMetrics(viewer, deps);
+  return svg(renderDashboard(await withAvatar(metrics, viewer, new URL(request.url).origin, deps)), false);
 }
 
 async function handleWebPost(request: Request, path: string, deps: Deps): Promise<Response> {
@@ -754,53 +719,11 @@ async function route(request: Request, deps: Deps): Promise<Response> {
   if (path === '/favicon.ico') return new Response(null, { status: 301, headers: { location: '/favicon.svg', 'cache-control': 'public, max-age=86400' } });
   // `curl -fsSL https://ohmystats.dev/install.sh | sh` and `irm .../install.ps1 | iex` both follow this.
   if (INSTALL_SCRIPTS.has(path)) return new Response(null, { status: 302, headers: { location: `${LATEST_RELEASE}${path}`, 'cache-control': PUBLIC_CACHE } });
-  if (path === '/') {
-    const [viewer, board] = await Promise.all([viewerFromCookie(request, deps), landingBoard(url.origin, deps)]);
-    return html(landingPage(url.origin, viewer, board));
-  }
   if (path === '/login') return startLogin(request, deps);
   if (path === '/auth/callback') return finishLogin(request, deps);
-  if (path === '/me' || path === '/me/report.svg') return serveMe(request, deps, path === '/me/report.svg');
+  if (path === '/me/report.svg') return serveReport(request, deps);
 
-  // Boards under /rankings.
-  if (path === '/rankings' || path === '/rankings/providers' || path === '/rankings/models' || path === '/me/rankings') {
-    if (deps.allow && !(await deps.allow('public', `rankings:${clientIp(request)}`))) return tooMany();
-    const viewer = await viewerFromCookie(request, deps);
-    const now = deps.now();
-    const period = rankingPeriod(url.searchParams.get('days'), now, true);
-    if (path === '/me/rankings') {
-      if (!viewer) return redirect('/login');
-      // The viewer's place all time and this week, and in the period chosen when it is another.
-      const ranges = [rankingPeriod('all', now), rankingPeriod('7', now), ...(period.days === 'all' || period.days === 7 ? [] : [period])];
-      const [personal, ...boards] = await Promise.all([
-        personalRankings(deps.db, viewer.id, period),
-        ...ranges.map(range => publicRankings(deps.db, range, viewer.id)),
-      ] as const);
-      return html(myRankingsPage(period, personal, viewer, boards.map(b => b.position)));
-    }
-    if (path === '/rankings/providers') return html(providersPage(period, await providerBoard(deps.db, period), viewer, url.origin));
-    const prices = () => loadPrices(deps.db, deps.fetch, deps.waitUntil, now);
-    if (path === '/rankings/models') return html(modelsPage(period, await modelBoard(deps.db, await prices(), period), viewer, url.origin));
-    const view = { viewerId: viewer?.id, provider: rankingProvider(url.searchParams.get('provider')), page: rankingPage(url.searchParams.get('page')) };
-    // Only the board by cost reads the logs and the prices. By tokens, a visit costs what it always has.
-    const board = boardSort(url.searchParams.get('sort')) === 'cost'
-      ? await costBoard(deps.db, await prices(), period, view)
-      : await rankBoard(deps.db, period, { kind: 'public' }, view);
-    return html(rankingsPage(period, board, viewer, view.provider, url.origin));
-  }
-
-  // Groups.
-  const group = /^\/groups(?:\/([a-z0-9-]{1,64}))?$/.exec(path);
-  if (group) {
-    // Counted before the group is looked for, so being turned away says nothing about it.
-    if (deps.allow && !(await deps.allow('public', `groups:${clientIp(request)}`))) return tooMany();
-    const answer = await groupGet(deps.db, await viewerFromCookie(request, deps), group[1] ?? null, url, deps.now());
-    return 'location' in answer ? redirect(answer.location) : html(answer.page, answer.status);
-  }
-
-  // Reading pages, and what search engines ask for.
-  const reading = READING_PAGES.get(path);
-  if (reading) return html(reading(url.origin, await viewerFromCookie(request, deps)));
+  // What search engines ask for.
   if (path === '/robots.txt') return crawlerFile(robotsTxt(url.origin), 'text/plain', PUBLIC_CACHE);
   // The sitemap names every public profile, so it is kept, and purged, like a profile's own pages.
   if (path === '/sitemap.xml') {
@@ -808,11 +731,11 @@ async function route(request: Request, deps: Deps): Promise<Response> {
   }
 
   // A profile, and what is published under it. Anything else under a profile is not found.
-  const profile = /^\/u\/([A-Za-z0-9-]{1,39})(?:\/([a-z0-9./-]+))?$/.exec(path);
+  // The profile page itself is drawn under app/.
+  const profile = /^\/u\/([A-Za-z0-9-]{1,39})\/([a-z0-9./-]+)$/.exec(path);
   if (profile) {
     const [, login, resource] = profile;
     const theme = themeNamed(url.searchParams.get('theme'));
-    if (resource === undefined) return serveProfile(login, request, deps);
     if (resource === 'dashboard.svg') return cachedPublic(request, deps, () => serveDashboardSvg(login, theme, url.origin, deps));
     if (resource === 'ranking.svg') return cachedPublic(request, deps, () => serveRankingCard(login, theme, deps));
     if (resource === PREVIEW_IMAGE) return cachedPublic(request, deps, () => servePreview(login, deps));

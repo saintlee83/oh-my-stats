@@ -1,6 +1,7 @@
 import type { ReactNode } from 'react';
 import type { Deps } from '../server/app.ts';
 import type { UserRow } from '../server/db.ts';
+import type { Back } from './error.tsx';
 
 /** What a page is given to load from: its address, the request, who is signed in, and the server's parts. */
 export interface PageInput {
@@ -25,4 +26,6 @@ export interface PageModule<Props> {
   View(props: Props): ReactNode;
   /** What a missing page says. Its route's not-found.tsx shows the same words. */
   notFound?: string;
+  /** Where a missing page leads back to, when not the home page. */
+  notFoundBack?: Back;
 }

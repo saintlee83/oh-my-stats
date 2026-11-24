@@ -4,7 +4,7 @@ import { DESCRIPTION, REPO_URL, SITE, type PageOptions } from '../server/pages.t
 import { OTHER_PROVIDER_ICON, PROVIDER_ICONS } from '../server/provider-icons.ts';
 import { Avatar, iconId } from './common.tsx';
 
-interface LayoutProps extends Omit<PageOptions, 'dashboard'> {
+interface LayoutProps extends PageOptions {
   title: string;
   viewer: UserRow | null;
   /** Every tool the page marks, so each drawing is on the page once however many rows show it. */

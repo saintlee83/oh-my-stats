@@ -64,6 +64,6 @@ export async function site(request: Request, deps: Deps): Promise<Response> {
   const result = await module.load({ url, request, viewer, deps, params: page.params });
   // Next's redirect() from a page is a 307, with the headers the proxy gives every page.
   if ('redirect' in result) return new Response(null, { status: 307, headers: { location: result.redirect, ...pageHeaders(TEST_NONCE) } });
-  if ('notFound' in result) return draw(<ErrorView status={404} message={module.notFound ?? PAGE_NOT_FOUND} viewer={viewer} />, 404);
+  if ('notFound' in result) return draw(<ErrorView status={404} message={module.notFound ?? PAGE_NOT_FOUND} back={module.notFoundBack} viewer={viewer} />, 404);
   return draw(<module.View {...result.props} />, 200);
 }

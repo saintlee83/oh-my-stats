@@ -17,7 +17,8 @@ const PEOPLE = {
 type Person = keyof typeof PEOPLE;
 
 const JOIN_NOTE = 'Joining shows your token totals to this group’s members, even while your profile is private. Machine names stay private.';
-const HIDDEN = /<p class="code">404<\/p><h1>This group is private or does not exist\.<\/h1>/;
+// The group page and the server's answers to forms draw the same notice: React without line breaks, the server with them.
+const HIDDEN = /<div class="notice group-notice"><p class="code">404<\/p><h1>This group is private or does not exist\.<\/h1>\s*<div class="actions"><a class="button" href="\/groups">See all groups<\/a>/;
 
 /** A server where each person has a website session, and the helpers to act as them. */
 async function world(overrides: Parameters<typeof app>[0] = {}) {

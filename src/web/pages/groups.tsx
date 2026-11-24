@@ -449,4 +449,5 @@ export const group: PageModule<GroupProps> = {
   },
   View: GroupView,
   notFound: 'This group is private or does not exist.',
+  notFoundBack: { href: '/groups', label: 'See all groups' },
 };

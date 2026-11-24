@@ -1,25 +1,21 @@
 import type { Db, UserRow } from './db.ts';
-import { groupNotice, groupPage, groupsPage, invitationPage } from './grouppages.ts';
+import { groupNotice } from './grouppages.ts';
 import {
   cleanGroupName,
   createGroup,
   deleteGroup,
   groupDetails,
   GROUP_LIMITS,
-  groupMembers,
-  groupsOf,
   joinGroup,
   leaveGroup,
-  memberCount,
   openGroup,
-  publicGroups,
   removeMember,
   renewInvite,
   updateGroup,
 } from './groups.ts';
-import { rankBoard, rankingPeriod, type Board, type Membership, type RankingPeriod } from './rankings.ts';
+import { rankBoard, type Board, type Membership, type RankingPeriod } from './rankings.ts';
 
-/** What a group's address answers: a page, or another address to go to. Neither is kept by a cache. */
+/** What a group form answers: a page, or another address to go to. Neither is kept by a cache. */
 export type GroupAnswer = { page: string; status: number } | { location: string };
 
 const ALL_GROUPS = { href: '/groups', label: 'See all groups' };
@@ -39,32 +35,6 @@ export async function wholeBoard(db: Db, period: RankingPeriod, members: Members
   const users = [...first.users];
   for (let page = 2; page <= first.pages; page++) users.push(...(await rankBoard(db, period, members, { viewerId, page })).users);
   return { ...first, users };
-}
-
-/** `GET /groups` and `GET /groups/<slug>`. */
-export async function groupGet(db: Db, viewer: UserRow | null, slug: string | null, url: URL, now: Date): Promise<GroupAnswer> {
-  if (slug === null) {
-    const [open, mine] = await Promise.all([publicGroups(db), viewer ? groupsOf(db, viewer.id) : []]);
-    return { page: groupsPage(open, mine, viewer, url.origin), status: 200 };
-  }
-  const invite = url.searchParams.get('invite');
-  const opened = await openGroup(db, slug, viewer?.id ?? null, invite);
-  if (!opened) return hidden(viewer);
-  const { group, role, inviteCode } = opened;
-  if (role === 'invited') {
-    // Joining belongs to an account, so signing in comes first, and returns here.
-    if (!viewer) return { location: `/login?next=${encodeURIComponent(`${url.pathname}${url.search}`)}` };
-    return { page: invitationPage(group, await memberCount(db, group.id), invite ?? '', viewer), status: 200 };
-  }
-  const period = rankingPeriod(url.searchParams.get('days'), now, true);
-  // From outside, a public group is its members with public profiles: their rows, and a total of theirs alone.
-  const publicOnly = role === 'visitor';
-  const [members, count, board] = await Promise.all([
-    groupMembers(db, group.id, publicOnly),
-    memberCount(db, group.id),
-    wholeBoard(db, period, { kind: 'group', id: group.id, publicOnly }, publicOnly ? null : viewer?.id ?? null),
-  ]);
-  return { page: groupPage({ group, role, viewer, period, board, members, memberCount: count, origin: url.origin, inviteCode }), status: 200 };
 }
 
 const ACTION = /^\/groups\/([a-z0-9-]{1,64})\/(join|leave|edit|invite|delete|members\/(\d{1,20})\/remove)$/;
