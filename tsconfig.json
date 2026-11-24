@@ -4,7 +4,8 @@
     "module": "nodenext",
     "moduleResolution": "nodenext",
     "lib": ["esnext", "dom", "dom.iterable"],
-    "types": ["node"],
+    "types": ["node", "vinext/types"],
+    "jsx": "react-jsx",
     "strict": true,
     "noEmit": true,
     "allowImportingTsExtensions": true,
@@ -12,5 +13,5 @@
     "verbatimModuleSyntax": true,
     "skipLibCheck": true
   },
-  "include": ["src/shared", "src/server", "test"]
+  "include": ["src/shared", "src/server", "src/web", "test"]
 }

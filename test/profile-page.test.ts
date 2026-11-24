@@ -144,10 +144,10 @@ test('a day with usage in the last 12 months opens its providers, and every othe
     const grid = recent.slice(recent.indexOf('<div class="weeks">'), recent.indexOf('<p class="scale"'));
     assert.equal(count(grid, /class="day"/g), 365);
     assert.equal(count(grid, /<button class="day"/g), 3);
-    assert.equal(count(recent, /<section popover class="day-details"/g), 3);
-    assert.match(recent, /<button class="day" popovertarget="day-2026-11-09" data-level="4" aria-label="2026-11-09 · 200 tokens" title="2026-11-09 · 200 tokens"><\/button>/);
-    assert.match(recent, /<section popover class="day-details" id="day-2026-11-09" aria-label="AI usage on 2026-11-09"><h2>2026-11-09<\/h2><p>200 tokens<\/p><ul><li>Codex · 125<\/li><li>Pi · 75<\/li><\/ul>/);
-    assert.match(recent, /popovertarget="day-2025-11-10"[^>]*aria-label="2025-11-10 · 40 tokens"/, 'the first day of the 53 weeks');
+    assert.equal(count(recent, /<section popover(?:="")? class="day-details"/g), 3);
+    assert.match(recent, /<button class="day" popover[tT]arget="day-2026-11-09" data-level="4" aria-label="2026-11-09 · 200 tokens" title="2026-11-09 · 200 tokens"><\/button>/);
+    assert.match(recent, /<section popover(?:="")? class="day-details" id="day-2026-11-09" aria-label="AI usage on 2026-11-09"><h2>2026-11-09<\/h2><p>200 tokens<\/p><ul><li>Codex · 125<\/li><li>Pi · 75<\/li><\/ul>/);
+    assert.match(recent, /popover[tT]arget="day-2025-11-10"[^>]*aria-label="2025-11-10 · 40 tokens"/, 'the first day of the 53 weeks');
     assert.match(recent, /<span class="day" title="2026-11-08 · 0 tokens"><\/span>/, 'a day without usage');
     assert.doesNotMatch(recent, /2025-11-09/, 'the day before the 53 weeks begin');
     assert.match(recent, /2025-11-10 – 2026-11-09 · 290 tokens on 3 days · Select a day for its providers\./);
@@ -169,12 +169,15 @@ test('the calendar switches between the last 12 months and the years with radio 
   const everyYear = days({ '2021-06-01': { claude: 1 }, '2022-06-01': { claude: 1 }, '2023-06-01': { claude: 1 }, '2024-06-01': { claude: 1 }, '2025-06-01': { claude: 1 }, '2026-06-01': { claude: 1 } });
   const { profile } = await pages({ days: everyYear });
   const calendar = calendarOf(profile);
-  assert.match(calendar, /<section class="panel panes" role="group" aria-label="AI usage calendar"><input type="radio" name="range" id="range-recent" checked><input type="radio" name="range" id="range-2026"><input type="radio" name="range" id="range-2025"><input type="radio" name="range" id="range-2024"><input type="radio" name="range" id="range-2023">\n/);
+  // React writes a radio's name after its id, and closes the tag; the server's own pages did neither.
+  const radio = (name: string, key: string, checked = false) =>
+    `<input type="radio" (?:name="${name}" id="${name}-${key}"|id="${name}-${key}" name="${name}")${checked ? ' checked(?:="")?' : ''}\\/?>`;
+  assert.match(calendar, new RegExp(`<section class="panel panes" role="group" aria-label="AI usage calendar">${radio('range', 'recent', true)}${['2026', '2025', '2024', '2023'].map((year) => radio('range', year)).join('')}\\n?<header`));
   assert.deepEqual([...calendar.matchAll(/<label for="range-([^"]+)" data-label="([^"]+)">([^<]+)<\/label>/g)].map((match) => match.slice(1)),
     [['recent', 'Last 12 months', 'Last 12 months'], ['2026', '2026', '2026'], ['2025', '2025', '2025'], ['2024', '2024', '2024'], ['2023', '2023', '2023']]);
   assert.equal(panesOf(calendar).length, 5);
   assert.equal(count(calendar, /<p class="scale" aria-hidden="true"><small>Less<\/small>/g), 5);
-  assert.equal(count(periodsOf(profile), /<input type="radio" name="period"/g), 5);
+  assert.equal(count(periodsOf(profile), /<input type="radio" (?:id="period-[^"]+" )?name="period"/g), 5);
   // Neither panel may hold more panes than the stylesheet has rules for.
   for (const index of [1, 2, 3, 4, 5]) {
     assert.ok(STYLE.includes(`.panes > input:nth-of-type(${index}):checked ~ .pane:nth-of-type(${index})`));
@@ -239,7 +242,8 @@ test('the period tiles show each number on the public and the private page', asy
     const periods = periodsOf(page);
     assert.deepEqual([...periods.matchAll(/<label for="period-([^"]+)" data-label="[^"]+">([^<]+)<\/label>/g)].map((match) => match.slice(1)),
       [['all', 'Lifetime'], ['30', 'Last 30 days'], ['7', 'Last 7 days'], ['month', 'This month'], ['last-month', 'Last month']]);
-    assert.match(periods, /<input type="radio" name="period" id="period-all" checked>/);
+    // React writes the name after the id, and `checked=""`.
+    assert.match(periods, /<input type="radio" (?:name="period" id="period-all"|id="period-all" name="period") checked(?:="")?\/?>/);
     const [lifetime, last30, last7, month, lastMonth] = panesOf(periods);
     assert.deepEqual(tiles(lifetime), [
       ['Tokens', '16.7k', '16,684'], ['Active days', '10', 'since 2026-09-30'], ['Most used provider', 'Claude Code', '96.1% of tokens'],

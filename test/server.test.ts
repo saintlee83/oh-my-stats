@@ -1,10 +1,12 @@
 import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
 import { test } from 'node:test';
-import { handle, isLocalRequest, LATEST_RELEASE, type Deps } from '../src/server/app.ts';
+import { handle, isLocalRequest, LATEST_RELEASE, profilePageKey, type Deps } from '../src/server/app.ts';
 import { LOGO_SVG } from '../src/server/logo.ts';
 import { COMPONENT_KEYS } from '../src/shared/render/svg.ts';
+import { pageHeaders } from '../src/web/routes.ts';
 import { testDb } from './sqlite-d1.ts';
+import { site, TEST_NONCE } from './site.tsx';
 import { githubMetrics } from './fixtures.ts';
 import {
   api, app, countingDb, fakeCache, fakeGitHub, MACHINE_A, MACHINE_B, machine, mark, octo, ORIGIN, published, SECRET_NAME, signIn, upload, webLogin, webPost,
@@ -275,7 +277,8 @@ test('website sign-in checks its state, so a forged callback fails', async () =>
 
 test('the dashboard requires sign-in and shows the owner their machines', async () => {
   const context = app();
-  assert.equal((await context.call('/me')).status, 303);
+  // Next's redirect() from a page is a 307.
+  assert.equal((await context.call('/me')).status, 307);
   const agent = await signIn(context);
   await context.call('/v1/usage', api(agent, 'PUT', upload(MACHINE_A)));
   const session = await webLogin(context);
@@ -296,7 +299,7 @@ test('an agent token cannot open the website, nor a web session the API', async 
   const context = app();
   const agent = await signIn(context);
   const session = await webLogin(context);
-  assert.equal((await context.call('/me', { headers: { cookie: `oms_session=${agent}` } })).status, 303);
+  assert.equal((await context.call('/me', { headers: { cookie: `oms_session=${agent}` } })).status, 307);
   const webToken = session.split('=')[1];
   assert.equal((await context.call('/v1/me', api(webToken, 'GET'))).status, 401);
 });
@@ -382,7 +385,7 @@ test('a renamed GitHub account keeps its data, and a reused login gets none of i
 test('the install steps name the server, except on the hosted one the agent already defaults to', async () => {
   const context = app();
   assert.match(await (await context.call('/')).text(), /oms login --server https:\/\/stats\.example/);
-  const hosted = await handle(new Request('https://ohmystats.dev/'), context.deps);
+  const hosted = await site(new Request('https://ohmystats.dev/'), context.deps);
   const text = await hosted.text();
   assert.match(text, /oms login\n/);
   assert.ok(!text.includes('--server'));
@@ -452,8 +455,12 @@ test('a signed-in visitor never gets or leaves a shared copy of a page', async (
   assert.equal(page.headers.get('cache-control'), 'no-store');
   assert.equal(cache.store.size, 0);
   const anonymous = await context.call('/u/octo');
-  assert.equal(anonymous.headers.get('cache-control'), 'public, max-age=300');
+  // The page itself is never kept, by browsers or the edge: what it shows is, for signed-out visits.
+  assert.equal(anonymous.headers.get('cache-control'), 'no-store');
+  assert.ok(cache.store.has(profilePageKey(ORIGIN, 'octo').url), 'a signed-out visit keeps what the page shows');
   assert.ok(!(await anonymous.text()).includes('href="/me"'), 'the shared copy names nobody');
+  const again = await (await context.call('/u/octo', { headers: { cookie: session } })).text();
+  assert.ok(again.includes('href="/me"'), 'a signed-in visit is drawn for its viewer, never from the shared copy');
 });
 
 test('limits apply to uncached pages, by address and page, and to sign-in and uploads', async () => {
@@ -521,7 +528,8 @@ test('a made-up session cookie gets the shared copy, and still counts against th
   const before = draws();
   const forged: RequestInit = { headers: { cookie: 'oms_session=made-up', 'cf-connecting-ip': '203.0.113.9' } };
   const page = await context.call('/u/octo', forged);
-  assert.equal(page.headers.get('cache-control'), 'public, max-age=300');
+  assert.equal(page.status, 200);
+  assert.ok(!(await page.text()).includes('href="/me"'), 'the shared copy names nobody');
   assert.equal(draws(), before, 'the page is not drawn again');
   assert.ok(keys.includes('session:203.0.113.9'));
   open = false;
@@ -697,9 +705,10 @@ test('no destructive button is one click away on the dashboard', async () => {
   await context.call('/v1/usage', api(agent, 'PUT', upload(MACHINE_A)));
   const session = await webLogin(context);
   const page = await (await context.call('/me', { headers: { cookie: session } })).text();
-  assert.match(page, /<details class="confirm"[^>]*>\s*<summary class="danger">Delete my account and data<\/summary>\s*<form method="post" action="\/me\/delete">/);
-  assert.match(page, /name="confirm"[^>]*required/);
-  assert.match(page, /<details class="confirm"><summary class="danger">Remove<\/summary><form class="inline" method="post" action="\/me\/machines\//);
+  assert.match(page, /<details class="confirm"[^>]*>\s*<summary class="danger">Delete my account and data<\/summary>\s*<form action="\/me\/delete" method="post">/);
+  // The confirmation field is required, in whichever order its attributes are written.
+  assert.match(page, /<input(?=[^>]* name="confirm")(?=[^>]* required)[^>]*>/);
+  assert.match(page, /<details class="confirm"><summary class="danger">Remove<\/summary><form class="inline" action="\/me\/machines\//);
   assert.ok(!page.includes('<details open'), 'closed until asked for');
 });
 
@@ -769,7 +778,7 @@ test('the profile header uses what the owner wrote on the website, and their Git
   const page = await (await context.call('/me', { headers: { cookie: session } })).text();
   assert.ok(page.includes('value="Staff engineer"'));
   assert.ok(page.includes('placeholder="Builds things"'), 'each field shows what it falls back to');
-  assert.ok(page.includes('<option value="hiring" selected>'));
+  assert.ok(page.includes('<option value="hiring" selected="">'));
   assert.ok(page.includes('/components/profile.svg'), 'the part is offered for embedding');
 
   await context.call('/me/profile', webPost(session, 'status=none'));
@@ -948,13 +957,17 @@ test('pages load nothing the content policy would block, and share one frame', a
     const text = await response.text();
     const policy = response.headers.get('content-security-policy') ?? '';
     assert.match(policy, /default-src 'none'/, path);
-    const dashboardAssets = '<link rel="stylesheet" href="/dashboard.css"><script src="/dashboard.js" defer></script>';
-    if (path === '/me') {
-      assert.ok(text.includes(dashboardAssets));
-      assert.match(policy, /script-src 'self'(?:;|$)/);
-      assert.match(policy, /style-src 'self' 'unsafe-inline'/);
+    // The workspace's own styles. React puts the stylesheet in the head, where vinext's scripts also go.
+    const dashboardAssets = '<link rel="stylesheet" href="/dashboard.css" data-precedence="default"/>';
+    if (policy.includes("'nonce-")) {
+      // A page drawn with React runs only the scripts that carry the response's nonce.
+      assert.equal(policy, pageHeaders(TEST_NONCE)['content-security-policy'], path);
     } else {
       assert.doesNotMatch(policy, /script-src/);
+    }
+    if (path === '/me') {
+      assert.ok(text.includes(dashboardAssets), 'the dashboard loads its workspace styles');
+      assert.match(text, /<body class="workspace">/);
     }
     // A drawing may point at its own patterns. Anything else named by address would be fetched.
     assert.doesNotMatch(path === '/me' ? text.replace(dashboardAssets, '') : text, /<script|<link rel="stylesheet"|@import|url\((?!#)|<iframe/i, `${path} needs only what the policy allows`);
@@ -962,7 +975,7 @@ test('pages load nothing the content policy would block, and share one frame', a
       assert.match(source, /^(\/(?!\/)|https:\/\/avatars\.githubusercontent\.com\/)/, `${path} loads ${source}`);
     }
     assert.match(text, /<a class="skip" href="#main">Skip to content<\/a>[\s\S]*<main id="main"/, path);
-    assert.match(text, /<meta name="description" content="[^"]{40,}">/, path);
+    assert.match(text, /<meta name="description" content="[^"]{40,}"\/?>/, path);
     assert.match(text, /<footer class="bottom">[\s\S]*href="https:\/\/github\.com\/saintlee83\/oh-my-stats"/, path);
     assert.equal(text.match(/<h1[ >]/g)?.length, 1, `${path} has one main heading`);
   }
@@ -980,16 +993,17 @@ test('pages worth sharing name the preview image by its full address, and the im
     const text = await (await context.call(path)).text();
     // A profile names its own picture, drawn from its numbers. Every other page names the site's.
     const image = path.startsWith('/u/') ? `${path.slice(1)}/og.png` : 'og.png';
-    assert.ok(text.includes(`<meta property="og:image" content="https://stats.example/${image}">`), path);
-    assert.match(text, /<meta name="twitter:card" content="summary_large_image">/, path);
+    const tag = `<meta property="og:image" content="https://stats.example/${image}"`;
+    assert.ok(text.includes(`${tag}>`) || text.includes(`${tag}/>`), path);
+    assert.match(text, /<meta name="twitter:card" content="summary_large_image"\/?>/, path);
   }
   for (const [path, init] of [['/nope', {}], ['/me', { headers: { cookie: session } }], ['/me/rankings', { headers: { cookie: session } }]] as const) {
     const text = await (await context.call(path, init)).text();
     assert.doesNotMatch(text, /og:image/, `${path} is not for sharing`);
-    assert.match(text, /<meta name="twitter:card" content="summary">/, path);
+    assert.match(text, /<meta name="twitter:card" content="summary"\/?>/, path);
   }
-  // Wrangler serves this folder at the site's root, so the Worker never sees the request.
-  assert.match(readFileSync(new URL('../wrangler.jsonc', import.meta.url), 'utf8'), /"assets": \{ "directory": "\.\/public" \}/);
+  // The build copies this folder into the assets Wrangler serves at the site's root.
+  assert.match(readFileSync(new URL('../wrangler.jsonc', import.meta.url), 'utf8'), /"assets": \{\s*"directory": "dist\/client"/);
   const image = readFileSync(new URL('../public/og.png', import.meta.url));
   assert.equal(image.subarray(1, 4).toString('latin1'), 'PNG');
   assert.deepEqual([image.readUInt32BE(16), image.readUInt32BE(20)], [2400, 1260], 'the size the pages declare');
@@ -1004,8 +1018,9 @@ test('install commands are shown per system, each with the same next steps', asy
     const text = await page.text();
     assert.match(text, /<pre><code>curl -fsSL https:\/\/stats\.example\/install\.sh \| sh\noms login --server https:\/\/stats\.example\noms service install<\/code><\/pre>/);
     assert.match(text, /<pre><code>irm https:\/\/stats\.example\/install\.ps1 \| iex\noms login --server https:\/\/stats\.example\noms service install<\/code><\/pre>/);
-    assert.equal(text.match(/type="radio" name="os"/g)?.length, 2);
-    assert.equal(text.match(/type="radio" name="os"[^>]* checked/g)?.length, 1, 'one system is shown to start with');
+    // React writes the name after the id.
+    assert.equal(text.match(/type="radio"[^>]* name="os"/g)?.length, 2);
+    assert.equal(text.match(/type="radio"[^>]* name="os"[^>]* checked/g)?.length, 1, 'one system is shown to start with');
     const setup = text.match(/<details class="github-setup">([\s\S]*?)<\/details>/)?.[1] ?? '';
     assert.match(setup, /<summary>[^<]*optional[^<]*<\/summary>/i);
     assert.match(setup, /gh auth status[\s\S]*gh auth login[\s\S]*oms sync --github[\s\S]*gh auth refresh -s repo,read:org/);
@@ -1117,7 +1132,7 @@ test('weekly card, day drilldown and provider shares agree across private and pu
   const cookie = await webLogin(context);
   for (const [path, headers] of [['/me', { cookie }], ['/u/octo', {}]] as const) {
     const page = await (await context.call(path, { headers })).text();
-    assert.match(page, /popovertarget="day-2026-11-09"[^>]*aria-label="2026-11-09 · 200 tokens"/);
+    assert.match(page, /popover[tT]arget="day-2026-11-09"[^>]*aria-label="2026-11-09 · 200 tokens"/, `${path}: React writes the attribute in camel case, which HTML reads the same`);
     assert.match(page, /<p>200 tokens<\/p><ul><li>Codex · 125<\/li><li>Pi · 75<\/li>/);
     assert.match(page, /Codex<\/td><td class="num">100.0%<\/td><td class="num">50.0%/);
   }

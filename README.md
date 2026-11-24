@@ -353,7 +353,7 @@ Have your tool or exporter append one JSON object per completed response to a ne
 
 ## Run your own server
 
-The server is a single Cloudflare Worker with a D1 database, and has no runtime dependencies.
+The server is a single Cloudflare Worker with a D1 database. Its pages are React, served by [vinext](https://github.com/cloudflare/vinext).
 
 1. [Create a GitHub App](https://github.com/settings/apps/new) with no permissions, so its tokens can only identify a user. Set the callback URL to `https://your-server/auth/callback`, **enable device flow**, turn off the webhook, and allow installation on any account.
 2. Create the database. In `wrangler.jsonc`, put in its id, your domain under `routes`, and your app's `GITHUB_CLIENT_ID` under `vars`.
@@ -365,12 +365,12 @@ The server is a single Cloudflare Worker with a D1 database, and has no runtime 
 3. Add the client secret and deploy.
    ```sh
    npx wrangler secret put GITHUB_CLIENT_SECRET
-   npx wrangler deploy
+   pnpm run deploy
    ```
 
 Then sign each computer in to it with `oms login --server https://your-server`.
 
-To update a server, apply any new migrations before deploying: `npx wrangler d1 migrations apply DB --remote`, then `npx wrangler deploy`. A page that needs a table the database doesn't have yet fails until they are applied.
+To update a server, apply any new migrations before deploying: `npx wrangler d1 migrations apply DB --remote`, then `pnpm run deploy`. A page that needs a table the database doesn't have yet fails until they are applied.
 
 ## Known limits
 

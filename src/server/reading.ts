@@ -1,6 +1,6 @@
 import { PROVIDERS } from '../shared/format.ts';
-import type { Db, UserRow } from './db.ts';
-import { esc, layout, REPO_URL, SITE } from './pages.ts';
+import type { Db } from './db.ts';
+import { esc, REPO_URL, SITE } from './pages.ts';
 
 /**
  * The pages that explain the service in words, and the two files search engines ask for.
@@ -11,7 +11,7 @@ import { esc, layout, REPO_URL, SITE } from './pages.ts';
 
 type Section = [id: string, title: string, body: string];
 
-interface ReadingPage {
+export interface ReadingPage {
   title: string;
   lead: string;
   description: string;
@@ -82,12 +82,12 @@ const PRIVACY: ReadingPage = {
   title: 'Privacy',
   lead: 'What this server stores, what stays on your machine, what publishing makes public, and how to remove it. The server is open source, so what this page says about the code can be checked there.',
   description: `What this ${SITE} server stores, what stays on your machine, what publishing makes public, its two cookies, and how to delete your data.`,
-  updated: '2026-11-18',
+  updated: '2026-11-24',
   sections: [
     ['summary', 'In short', `<ul>
 <li>Only totals leave your machine. Prompts, responses and code never do.</li>
 <li>Your profile is private until you publish it, and a private profile looks the same as one that doesn’t exist.</li>
-<li>The personal dashboard uses a script from this server to navigate sections and inspect daily usage. The site has two sign-in cookies and no trackers.</li>
+<li>Pages run only scripts from this server, which draw the site in your browser. The site has two sign-in cookies and no trackers.</li>
 <li>You can remove a machine or your whole account on your dashboard, and it is deleted at once.</li>
 </ul>`],
     ['local', 'What stays on your machine', `<ul>
@@ -125,7 +125,7 @@ const PRIVACY: ReadingPage = {
 <li><code>oms_state</code> is set when you start signing in and removed when you finish, or after 10 minutes. It lets the server check that GitHub’s answer belongs to the sign-in you started, and, when you came from a group’s invite link, holds that address to return you to.</li>
 </ul>
 <p>Both are kept from scripts (<code>HttpOnly</code>) and travel only over HTTPS. With <code>SameSite=Lax</code>, another site can’t use them in a request of its own. They are sent from elsewhere only when you follow a link here.</p>
-<p>Public pages run no scripts. The signed-in dashboard loads a script from this server. It switches between sections and shows the selected day’s token count using data already on the page. The content policy allows images from GitHub’s avatar server and blocks frames, external fonts and third-party scripts. There is no analytics code, no advertising and no tracking pixel.</p>`],
+<p>Pages run scripts from this server only. They draw the page in your browser and open some links without a reload. On the signed-in dashboard they also switch between sections and show the selected day’s token count, using data already on the page. The content policy runs a script only when it carries the code its page was sent with, allows images from GitHub’s avatar server, and blocks frames, external fonts and third-party scripts. There is no analytics code, no advertising and no tracking pixel.</p>`],
     ['others', 'Who else is involved', `<h3>GitHub, to sign in</h3>
 <p>On the website you are sent to GitHub to approve the sign-in. On a machine, <code>oms login</code> shows a code that you approve at GitHub. Either way the server only ever receives a token that proves who you are. It comes from a GitHub App with no permissions, so it can’t read your repositories. The server uses it once and doesn’t store it, and <code>oms</code> refuses to send a GitHub token with more access than that.</p>
 <h3>GitHub, for avatars</h3>
@@ -141,7 +141,7 @@ const PRIVACY: ReadingPage = {
     ['groups', 'What joining a group shows', `<p>Joining a group shows its members your GitHub username and your token total for each period its board covers, even while your profile is private. It shows no models, no day-by-day history and no machine names.</p>
 <p>A private group is shown to its members only. To anyone else it gives the same answer as a group that doesn’t exist. A public group can be opened by anyone and joined by any signed-in account; people outside it see only the members whose profiles are public.</p>
 <p>A group’s name and description are written by its owner and, for a public group, shown to everyone. When you leave a group, your totals stop showing there at once.</p>`],
-    ['caching', 'Caching and unpublishing', `<p>Public pages and images are cached for 5 minutes, by the host and by browsers.</p>
+    ['caching', 'Caching and unpublishing', `<p>What public profile pages show is cached for 5 minutes by the host, and images for 5 minutes by the host and by browsers.</p>
 <p>When you unpublish or delete your account, everything public about you answers “not found” from then on. The server removes your pages, your images and your sitemap entry from the cache at the location that handled the request. Copies at other locations and in browsers can stay visible for up to five minutes.</p>
 <p>Copies that others made are beyond this server’s reach. A search engine’s index, or an image proxy such as the one GitHub uses for READMEs, keeps what it fetched by its own rules.</p>`],
     ['deleting', 'Removing your data', `<h3>A machine</h3>
@@ -179,26 +179,13 @@ const TERMS: ReadingPage = {
   ],
 };
 
-type Render = (origin: string, viewer: UserRow | null) => string;
-
-/** Each section has its heading beside it, so a long page can be scanned down one edge. */
-const readingPage = (page: ReadingPage): Render => (origin, viewer) => {
-  const updated = page.updated ? `<p class="muted">Last updated <time datetime="${page.updated}">${page.updated}</time></p>` : '';
-  const jumps = page.sections.map(([id, title]) => `<a href="#${id}">${title}</a>`).join('');
-  const sections = page.sections.map(([id, title, body]) => `<section id="${id}"><h2>${title}</h2><div>${body}</div></section>`).join('\n');
-  return layout(`${page.title} · ${SITE}`, `<div class="page-head"><div><h1>${page.title}</h1><p>${page.lead}</p>${updated}</div></div>
-<nav class="filters jump" aria-label="On this page">${jumps}</nav>
-<article class="reading">${sections}</article>`, viewer, { origin, description: page.description });
-};
-
-/** Every reading page by its address. */
-export const READING_PAGES: ReadonlyMap<string, Render> = new Map([
-  ['/how-we-count', readingPage(HOW_WE_COUNT)],
-  ['/privacy', readingPage(PRIVACY)],
-  ['/terms', readingPage(TERMS)],
+/** The words of each reading page by its address, for the pages drawn with React. */
+export const READING: ReadonlyMap<string, ReadingPage> = new Map([
+  ['/how-we-count', HOW_WE_COUNT],
+  ['/privacy', PRIVACY],
+  ['/terms', TERMS],
 ]);
 
-/** A file for crawlers. The lifetime is the caller's, so the edge cache keeps it like any public page. */
 export const crawlerFile = (body: string, type: 'text/plain' | 'application/xml', cacheControl: string) =>
   new Response(body, { headers: { 'content-type': `${type}; charset=utf-8`, 'cache-control': cacheControl, 'x-content-type-options': 'nosniff' } });
 
@@ -212,7 +199,7 @@ Disallow: /auth/
 Sitemap: ${origin}/sitemap.xml
 `;
 
-const INDEXED_PATHS = ['/', '/rankings', '/rankings/providers', '/rankings/models', '/groups', ...READING_PAGES.keys()];
+const INDEXED_PATHS = ['/', '/rankings', '/rankings/providers', '/rankings/models', '/groups', ...READING.keys()];
 /** One sitemap file may list 50,000 addresses. This keeps the file, and the query behind it, small. */
 const SITEMAP_PROFILES = 5000;
 /** What a profile's address accepts. An account whose login passed to someone else has no address until it signs in again. */

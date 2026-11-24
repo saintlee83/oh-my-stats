@@ -125,7 +125,7 @@ test('the board by cost shows the cost, the logged tokens and what the estimate 
   assert.match(html, /<a href="\/rankings\?days=7">By tokens<\/a><a href="\/rankings\?days=7&amp;sort=cost" aria-current="page">By estimated cost<\/a>/);
   assert.match(html, /<th class="num">Estimated cost<\/th><th class="num wide">Logged tokens<\/th>/);
   assert.match(html, /Places 1–5<\/h2><p class="muted">\$44 at list prices for 19\.1k logged tokens, from 5 ranked public profiles · You are <strong>#1<\/strong><\/p>/);
-  assert.match(html, /<tr class="me"><td class="rank"><span class="place" data-place="1">1<\/span>[\s\S]*?<b>Octo Cat<\/b><small>@octo<\/small><\/span><\/a><span class="badge">You<\/span><\/td>\n[^\n]*\n<td class="num"><strong>\$32<\/strong><small class="narrow">17k tokens<\/small><small>\$32\.00<\/small><\/td><td class="num wide"><strong>17k<\/strong><small>17,000<\/small><\/td><\/tr>/);
+  assert.match(html, /<tr class="me"><td class="rank"><span class="place" data-place="1">1<\/span>[\s\S]*?<b>Octo Cat<\/b><small>@octo<\/small><\/span><\/a><span class="badge">You<\/span><\/td><td class="meter" aria-hidden="true"><span style="[^"]*"><\/span><\/td><td class="num"><strong>\$32<\/strong><small class="narrow">17k tokens<\/small><small>\$32\.00<\/small><\/td><td class="num wide"><strong>17k<\/strong><small>17,000<\/small><\/td><\/tr>/);
   assert.deepEqual([...html.matchAll(/<span class="place"[^>]*>(\d+)<\/span><\/td><td class="who"><a href="\/u\/([a-z]+)"/g)].map(([, rank, login]) => `${rank} ${login}`),
     ['1 octo', '2 beta', '2 epsilon', '4 gamma', '5 zeta']);
   assert.match(html, /<strong>\$5<\/strong><small class="narrow">1\.3k tokens<\/small><small>\$5\.00<\/small>/);
@@ -140,7 +140,7 @@ test('the board by cost shows the cost, the logged tokens and what the estimate 
   assert.match(codex, /Places 1–3 · Codex<\/h2><p class="muted">\$9 at list prices for 2\.9k logged tokens, from 3 ranked public profiles<\/p>/);
   assert.match(codex, /<a href="\/rankings\?days=7&amp;provider=codex">By tokens<\/a>/, 'changing the order keeps the provider');
   const none = await (await context.call('/rankings?days=7&provider=kimi-cli&sort=cost')).text();
-  assert.match(none, /Places · Kimi Code CLI<\/h2><p class="muted">0 ranked public profiles<\/p><\/div>\n<p>No logged usage with a list price for this period\.<\/p>/);
+  assert.match(none, /Places · Kimi Code CLI<\/h2><p class="muted">0 ranked public profiles<\/p><\/div><p>No logged usage with a list price for this period\.<\/p>/);
 
   const tokens = await (await context.call('/rankings?days=7')).text();
   assert.match(tokens, /@delta<\/a>[\s\S]*<strong>50k<\/strong>/, 'by tokens, usage without a price still ranks');
@@ -171,7 +171,7 @@ test('the profiles board is read a page at a time, and says which places it show
   assert.match(first, /Places 1–100<\/h2><p class="muted"><span title="183,090 tokens">183k tokens<\/span> from 204 ranked public profiles · You are <strong>#150<\/strong>, <a href="\/rankings\?days=7&amp;page=2">on page 2<\/a><\/p>/, 'the totals are of the whole board, and the viewer is told where their row is');
   assert.match(first, /<nav class="board-pager" aria-label="Pages"><span><\/span><span>1–100 of 204<\/span><a class="button" href="\/rankings\?days=7&amp;page=2" rel="next">Next<\/a><\/nav>/);
   assert.match(first, /<b>Member 1<\/b><small>@member-001<\/small><\/span><\/a><\/td>/, 'a profile with a name shows it with the login');
-  assert.match(first, /loading="lazy">@member-002<\/a><\/td>/, 'one without shows the login alone');
+  assert.match(first, /loading="lazy"\/>@member-002<\/a><\/td>/, 'one without shows the login alone');
   assert.doesNotMatch(first, /class="me"/);
 
   const second = await get('/rankings?days=7&page=2', true);
@@ -189,9 +189,9 @@ test('the profiles board is read a page at a time, and says which places it show
   const beyond = await context.call('/rankings?days=7&page=9');
   assert.equal(beyond.status, 200, 'a page past the end is an ordinary page');
   const empty = await beyond.text();
-  assert.match(empty, /Page 9<\/h2><p class="muted"><span title="183,090 tokens">183k tokens<\/span> from 204 ranked public profiles<\/p><\/div>\n<p>There is no page 9\. This board has 3 pages\.<\/p>\n<p><a class="button" href="\/rankings\?days=7">Back to the first page<\/a><\/p>/);
+  assert.match(empty, /Page 9<\/h2><p class="muted"><span title="183,090 tokens">183k tokens<\/span> from 204 ranked public profiles<\/p><\/div><p>There is no page 9\. This board has 3 pages\.<\/p><p><a class="button" href="\/rankings\?days=7">Back to the first page<\/a><\/p>/);
   assert.doesNotMatch(empty, /<table|class="board-pager"/);
-  assert.match(await get('/rankings?days=30&page=2&provider=pi'), /There is no page 2\. This board has 1 page\.<\/p>\n<p><a class="button" href="\/rankings\?days=30&amp;provider=pi">Back to the first page<\/a>/);
+  assert.match(await get('/rankings?days=30&page=2&provider=pi'), /There is no page 2\. This board has 1 page\.<\/p><p><a class="button" href="\/rankings\?days=30&amp;provider=pi">Back to the first page<\/a>/);
 
   db.raw.exec("UPDATE users SET is_public = 0 WHERE CAST(id AS INTEGER) > 101");
   assert.match(await get('/rankings?days=7&page=2'), /Place 101<\/h2>[\s\S]*<span>101–101 of 101<\/span><span><\/span><\/nav>/, 'one profile past a full page gets a page of its own');
@@ -324,7 +324,7 @@ test('the providers board lists the known tools, and writes each change plainly'
   assert.match(html, /Providers by active profiles<\/h2><p class="muted">883 tokens from 40 ranked public profiles<\/p>/);
   assert.match(html, /<th class="num wide">Active profiles<\/th><th class="num wide">Adoption<\/th><th class="num">Tokens \(7 days\)<\/th><th class="num wide">Change in profiles<\/th>/);
   const row = (name: string) => html.slice(html.indexOf(`>${name}</a>`)).split('</tr>')[0];
-  assert.match(row('Codex'), /^>Codex<\/a><small class="narrow">30 profiles \(75\.0%\) · <span class="up">\+5<\/span><\/small><\/td>\n<td class="meter" aria-hidden="true"><span style="--share:75\.0%"><\/span><\/td>\n<td class="num wide"><strong>30<\/strong><\/td><td class="num wide"><strong>75\.0%<\/strong><\/td><td class="num"><strong>300<\/strong><\/td><td class="num wide"><strong class="up">\+5<\/strong><small>\+20\.0%<\/small><\/td>$/);
+  assert.match(row('Codex'), /^>Codex<\/a><small class="narrow">30 profiles \(75\.0%\) · <span class="up">\+5<\/span><\/small><\/td><td class="meter" aria-hidden="true"><span style="--share:75\.0%"><\/span><\/td><td class="num wide"><strong>30<\/strong><\/td><td class="num wide"><strong>75\.0%<\/strong><\/td><td class="num"><strong>300<\/strong><\/td><td class="num wide"><strong class="up">\+5<\/strong><small>\+20\.0%<\/small><\/td>$/);
   assert.match(row('Claude Code'), /<strong>20<\/strong><\/td><td class="num wide"><strong>50\.0%<\/strong><\/td><td class="num"><strong>400<\/strong><\/td><td class="num wide"><strong class="down">−4<\/strong><\/td>$/, 'no percentage on a base under 25');
   assert.match(row('Pi'), /3 profiles \(7\.5%\) · <span class="up">new<\/span>[\s\S]*<strong class="up">new<\/strong><\/td>$/);
   assert.match(row('OpenCode'), /2 profiles \(5\.0%\)<\/small>[\s\S]*<td class="num wide"><strong>0<\/strong><\/td>$/);
@@ -338,7 +338,7 @@ test('the providers board lists the known tools, and writes each change plainly'
   assert.match(lifetime, /<th class="num">Lifetime tokens<\/th><\/tr>/);
   assert.doesNotMatch(lifetime, /Change in profiles|Change is the difference|class="(up|down)"/, 'all time has nothing to compare with');
   assert.match(await (await context.call('/rankings/providers?days=month')).text(), /from 2026-10-01 through 2026-10-31, the whole of last month\./);
-  assert.match(await (await app().call('/rankings/providers?days=7')).text(), /Providers by active profiles<\/h2><p class="muted">0 ranked public profiles<\/p><\/div>\n<p>No token usage for this period\.<\/p>/);
+  assert.match(await (await app().call('/rankings/providers?days=7')).text(), /Providers by active profiles<\/h2><p class="muted">0 ranked public profiles<\/p><\/div><p>No token usage for this period\.<\/p>/);
 });
 
 /**
@@ -411,7 +411,7 @@ test('the models board lists priced models only, with the provider that carries 
   assert.match(html, /Models by active profiles<\/h2><p class="muted">3 priced models · 6k logged tokens · \$38 at list prices<\/p>/);
   assert.match(html, /<th class="num wide">Active profiles<\/th><th class="num wide">Adoption<\/th><th class="num">Logged tokens<\/th><th class="num wide">Cost at list price<\/th><th class="num wide">Change in profiles<\/th>/);
   const row = (name: string) => html.slice(html.indexOf(`<b>${name}</b>`)).split('</tr>')[0];
-  assert.match(row('claude-opus-5-5'), /^<b>claude-opus-5-5<\/b><small>96% via Claude Code<\/small><small class="narrow">30 profiles \(75\.0%\) · <span class="up">\+4<\/span><\/small><\/td>\n<td class="meter" aria-hidden="true"><span style="--share:75\.0%"><\/span><\/td>\n<td class="num wide"><strong>30<\/strong><\/td><td class="num wide"><strong>75\.0%<\/strong><\/td><td class="num"><strong>2\.9k<\/strong><small class="narrow">\$29<\/small><small>2,910<\/small><\/td><td class="num wide"><strong>\$29<\/strong><small>\$29\.10<\/small><\/td><td class="num wide"><strong class="up">\+4<\/strong><small>\+15\.4%<\/small><\/td>$/);
+  assert.match(row('claude-opus-5-5'), /^<b>claude-opus-5-5<\/b><small>96% via Claude Code<\/small><small class="narrow">30 profiles \(75\.0%\) · <span class="up">\+4<\/span><\/small><\/td><td class="meter" aria-hidden="true"><span style="--share:75\.0%"><\/span><\/td><td class="num wide"><strong>30<\/strong><\/td><td class="num wide"><strong>75\.0%<\/strong><\/td><td class="num"><strong>2\.9k<\/strong><small class="narrow">\$29<\/small><small>2,910<\/small><\/td><td class="num wide"><strong>\$29<\/strong><small>\$29\.10<\/small><\/td><td class="num wide"><strong class="up">\+4<\/strong><small>\+15\.4%<\/small><\/td>$/);
   assert.match(row('gpt-5.5-codex'), /^<b>gpt-5\.5-codex<\/b><small>80% via other tools<\/small>[\s\S]*<strong>\$5<\/strong><small>\$5\.00<\/small><\/td><td class="num wide"><strong class="up">\+2<\/strong><\/td>$/, 'no percentage on a base of ten');
   assert.match(row('gemini-3-pro'), /^<b>gemini-3-pro<\/b><small>100% via Gemini CLI<\/small>[\s\S]*<strong class="up">new<\/strong><\/td>$/);
   assert.deepEqual([...html.matchAll(/<td class="who"><b>([^<]+)<\/b>/g)].map(([, model]) => model), ['claude-opus-5-5', 'gpt-5.5-codex', 'gemini-3-pro']);
@@ -422,7 +422,7 @@ test('the models board lists priced models only, with the provider that carries 
   assert.match(lifetime, /<b>claude-sonnet-5-5<\/b><small>100% via Claude Code<\/small>/);
   assert.doesNotMatch(lifetime, /Change in profiles|Change is the difference|class="(up|down)"/);
   const empty = await (await app().call('/rankings/models?days=30')).text();
-  assert.match(empty, /Models by active profiles<\/h2><p class="muted">No priced models<\/p><\/div>\n<p>No logged usage of a model with a list price for this period\.<\/p>/);
+  assert.match(empty, /Models by active profiles<\/h2><p class="muted">No priced models<\/p><\/div><p>No logged usage of a model with a list price for this period\.<\/p>/);
 });
 
 test('a private profile changes nothing on any board', async () => {
@@ -483,10 +483,10 @@ test('the boards share the site’s frame, and say how to join', async () => {
     assert.doesNotMatch(text, /<script|<link rel="stylesheet"|@import|url\((?!#)|<iframe|\son[a-z]+=/i, `${path} needs only what the policy allows`);
     for (const [, source] of text.matchAll(/<img src="([^"]+)"/g)) assert.match(source, /^(\/(?!\/)|https:\/\/avatars\.githubusercontent\.com\/)/, `${path} loads ${source}`);
     assert.equal(text.match(/<h1[ >]/g)?.length, 1, `${path} has one main heading`);
-    assert.match(text, /<meta name="description" content="[^"]{40,}">/, path);
-    assert.match(text, /<meta property="og:image" content="https:\/\/stats\.example\/og\.png">/, path);
+    assert.match(text, /<meta name="description" content="[^"]{40,}"\/>/, path);
+    assert.match(text, /<meta property="og:image" content="https:\/\/stats\.example\/og\.png"\/>/, path);
     assert.equal(text.match(/<nav class="board-tabs" aria-label="Boards">[\s\S]*?<\/nav>/)?.[0].match(/aria-current="page"/g)?.length, 1, `${path} marks its own tab`);
-    assert.match(text, /<h2>Appear on the boards<\/h2>\n<p>The boards count published profiles only\.[\s\S]*<pre><code>oms publish<\/code><\/pre>[\s\S]*<a class="button primary" href="\/login">[\s\S]*Sign in with GitHub<\/a><a class="button" href="https:\/\/github\.com\/saintlee83\/oh-my-stats#get-started">Read the guide<\/a>/, `${path} tells a visitor where to start`);
+    assert.match(text, /<h2>Appear on the boards<\/h2><p>The boards count published profiles only\.[\s\S]*<pre><code>oms publish<\/code><\/pre>[\s\S]*<a class="button primary" href="\/login">[\s\S]*Sign in with GitHub<\/a><a class="button" href="https:\/\/github\.com\/saintlee83\/oh-my-stats#get-started">Read the guide<\/a>/, `${path} tells a visitor where to start`);
     assert.doesNotMatch(text, /Ranking views|secret-laptop/, path);
     titles.add(text.match(/<title>([^<]+)<\/title>/)![1]);
   }
@@ -494,11 +494,11 @@ test('the boards share the site’s frame, and say how to join', async () => {
 
   const cookie = await webLogin(context);
   const mine = await (await context.call('/rankings/models?days=7', { headers: { cookie } })).text();
-  assert.match(mine, /<h2>Your profile is counted<\/h2>\n<p>Your profile is public[\s\S]*<code>oms sync<\/code>/);
+  assert.match(mine, /<h2>Your profile is counted<\/h2><p>Your profile is public[\s\S]*<code>oms sync<\/code>/);
   assert.doesNotMatch(mine, /Appear on the boards|href="\/login"/);
   rawDb(context).raw.exec("UPDATE users SET is_public = 0 WHERE id = '1'");
   const hidden = await (await context.call('/rankings/providers?days=7', { headers: { cookie } })).text();
-  assert.match(hidden, /<h2>Appear on the boards<\/h2>\n<p>Your profile is private, so it is not counted here\. To publish it, use <a href="\/me">your dashboard<\/a>[\s\S]*<pre><code>oms publish<\/code><\/pre>/);
+  assert.match(hidden, /<h2>Appear on the boards<\/h2><p>Your profile is private, so it is not counted here\. To publish it, use <a href="\/me">your dashboard<\/a>[\s\S]*<pre><code>oms publish<\/code><\/pre>/);
   assert.doesNotMatch(hidden, /href="\/login"|New here\?/, 'someone signed in is not sent to sign in');
 });
 

@@ -5,7 +5,9 @@ import { PROVIDERS } from '../src/shared/format.ts';
 import { api, app, countingDb, fakeCache, MACHINE_A, machine, mark, octo, ORIGIN, published, SECRET_NAME, upload, webLogin, webPost } from './harness.ts';
 
 const READING = ['/how-we-count', '/privacy', '/terms'];
-const NOINDEX = '<meta name="robots" content="noindex">';
+// Pages drawn with React close their void tags; the server's own pages don't.
+const NOINDEX = /<meta name="robots" content="noindex"\/?>/;
+const noindex = (html: string) => NOINDEX.test(html);
 
 const PEOPLE = {
   'gh-token': octo, 'web-token': octo,
@@ -38,10 +40,10 @@ test('each reading page answers, shares the frame, and can be shared and indexed
       const page = await response.text();
       assert.doesNotMatch(page, /<script|<link rel="stylesheet"|@import|url\((?!#)|<iframe|<img (?!src="\/favicon\.svg"|src="https:\/\/avatars\.githubusercontent\.com\/)/i, `${path} needs only what the policy allows`);
       assert.match(page, /<a class="skip" href="#main">Skip to content<\/a>[\s\S]*<main id="main">/, path);
-      assert.match(page, /<meta name="description" content="[^"]{40,}">/, path);
+      assert.match(page, /<meta name="description" content="[^"]{40,}"\/?>/, path);
       assert.equal(page.match(/<h1[ >]/g)?.length, 1, `${path} has one main heading`);
-      assert.match(page, /<meta property="og:image" content="https:\/\/stats\.example\/og\.png">/, path);
-      assert.ok(!page.includes(NOINDEX), `${path} is for everyone`);
+      assert.match(page, /<meta property="og:image" content="https:\/\/stats\.example\/og\.png"\/?>/, path);
+      assert.ok(!noindex(page), `${path} is for everyone`);
       // Every jump at the top of the page lands on a section of it.
       const jumps = [...page.matchAll(/<a href="#([a-z-]+)">/g)].map(([, id]) => id);
       assert.ok(jumps.length >= 6, path);
@@ -109,14 +111,16 @@ test('the privacy page names the cookies the server sets, and how long each last
     assert.equal((await other.call(path)).headers.get('set-cookie'), null, path);
   }
   assert.match(page, /A visitor who never signs in gets none/);
-  assert.match(page, /Public pages run no scripts/);
-  assert.match(page, /signed-in dashboard loads a script from this server/);
+  // What the page says of scripts is what the content policy enforces: this server's own, and only those its page was sent with.
+  assert.match(page, /Pages run scripts from this server only/);
+  assert.match(page, /blocks frames, external fonts and third-party scripts. There is no analytics code/);
+  assert.match((await context.call('/privacy')).headers.get('content-security-policy') ?? '', /script-src 'self' 'nonce-[^']+'(?:;|$)/);
 });
 
 test('the privacy page says what is stored and public, how to delete it, and invents no contact', async () => {
   const { context } = await published();
   const page = await text(context, '/privacy');
-  assert.match(page, /<p class="muted">Last updated <time datetime="(\d{4}-\d{2}-\d{2})">\1<\/time><\/p>/);
+  assert.match(page, /<p class="muted">Last updated <time date[tT]ime="(\d{4}-\d{2}-\d{2})">\1<\/time><\/p>/);
   for (const fact of [
     'Prompts, responses and code', 'Commit messages and file paths', 'Private repository and organization names', 'The token that reads your repositories',
     'no place for an email address, a password or an IP address',
@@ -146,7 +150,7 @@ test('the privacy page says what is stored and public, how to delete it, and inv
 
 test('the terms are short: no warranty, your own real usage, and publishing by choice', async () => {
   const page = await text(app(), '/terms');
-  assert.match(page, /<p class="muted">Last updated <time datetime="\d{4}-\d{2}-\d{2}">/);
+  assert.match(page, /<p class="muted">Last updated <time date[tT]ime="\d{4}-\d{2}-\d{2}">/);
   for (const fact of [
     '<a href="https://github.com/saintlee83/oh-my-stats/blob/main/LICENSE">MIT license</a>',
     'without warranty of any kind',
@@ -233,11 +237,11 @@ test('pages only their owner sees, and errors, ask search engines to leave them 
   const { context } = await published();
   const session = await webLogin(context);
   for (const path of ['/', '/rankings', '/rankings?days=7', '/u/octo', ...READING]) {
-    assert.ok(!(await text(context, path)).includes(NOINDEX), `${path} is public`);
-    assert.ok(!(await text(context, path, { headers: { cookie: session } })).includes(NOINDEX), `${path} is public, whoever reads it`);
+    assert.ok(!noindex(await text(context, path)), `${path} is public`);
+    assert.ok(!noindex(await text(context, path, { headers: { cookie: session } })), `${path} is public, whoever reads it`);
   }
-  for (const path of ['/me', '/me/rankings']) assert.ok((await text(context, path, { headers: { cookie: session } })).includes(NOINDEX), path);
-  for (const path of ['/nope', '/u/nobody', '/rankings?days=8']) assert.ok((await text(context, path)).includes(NOINDEX), `${path} is an error`);
+  for (const path of ['/me', '/me/rankings']) assert.ok(noindex(await text(context, path, { headers: { cookie: session } })), path);
+  for (const path of ['/nope', '/u/nobody', '/rankings?days=8']) assert.ok(noindex(await text(context, path)), `${path} is an error`);
   assert.equal((await text(context, '/nope')).match(/<meta name="robots"/g)?.length, 1);
 });
 
