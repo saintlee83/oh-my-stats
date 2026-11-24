@@ -8,6 +8,8 @@ import { ErrorView, PAGE_NOT_FOUND } from '../src/web/error.tsx';
 import type { PageModule } from '../src/web/page.ts';
 import * as boards from '../src/web/pages/boards.tsx';
 import * as groups from '../src/web/pages/groups.tsx';
+import { landing } from '../src/web/pages/landing.tsx';
+import * as reading from '../src/web/pages/reading.tsx';
 import { gate, isWorkspace, pageFor, pageHeaders, type PageName } from '../src/web/routes.ts';
 
 /**
@@ -22,6 +24,10 @@ const PAGES: Partial<Record<PageName, PageModule<any>>> = {
   'my-rankings': boards.myRankings,
   groups: groups.groups,
   group: groups.group,
+  landing,
+  'how-we-count': reading.howWeCount,
+  privacy: reading.privacy,
+  terms: reading.terms,
 };
 
 export const TEST_NONCE = 'test-nonce';

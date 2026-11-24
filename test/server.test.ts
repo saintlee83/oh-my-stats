@@ -6,7 +6,7 @@ import { LOGO_SVG } from '../src/server/logo.ts';
 import { COMPONENT_KEYS } from '../src/shared/render/svg.ts';
 import { pageHeaders } from '../src/web/routes.ts';
 import { testDb } from './sqlite-d1.ts';
-import { TEST_NONCE } from './site.tsx';
+import { site, TEST_NONCE } from './site.tsx';
 import { githubMetrics } from './fixtures.ts';
 import {
   api, app, countingDb, fakeCache, fakeGitHub, MACHINE_A, MACHINE_B, machine, mark, octo, ORIGIN, published, SECRET_NAME, signIn, upload, webLogin, webPost,
@@ -384,7 +384,7 @@ test('a renamed GitHub account keeps its data, and a reused login gets none of i
 test('the install steps name the server, except on the hosted one the agent already defaults to', async () => {
   const context = app();
   assert.match(await (await context.call('/')).text(), /oms login --server https:\/\/stats\.example/);
-  const hosted = await handle(new Request('https://ohmystats.dev/'), context.deps);
+  const hosted = await site(new Request('https://ohmystats.dev/'), context.deps);
   const text = await hosted.text();
   assert.match(text, /oms login\n/);
   assert.ok(!text.includes('--server'));
@@ -1010,8 +1010,8 @@ test('install commands are shown per system, each with the same next steps', asy
     const text = await page.text();
     assert.match(text, /<pre><code>curl -fsSL https:\/\/stats\.example\/install\.sh \| sh\noms login --server https:\/\/stats\.example\noms service install<\/code><\/pre>/);
     assert.match(text, /<pre><code>irm https:\/\/stats\.example\/install\.ps1 \| iex\noms login --server https:\/\/stats\.example\noms service install<\/code><\/pre>/);
-    assert.equal(text.match(/type="radio" name="os"/g)?.length, 2);
-    assert.equal(text.match(/type="radio" name="os"[^>]* checked/g)?.length, 1, 'one system is shown to start with');
+    assert.equal(text.match(/<input type="radio"[^>]* name="os"/g)?.length, 2);
+    assert.equal(text.match(/<input type="radio"[^>]* name="os"[^>]* checked/g)?.length, 1, 'one system is shown to start with');
     const setup = text.match(/<details class="github-setup">([\s\S]*?)<\/details>/)?.[1] ?? '';
     assert.match(setup, /<summary>[^<]*optional[^<]*<\/summary>/i);
     assert.match(setup, /gh auth status[\s\S]*gh auth login[\s\S]*oms sync --github[\s\S]*gh auth refresh -s repo,read:org/);
