@@ -7,6 +7,7 @@ import { Document } from '../src/web/document.tsx';
 import { ErrorView, PAGE_NOT_FOUND } from '../src/web/error.tsx';
 import type { PageModule } from '../src/web/page.ts';
 import * as boards from '../src/web/pages/boards.tsx';
+import * as groups from '../src/web/pages/groups.tsx';
 import { gate, isWorkspace, pageFor, pageHeaders, type PageName } from '../src/web/routes.ts';
 
 /**
@@ -19,6 +20,8 @@ const PAGES: Partial<Record<PageName, PageModule<any>>> = {
   providers: boards.providers,
   models: boards.models,
   'my-rankings': boards.myRankings,
+  groups: groups.groups,
+  group: groups.group,
 };
 
 export const TEST_NONCE = 'test-nonce';
@@ -49,8 +52,8 @@ export async function site(request: Request, deps: Deps): Promise<Response> {
   };
   if ('error' in gated) return draw(<ErrorView status={gated.error.status} message={gated.error.message} viewer={viewer} />, gated.error.status);
   const result = await module.load({ url, request, viewer, deps, params: page.params });
-  // Next's redirect() from a page is a 307.
-  if ('redirect' in result) return new Response(null, { status: 307, headers: { location: result.redirect } });
+  // Next's redirect() from a page is a 307, with the headers the proxy gives every page.
+  if ('redirect' in result) return new Response(null, { status: 307, headers: { location: result.redirect, ...pageHeaders(TEST_NONCE) } });
   if ('notFound' in result) return draw(<ErrorView status={404} message={module.notFound ?? PAGE_NOT_FOUND} viewer={viewer} />, 404);
   return draw(<module.View {...result.props} />, 200);
 }

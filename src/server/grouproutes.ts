@@ -34,7 +34,7 @@ const atJoinLimit = (viewer: UserRow) =>
   refused(400, `You are already in ${GROUP_LIMITS.joined} groups.`, 'That is the most an account can join. Leave one to join another.', viewer);
 
 /** A group holds few enough members to show its board whole, however many pages that is read in. */
-async function wholeBoard(db: Db, period: RankingPeriod, members: Membership, viewerId: string | null): Promise<Board> {
+export async function wholeBoard(db: Db, period: RankingPeriod, members: Membership, viewerId: string | null): Promise<Board> {
   const first = await rankBoard(db, period, members, { viewerId });
   const users = [...first.users];
   for (let page = 2; page <= first.pages; page++) users.push(...(await rankBoard(db, period, members, { viewerId, page })).users);
