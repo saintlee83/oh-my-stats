@@ -208,7 +208,7 @@ function TokenMixPanel({ tokens }: { tokens: TokenMetrics }) {
       <p className="muted">{`Covers tokens with a known breakdown: ${compact(known)} of ${compact(tokens.total)} lifetime tokens.`}</p>
       <div className="mix-bar" role="img" aria-label={parts.map((part) => `${part.label} ${percent(part.share)}`).join(', ')}>
         {parts.filter((part) => part.tokens > 0).map(({ key, label, share }) => (
-          <span key={key} style={{ flexGrow: Number((share * 100).toFixed(2)), ...swatch(key) }} title={`${label} · ${percent(share)}`}></span>
+          <span key={key} style={{ flexGrow: (share * 100).toFixed(2), ...swatch(key) }} title={`${label} · ${percent(share)}`}></span>
         ))}
       </div>
       <div className="table">

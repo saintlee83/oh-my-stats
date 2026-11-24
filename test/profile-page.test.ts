@@ -144,10 +144,11 @@ test('a day with usage in the last 12 months opens its providers, and every othe
     const grid = recent.slice(recent.indexOf('<div class="weeks">'), recent.indexOf('<p class="scale"'));
     assert.equal(count(grid, /class="day"/g), 365);
     assert.equal(count(grid, /<button class="day"/g), 3);
-    assert.equal(count(recent, /<section popover class="day-details"/g), 3);
-    assert.match(recent, /<button class="day" popovertarget="day-2026-11-09" data-level="4" aria-label="2026-11-09 · 200 tokens" title="2026-11-09 · 200 tokens"><\/button>/);
-    assert.match(recent, /<section popover class="day-details" id="day-2026-11-09" aria-label="AI usage on 2026-11-09"><h2>2026-11-09<\/h2><p>200 tokens<\/p><ul><li>Codex · 125<\/li><li>Pi · 75<\/li><\/ul>/);
-    assert.match(recent, /popovertarget="day-2025-11-10"[^>]*aria-label="2025-11-10 · 40 tokens"/, 'the first day of the 53 weeks');
+    // React writes `popover=""` and `popoverTarget`; HTML reads attribute names in any case.
+    assert.equal(count(recent, /<section popover(?:="")? class="day-details"/g), 3);
+    assert.match(recent, /<button class="day" popovertarget="day-2026-11-09" data-level="4" aria-label="2026-11-09 · 200 tokens" title="2026-11-09 · 200 tokens"><\/button>/i);
+    assert.match(recent, /<section popover(?:="")? class="day-details" id="day-2026-11-09" aria-label="AI usage on 2026-11-09"><h2>2026-11-09<\/h2><p>200 tokens<\/p><ul><li>Codex · 125<\/li><li>Pi · 75<\/li><\/ul>/);
+    assert.match(recent, /popovertarget="day-2025-11-10"[^>]*aria-label="2025-11-10 · 40 tokens"/i, 'the first day of the 53 weeks');
     assert.match(recent, /<span class="day" title="2026-11-08 · 0 tokens"><\/span>/, 'a day without usage');
     assert.doesNotMatch(recent, /2025-11-09/, 'the day before the 53 weeks begin');
     assert.match(recent, /2025-11-10 – 2026-11-09 · 290 tokens on 3 days · Select a day for its providers\./);
@@ -239,7 +240,8 @@ test('the period tiles show each number on the public and the private page', asy
     const periods = periodsOf(page);
     assert.deepEqual([...periods.matchAll(/<label for="period-([^"]+)" data-label="[^"]+">([^<]+)<\/label>/g)].map((match) => match.slice(1)),
       [['all', 'Lifetime'], ['30', 'Last 30 days'], ['7', 'Last 7 days'], ['month', 'This month'], ['last-month', 'Last month']]);
-    assert.match(periods, /<input type="radio" name="period" id="period-all" checked>/);
+    // React writes the name after the id, and `checked=""`.
+    assert.match(periods, /<input type="radio" (?:name="period" id="period-all"|id="period-all" name="period") checked(?:="")?\/?>/);
     const [lifetime, last30, last7, month, lastMonth] = panesOf(periods);
     assert.deepEqual(tiles(lifetime), [
       ['Tokens', '16.7k', '16,684'], ['Active days', '10', 'since 2026-09-30'], ['Most used provider', 'Claude Code', '96.1% of tokens'],
