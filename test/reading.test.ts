@@ -5,7 +5,9 @@ import { PROVIDERS } from '../src/shared/format.ts';
 import { api, app, countingDb, fakeCache, MACHINE_A, machine, mark, octo, ORIGIN, published, SECRET_NAME, upload, webLogin, webPost } from './harness.ts';
 
 const READING = ['/how-we-count', '/privacy', '/terms'];
-const NOINDEX = '<meta name="robots" content="noindex">';
+// Pages drawn with React close their void tags; the server's own pages don't.
+const NOINDEX = /<meta name="robots" content="noindex"\/?>/;
+const noindex = (html: string) => NOINDEX.test(html);
 
 const PEOPLE = {
   'gh-token': octo, 'web-token': octo,
@@ -41,7 +43,7 @@ test('each reading page answers, shares the frame, and can be shared and indexed
       assert.match(page, /<meta name="description" content="[^"]{40,}">/, path);
       assert.equal(page.match(/<h1[ >]/g)?.length, 1, `${path} has one main heading`);
       assert.match(page, /<meta property="og:image" content="https:\/\/stats\.example\/og\.png">/, path);
-      assert.ok(!page.includes(NOINDEX), `${path} is for everyone`);
+      assert.ok(!noindex(page), `${path} is for everyone`);
       // Every jump at the top of the page lands on a section of it.
       const jumps = [...page.matchAll(/<a href="#([a-z-]+)">/g)].map(([, id]) => id);
       assert.ok(jumps.length >= 6, path);
@@ -233,11 +235,11 @@ test('pages only their owner sees, and errors, ask search engines to leave them 
   const { context } = await published();
   const session = await webLogin(context);
   for (const path of ['/', '/rankings', '/rankings?days=7', '/u/octo', ...READING]) {
-    assert.ok(!(await text(context, path)).includes(NOINDEX), `${path} is public`);
-    assert.ok(!(await text(context, path, { headers: { cookie: session } })).includes(NOINDEX), `${path} is public, whoever reads it`);
+    assert.ok(!noindex(await text(context, path)), `${path} is public`);
+    assert.ok(!noindex(await text(context, path, { headers: { cookie: session } })), `${path} is public, whoever reads it`);
   }
-  for (const path of ['/me', '/me/rankings']) assert.ok((await text(context, path, { headers: { cookie: session } })).includes(NOINDEX), path);
-  for (const path of ['/nope', '/u/nobody', '/rankings?days=8']) assert.ok((await text(context, path)).includes(NOINDEX), `${path} is an error`);
+  for (const path of ['/me', '/me/rankings']) assert.ok(noindex(await text(context, path, { headers: { cookie: session } })), path);
+  for (const path of ['/nope', '/u/nobody', '/rankings?days=8']) assert.ok(noindex(await text(context, path)), `${path} is an error`);
   assert.equal((await text(context, '/nope')).match(/<meta name="robots"/g)?.length, 1);
 });
 

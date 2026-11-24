@@ -88,7 +88,7 @@ export interface EdgeCache {
   delete(request: Request): Promise<boolean>;
 }
 
-const SESSION_COOKIE = 'oms_session';
+export const SESSION_COOKIE = 'oms_session';
 const STATE_COOKIE = 'oms_state';
 const WEB_SESSION_SECONDS = 30 * 86_400;
 const AGENT_SESSION_DAYS = 180;
@@ -97,13 +97,13 @@ const AGENT_SESSION_RENEW_DAYS = 150;
 const MAX_MACHINES_PER_ACCOUNT = 50;
 const MAX_USAGE_BYTES = 2_000_000;
 const MAX_GITHUB_BYTES = 256_000;
-const PUBLIC_CACHE = 'public, max-age=300';
+export const PUBLIC_CACHE = 'public, max-age=300';
 const CARD_KEYS = ['contributions', 'rhythm', 'languages', 'churn', 'tokens', 'coauthors', 'pulse'];
 /** Each release ships its own install scripts, so a script always matches the files it downloads. */
 export const LATEST_RELEASE = `${REPO_URL}/releases/latest/download`;
 const INSTALL_SCRIPTS = new Set(['/install.sh', '/install.ps1']);
 
-const HTML_CSP =
+export const HTML_CSP =
   "default-src 'none'; img-src 'self' data: https://avatars.githubusercontent.com; form-action 'self' https://github.com; base-uri 'none'; frame-ancestors 'none'";
 const DASHBOARD_CSP = `${HTML_CSP}; style-src 'self' 'unsafe-inline'; script-src 'self'`;
 
@@ -168,12 +168,14 @@ const authConfig = (deps: Deps): GitHubAuthConfig => ({
   fetch: deps.fetch,
 });
 
-async function viewerFromCookie(request: Request, deps: Deps): Promise<UserRow | null> {
-  const token = readCookie(request, SESSION_COOKIE);
+/** The signed-in person a web session cookie's value belongs to. */
+export async function viewerFromToken(token: string | null | undefined, deps: Pick<Deps, 'db' | 'now'>): Promise<UserRow | null> {
   if (!token) return null;
   const session = await findSession(deps.db, await hashToken(token), deps.now().toISOString());
   return session?.kind === 'web' ? userById(deps.db, session.user_id) : null;
 }
+
+const viewerFromCookie = (request: Request, deps: Deps) => viewerFromToken(readCookie(request, SESSION_COOKIE), deps);
 
 async function agentSession(request: Request, deps: Deps): Promise<SessionRow | null> {
   const header = request.headers.get('authorization') ?? '';
@@ -182,7 +184,7 @@ async function agentSession(request: Request, deps: Deps): Promise<SessionRow | 
   return session?.kind === 'agent' ? session : null;
 }
 
-async function buildMetrics(user: UserRow, deps: Deps): Promise<{ metrics: Metrics; github: GitHubMetrics | null }> {
+export async function buildMetrics(user: UserRow, deps: Deps): Promise<{ metrics: Metrics; github: GitHubMetrics | null }> {
   const now = deps.now();
   const [machines, stats, prices] = await Promise.all([
     loadUsage(deps.db, user.id),
@@ -233,17 +235,17 @@ async function avatarData(avatarUrl: string | null, origin: string, deps: Deps):
   }
 }
 
-async function withAvatar(metrics: Metrics, user: UserRow, origin: string, deps: Deps): Promise<Metrics> {
+export async function withAvatar(metrics: Metrics, user: UserRow, origin: string, deps: Deps): Promise<Metrics> {
   return { ...metrics, profile: { ...metrics.profile, avatar: await avatarData(user.avatar_url, origin, deps) } };
 }
 
-const hasData = (metrics: Metrics) => Boolean(metrics.github || metrics.tokens);
+export const hasData = (metrics: Metrics) => Boolean(metrics.github || metrics.tokens);
 
 const daysFrom = (now: Date, days: number) => new Date(now.getTime() + days * 86_400_000).toISOString();
 
-const clientIp = (request: Request) => request.headers.get('cf-connecting-ip') ?? 'unknown';
+export const clientIp = (request: Request) => request.headers.get('cf-connecting-ip') ?? 'unknown';
 
-const tooMany = () => new Response('Too many requests', { status: 429, headers: { 'retry-after': '60', 'cache-control': 'no-store' } });
+export const tooMany = () => new Response('Too many requests', { status: 429, headers: { 'retry-after': '60', 'cache-control': 'no-store' } });
 
 /** An address with the choices made for it, in the order given. A default is not written, so older links share its copy. */
 const choosing = (url: string, ...choices: (string | false)[]) => {
@@ -322,10 +324,16 @@ const LANDING_LEADERS = 5;
 const landingBoardKey = (origin: string) => new Request(`${origin}/cache/landing-board-2`);
 
 /**
+ * Where a location keeps what a public profile page shows to signed-out visitors, so the
+ * dashboard isn't drawn again for each of them. No page is served from here.
+ */
+export const profilePageKey = (origin: string, login: string) => new Request(`${origin}/cache/profile-page-1/${login.toLowerCase()}`);
+
+/**
  * The top of the public rankings, for the landing page. Ranking every profile is too much
  * work for the most visited page, so each location keeps the answer as long as a public page.
  */
-async function landingBoard(origin: string, deps: Deps): Promise<LandingBoard> {
+export async function landingBoard(origin: string, deps: Deps): Promise<LandingBoard> {
   const key = landingBoardKey(origin);
   const kept = await deps.cache?.match(key);
   if (kept) return kept.json();
@@ -374,7 +382,7 @@ async function purgeProfile(request: Request, deps: Deps, login: string): Promis
 
 // Public pages. A private or missing profile answers the same way, so neither is revealed.
 
-async function publicProfile(login: string, deps: Deps): Promise<UserRow | null> {
+export async function publicProfile(login: string, deps: Deps): Promise<UserRow | null> {
   const user = await userByLogin(deps.db, login);
   return user?.is_public === 1 ? user : null;
 }
@@ -422,7 +430,7 @@ async function serveComponentSvg(login: string, key: string, theme: Theme, origi
 }
 
 /** The place on the lifetime public board, which the profile page shows too. */
-const lifetimePosition = async (user: UserRow, deps: Deps) => (await publicRankings(deps.db, rankingPeriod('all', deps.now()), user.id)).position;
+export const lifetimePosition = async (user: UserRow, deps: Deps) => (await publicRankings(deps.db, rankingPeriod('all', deps.now()), user.id)).position;
 
 async function serveBadge(login: string, metric: BadgeMetric, deps: Deps): Promise<Response> {
   const user = await publicProfile(login, deps);
@@ -468,7 +476,7 @@ async function serveCard(login: string, key: string, deps: Deps): Promise<Respon
 }
 
 /** The picture sites show where a link to the profile is shared. They want a PNG, so it is drawn here. */
-const PREVIEW_IMAGE = 'og.png';
+export const PREVIEW_IMAGE = 'og.png';
 
 async function servePreview(login: string, deps: Deps): Promise<Response> {
   const user = await publicProfile(login, deps);
@@ -513,7 +521,7 @@ async function serveProfile(login: string, request: Request, deps: Deps): Promis
  * signed out. Only an address on this site and under /groups/ is taken, so a sign-in link
  * can't be made to send someone elsewhere.
  */
-function returnPath(value: string | null, origin: string, encoded = false): string | null {
+export function returnPath(value: string | null, origin: string, encoded = false): string | null {
   try {
     if (value && encoded) value = decodeURIComponent(value);
     if (!value || !value.startsWith('/') || value.length > 300) return null;

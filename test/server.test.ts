@@ -4,7 +4,9 @@ import { test } from 'node:test';
 import { handle, isLocalRequest, LATEST_RELEASE, type Deps } from '../src/server/app.ts';
 import { LOGO_SVG } from '../src/server/logo.ts';
 import { COMPONENT_KEYS } from '../src/shared/render/svg.ts';
+import { pageHeaders } from '../src/web/routes.ts';
 import { testDb } from './sqlite-d1.ts';
+import { TEST_NONCE } from './site.tsx';
 import { githubMetrics } from './fixtures.ts';
 import {
   api, app, countingDb, fakeCache, fakeGitHub, MACHINE_A, MACHINE_B, machine, mark, octo, ORIGIN, published, SECRET_NAME, signIn, upload, webLogin, webPost,
@@ -949,7 +951,10 @@ test('pages load nothing the content policy would block, and share one frame', a
     const policy = response.headers.get('content-security-policy') ?? '';
     assert.match(policy, /default-src 'none'/, path);
     const dashboardAssets = '<link rel="stylesheet" href="/dashboard.css"><script src="/dashboard.js" defer></script>';
-    if (path === '/me') {
+    if (policy.includes("'nonce-")) {
+      // A page drawn with React runs only the scripts that carry the response's nonce.
+      assert.equal(policy, pageHeaders(TEST_NONCE)['content-security-policy'], path);
+    } else if (path === '/me') {
       assert.ok(text.includes(dashboardAssets));
       assert.match(policy, /script-src 'self'(?:;|$)/);
       assert.match(policy, /style-src 'self' 'unsafe-inline'/);
@@ -962,7 +967,7 @@ test('pages load nothing the content policy would block, and share one frame', a
       assert.match(source, /^(\/(?!\/)|https:\/\/avatars\.githubusercontent\.com\/)/, `${path} loads ${source}`);
     }
     assert.match(text, /<a class="skip" href="#main">Skip to content<\/a>[\s\S]*<main id="main"/, path);
-    assert.match(text, /<meta name="description" content="[^"]{40,}">/, path);
+    assert.match(text, /<meta name="description" content="[^"]{40,}"\/?>/, path);
     assert.match(text, /<footer class="bottom">[\s\S]*href="https:\/\/github\.com\/saintlee83\/oh-my-stats"/, path);
     assert.equal(text.match(/<h1[ >]/g)?.length, 1, `${path} has one main heading`);
   }
@@ -980,16 +985,17 @@ test('pages worth sharing name the preview image by its full address, and the im
     const text = await (await context.call(path)).text();
     // A profile names its own picture, drawn from its numbers. Every other page names the site's.
     const image = path.startsWith('/u/') ? `${path.slice(1)}/og.png` : 'og.png';
-    assert.ok(text.includes(`<meta property="og:image" content="https://stats.example/${image}">`), path);
-    assert.match(text, /<meta name="twitter:card" content="summary_large_image">/, path);
+    const tag = `<meta property="og:image" content="https://stats.example/${image}"`;
+    assert.ok(text.includes(`${tag}>`) || text.includes(`${tag}/>`), path);
+    assert.match(text, /<meta name="twitter:card" content="summary_large_image"\/?>/, path);
   }
   for (const [path, init] of [['/nope', {}], ['/me', { headers: { cookie: session } }], ['/me/rankings', { headers: { cookie: session } }]] as const) {
     const text = await (await context.call(path, init)).text();
     assert.doesNotMatch(text, /og:image/, `${path} is not for sharing`);
-    assert.match(text, /<meta name="twitter:card" content="summary">/, path);
+    assert.match(text, /<meta name="twitter:card" content="summary"\/?>/, path);
   }
-  // Wrangler serves this folder at the site's root, so the Worker never sees the request.
-  assert.match(readFileSync(new URL('../wrangler.jsonc', import.meta.url), 'utf8'), /"assets": \{ "directory": "\.\/public" \}/);
+  // The build copies this folder into the assets Wrangler serves at the site's root.
+  assert.match(readFileSync(new URL('../wrangler.jsonc', import.meta.url), 'utf8'), /"assets": \{\s*"directory": "dist\/client"/);
   const image = readFileSync(new URL('../public/og.png', import.meta.url));
   assert.equal(image.subarray(1, 4).toString('latin1'), 'PNG');
   assert.deepEqual([image.readUInt32BE(16), image.readUInt32BE(20)], [2400, 1260], 'the size the pages declare');

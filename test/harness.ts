@@ -1,5 +1,6 @@
 import assert from 'node:assert/strict';
-import { handle, type Deps } from '../src/server/app.ts';
+import type { Deps } from '../src/server/app.ts';
+import { site } from './site.tsx';
 import { testDb } from './sqlite-d1.ts';
 
 /** What the server tests share: a server over a fresh database, a fake GitHub, and the usual sign-ins. */
@@ -60,7 +61,7 @@ export function app(overrides: Partial<Deps> = {}, tokens: Record<string, GitHub
     now: () => time,
     ...overrides,
   };
-  const call = (path: string, init: RequestInit = {}) => handle(new Request(`${ORIGIN}${path}`, init), deps);
+  const call = (path: string, init: RequestInit = {}) => site(new Request(`${ORIGIN}${path}`, init), deps);
   return { deps, call, github, setTime: (next: string) => (time = new Date(next)) };
 }
 

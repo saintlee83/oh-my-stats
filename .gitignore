@@ -3,3 +3,7 @@ node_modules/
 .dev.vars
 .DS_Store
 target/
+dist/
+.vinext/
+next-env.d.ts
+.next/
