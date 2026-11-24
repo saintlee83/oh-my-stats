@@ -277,7 +277,7 @@ test('the profile page names its preview as the image to show, at 1200 by 630, a
   assert.equal(page.match(/og:image"/g)?.length, 1, 'one image, not the site banner as well');
   const png = decode((await preview(context, new URL(meta('og:image') as string).pathname)).file);
   assert.deepEqual([png.width, png.height], [Number(meta('og:image:width')), Number(meta('og:image:height'))]);
-  assert.match(await (await context.call('/')).text(), /<meta property="og:image" content="https:\/\/stats\.example\/og\.png">/, 'other pages keep the site banner');
+  assert.match(await (await context.call('/')).text(), /<meta property="og:image" content="https:\/\/stats\.example\/og\.png"\/?>/, 'other pages keep the site banner');
 });
 
 test('every character the preview can write has a glyph of seven rows by five columns', () => {

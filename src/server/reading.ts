@@ -11,7 +11,7 @@ import { esc, layout, REPO_URL, SITE } from './pages.ts';
 
 type Section = [id: string, title: string, body: string];
 
-interface ReadingPage {
+export interface ReadingPage {
   title: string;
   lead: string;
   description: string;
@@ -82,12 +82,12 @@ const PRIVACY: ReadingPage = {
   title: 'Privacy',
   lead: 'What this server stores, what stays on your machine, what publishing makes public, and how to remove it. The server is open source, so what this page says about the code can be checked there.',
   description: `What this ${SITE} server stores, what stays on your machine, what publishing makes public, its two cookies, and how to delete your data.`,
-  updated: '2026-11-18',
+  updated: '2026-11-24',
   sections: [
     ['summary', 'In short', `<ul>
 <li>Only totals leave your machine. Prompts, responses and code never do.</li>
 <li>Your profile is private until you publish it, and a private profile looks the same as one that doesn’t exist.</li>
-<li>The personal dashboard uses a script from this server to navigate sections and inspect daily usage. The site has two sign-in cookies and no trackers.</li>
+<li>Pages run only scripts from this server, which draw the site in your browser. The site has two sign-in cookies and no trackers.</li>
 <li>You can remove a machine or your whole account on your dashboard, and it is deleted at once.</li>
 </ul>`],
     ['local', 'What stays on your machine', `<ul>
@@ -125,7 +125,7 @@ const PRIVACY: ReadingPage = {
 <li><code>oms_state</code> is set when you start signing in and removed when you finish, or after 10 minutes. It lets the server check that GitHub’s answer belongs to the sign-in you started, and, when you came from a group’s invite link, holds that address to return you to.</li>
 </ul>
 <p>Both are kept from scripts (<code>HttpOnly</code>) and travel only over HTTPS. With <code>SameSite=Lax</code>, another site can’t use them in a request of its own. They are sent from elsewhere only when you follow a link here.</p>
-<p>Public pages run no scripts. The signed-in dashboard loads a script from this server. It switches between sections and shows the selected day’s token count using data already on the page. The content policy allows images from GitHub’s avatar server and blocks frames, external fonts and third-party scripts. There is no analytics code, no advertising and no tracking pixel.</p>`],
+<p>Pages run scripts from this server only. They draw the page in your browser and open some links without a reload. On the signed-in dashboard they also switch between sections and show the selected day’s token count, using data already on the page. The content policy runs a script only when it carries the code its page was sent with, allows images from GitHub’s avatar server, and blocks frames, external fonts and third-party scripts. There is no analytics code, no advertising and no tracking pixel.</p>`],
     ['others', 'Who else is involved', `<h3>GitHub, to sign in</h3>
 <p>On the website you are sent to GitHub to approve the sign-in. On a machine, <code>oms login</code> shows a code that you approve at GitHub. Either way the server only ever receives a token that proves who you are. It comes from a GitHub App with no permissions, so it can’t read your repositories. The server uses it once and doesn’t store it, and <code>oms</code> refuses to send a GitHub token with more access than that.</p>
 <h3>GitHub, for avatars</h3>
@@ -235,3 +235,10 @@ ${addresses.map((address) => `<url><loc>${esc(address)}</loc></url>`).join('\n')
 </urlset>
 `;
 }
+
+/** The words of each reading page by its address, for the pages drawn with React. */
+export const READING: ReadonlyMap<string, ReadingPage> = new Map([
+  ['/how-we-count', HOW_WE_COUNT],
+  ['/privacy', PRIVACY],
+  ['/terms', TERMS],
+]);

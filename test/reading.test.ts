@@ -40,9 +40,9 @@ test('each reading page answers, shares the frame, and can be shared and indexed
       const page = await response.text();
       assert.doesNotMatch(page, /<script|<link rel="stylesheet"|@import|url\((?!#)|<iframe|<img (?!src="\/favicon\.svg"|src="https:\/\/avatars\.githubusercontent\.com\/)/i, `${path} needs only what the policy allows`);
       assert.match(page, /<a class="skip" href="#main">Skip to content<\/a>[\s\S]*<main id="main">/, path);
-      assert.match(page, /<meta name="description" content="[^"]{40,}">/, path);
+      assert.match(page, /<meta name="description" content="[^"]{40,}"\/?>/, path);
       assert.equal(page.match(/<h1[ >]/g)?.length, 1, `${path} has one main heading`);
-      assert.match(page, /<meta property="og:image" content="https:\/\/stats\.example\/og\.png">/, path);
+      assert.match(page, /<meta property="og:image" content="https:\/\/stats\.example\/og\.png"\/?>/, path);
       assert.ok(!noindex(page), `${path} is for everyone`);
       // Every jump at the top of the page lands on a section of it.
       const jumps = [...page.matchAll(/<a href="#([a-z-]+)">/g)].map(([, id]) => id);
@@ -111,14 +111,16 @@ test('the privacy page names the cookies the server sets, and how long each last
     assert.equal((await other.call(path)).headers.get('set-cookie'), null, path);
   }
   assert.match(page, /A visitor who never signs in gets none/);
-  assert.match(page, /Public pages run no scripts/);
-  assert.match(page, /signed-in dashboard loads a script from this server/);
+  // What the page says of scripts is what the content policy enforces: this server's own, and only those its page was sent with.
+  assert.match(page, /Pages run scripts from this server only/);
+  assert.match(page, /blocks frames, external fonts and third-party scripts. There is no analytics code/);
+  assert.match((await context.call('/privacy')).headers.get('content-security-policy') ?? '', /script-src 'self' 'nonce-[^']+'(?:;|$)/);
 });
 
 test('the privacy page says what is stored and public, how to delete it, and invents no contact', async () => {
   const { context } = await published();
   const page = await text(context, '/privacy');
-  assert.match(page, /<p class="muted">Last updated <time datetime="(\d{4}-\d{2}-\d{2})">\1<\/time><\/p>/);
+  assert.match(page, /<p class="muted">Last updated <time date[tT]ime="(\d{4}-\d{2}-\d{2})">\1<\/time><\/p>/);
   for (const fact of [
     'Prompts, responses and code', 'Commit messages and file paths', 'Private repository and organization names', 'The token that reads your repositories',
     'no place for an email address, a password or an IP address',
@@ -148,7 +150,7 @@ test('the privacy page says what is stored and public, how to delete it, and inv
 
 test('the terms are short: no warranty, your own real usage, and publishing by choice', async () => {
   const page = await text(app(), '/terms');
-  assert.match(page, /<p class="muted">Last updated <time datetime="\d{4}-\d{2}-\d{2}">/);
+  assert.match(page, /<p class="muted">Last updated <time date[tT]ime="\d{4}-\d{2}-\d{2}">/);
   for (const fact of [
     '<a href="https://github.com/saintlee83/oh-my-stats/blob/main/LICENSE">MIT license</a>',
     'without warranty of any kind',
