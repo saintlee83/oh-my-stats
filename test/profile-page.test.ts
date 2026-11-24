@@ -242,6 +242,7 @@ test('the period tiles show each number on the public and the private page', asy
     const periods = periodsOf(page);
     assert.deepEqual([...periods.matchAll(/<label for="period-([^"]+)" data-label="[^"]+">([^<]+)<\/label>/g)].map((match) => match.slice(1)),
       [['all', 'Lifetime'], ['30', 'Last 30 days'], ['7', 'Last 7 days'], ['month', 'This month'], ['last-month', 'Last month']]);
+    // React writes the name after the id, and `checked=""`.
     assert.match(periods, /<input type="radio" (?:name="period" id="period-all"|id="period-all" name="period") checked(?:="")?\/?>/);
     const [lifetime, last30, last7, month, lastMonth] = panesOf(periods);
     assert.deepEqual(tiles(lifetime), [

@@ -11,6 +11,7 @@ import * as groups from '../src/web/pages/groups.tsx';
 import { landing } from '../src/web/pages/landing.tsx';
 import * as reading from '../src/web/pages/reading.tsx';
 import { profile } from '../src/web/pages/profile.tsx';
+import * as dashboard from '../src/web/pages/dashboard.tsx';
 import { gate, isWorkspace, pageFor, pageHeaders, type PageName } from '../src/web/routes.ts';
 
 /**
@@ -30,6 +31,7 @@ const PAGES: Partial<Record<PageName, PageModule<any>>> = {
   privacy: reading.privacy,
   terms: reading.terms,
   profile,
+  me: dashboard.me,
 };
 
 export const TEST_NONCE = 'test-nonce';
