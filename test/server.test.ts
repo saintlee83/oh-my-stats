@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
 import { test } from 'node:test';
-import { handle, isLocalRequest, LATEST_RELEASE, type Deps } from '../src/server/app.ts';
+import { handle, isLocalRequest, LATEST_RELEASE, profilePageKey, type Deps } from '../src/server/app.ts';
 import { LOGO_SVG } from '../src/server/logo.ts';
 import { COMPONENT_KEYS } from '../src/shared/render/svg.ts';
 import { pageHeaders } from '../src/web/routes.ts';
@@ -454,8 +454,12 @@ test('a signed-in visitor never gets or leaves a shared copy of a page', async (
   assert.equal(page.headers.get('cache-control'), 'no-store');
   assert.equal(cache.store.size, 0);
   const anonymous = await context.call('/u/octo');
-  assert.equal(anonymous.headers.get('cache-control'), 'public, max-age=300');
+  // The page itself is never kept, by browsers or the edge: what it shows is, for signed-out visits.
+  assert.equal(anonymous.headers.get('cache-control'), 'no-store');
+  assert.ok(cache.store.has(profilePageKey(ORIGIN, 'octo').url), 'a signed-out visit keeps what the page shows');
   assert.ok(!(await anonymous.text()).includes('href="/me"'), 'the shared copy names nobody');
+  const again = await (await context.call('/u/octo', { headers: { cookie: session } })).text();
+  assert.ok(again.includes('href="/me"'), 'a signed-in visit is drawn for its viewer, never from the shared copy');
 });
 
 test('limits apply to uncached pages, by address and page, and to sign-in and uploads', async () => {
@@ -523,7 +527,8 @@ test('a made-up session cookie gets the shared copy, and still counts against th
   const before = draws();
   const forged: RequestInit = { headers: { cookie: 'oms_session=made-up', 'cf-connecting-ip': '203.0.113.9' } };
   const page = await context.call('/u/octo', forged);
-  assert.equal(page.headers.get('cache-control'), 'public, max-age=300');
+  assert.equal(page.status, 200);
+  assert.ok(!(await page.text()).includes('href="/me"'), 'the shared copy names nobody');
   assert.equal(draws(), before, 'the page is not drawn again');
   assert.ok(keys.includes('session:203.0.113.9'));
   open = false;
@@ -1123,7 +1128,7 @@ test('weekly card, day drilldown and provider shares agree across private and pu
   const cookie = await webLogin(context);
   for (const [path, headers] of [['/me', { cookie }], ['/u/octo', {}]] as const) {
     const page = await (await context.call(path, { headers })).text();
-    assert.match(page, /popovertarget="day-2026-11-09"[^>]*aria-label="2026-11-09 · 200 tokens"/);
+    assert.match(page, /popover[tT]arget="day-2026-11-09"[^>]*aria-label="2026-11-09 · 200 tokens"/, `${path}: React writes the attribute in camel case, which HTML reads the same`);
     assert.match(page, /<p>200 tokens<\/p><ul><li>Codex · 125<\/li><li>Pi · 75<\/li>/);
     assert.match(page, /Codex<\/td><td class="num">100.0%<\/td><td class="num">50.0%/);
   }

@@ -367,7 +367,7 @@ async function purgeProfile(request: Request, deps: Deps, login: string): Promis
   const base = `${origin}/u/${login.toLowerCase()}`;
   const images = [`${base}/dashboard.svg`, `${base}/ranking.svg`, ...COMPONENT_KEYS.map((key) => `${base}/components/${key}.svg`)];
   const urls = [
-    base,
+    profilePageKey(origin, login).url,
     landingBoardKey(origin).url,
     `${origin}/sitemap.xml`,
     `${base}/${PREVIEW_IMAGE}`,

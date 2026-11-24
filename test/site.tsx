@@ -7,6 +7,7 @@ import { Document } from '../src/web/document.tsx';
 import { ErrorView, PAGE_NOT_FOUND } from '../src/web/error.tsx';
 import type { PageModule } from '../src/web/page.ts';
 import * as boards from '../src/web/pages/boards.tsx';
+import { profile } from '../src/web/pages/profile.tsx';
 import { gate, isWorkspace, pageFor, pageHeaders, type PageName } from '../src/web/routes.ts';
 
 /**
@@ -19,6 +20,7 @@ const PAGES: Partial<Record<PageName, PageModule<any>>> = {
   providers: boards.providers,
   models: boards.models,
   'my-rankings': boards.myRankings,
+  profile,
 };
 
 export const TEST_NONCE = 'test-nonce';
