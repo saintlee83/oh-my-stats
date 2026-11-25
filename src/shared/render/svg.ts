@@ -1,48 +1,54 @@
-import type { GitHubMetrics, Metrics, ProfileMetrics, ProfileStatus, TokenMetrics, TokenYear } from '../metrics.ts';
-import { clip, commas, compact, costLabel, hours, percent, providerName } from '../format.ts';
+import type { GitHubMetrics, Metrics, ProfileMetrics, ProfileStatus, RankMetrics, TokenMetrics, TokenYear } from '../metrics.ts';
+import { clip, commas, compact, costLabel, hours, niceMax, percent, providerName } from '../format.ts';
 import { WEEKDAYS } from '../time.ts';
 import { monthlyRecap, weeklyUsage } from '../insights.ts';
 
 type Palette = Record<
-  'surface' | 'ink' | 'ink2' | 'muted' | 'grid' | 'axis' | 'ramp-low' | 'c1' | 'c2' | 'c3' | 'c4' | 'add' | 'del' | 'h0' | 'h1' | 'h2' | 'h3' | 'h4' | 'h5',
+  'surface' | 'ink' | 'ink2' | 'muted' | 'grid' | 'axis' | 'ramp-low' | 'accent' | 'c1' | 'c2' | 'c3' | 'c4' | 'add' | 'del' | 'h0' | 'h1' | 'h2' | 'h3' | 'h4' | 'h5',
   string
 >;
 
 /**
  * Every palette is checked for color-vision safety against its own surface:
- * categorical slots keep a fixed order, magnitude uses one hue whose quietest step
- * still shows on the surface, and added/removed use a blue-red diverging pair of
- * equal lightness. Text clears 4.5:1. Inside an <img> an SVG follows the OS color
- * scheme and has no hover, so every value is also in the text cards, which act as
- * the table view.
+ * categorical slots keep a fixed order, and magnitude uses one hue whose quietest step
+ * still shows on the surface. `accent` is that hue, for a chart of one series. Text
+ * clears 4.5:1. Inside an <img> an SVG follows the OS color scheme and has no hover,
+ * so every value is also in the text cards, which act as the table view.
  */
 export const THEMES = {
-  /** GitHub's own backgrounds and grays, so on a GitHub page the image reads as one of its bordered boxes. */
+  /**
+   * GitHub's own backgrounds and grays, so on a GitHub page the image reads as one of its
+   * bordered boxes, and its greens: usage is drawn the way its contribution graph draws a
+   * year. The quietest green is darker than GitHub's, which nearly vanishes on white.
+   * Added and removed are its green and red, which red-green color blindness can't tell
+   * apart, so that chart also says which is which by side and by sign.
+   */
   github: {
     light: {
-      surface: '#ffffff', ink: '#1f2328', ink2: '#424a53', muted: '#656d76', grid: '#d0d7de', axis: '#afb8c1', 'ramp-low': '#afb8c1',
-      c1: '#2a78d6', c2: '#eb6834', c3: '#1baf7a', c4: '#eda100', add: '#2a78d6', del: '#e34948',
-      h0: '#eaeef2', h1: '#7eb5fe', h2: '#4996f6', h3: '#2a78d6', h4: '#015bb5', h5: '#014286',
+      surface: '#ffffff', ink: '#1f2328', ink2: '#424a53', muted: '#656d76', grid: '#d0d7de', axis: '#afb8c1', 'ramp-low': '#afb8c1', accent: '#2da44e',
+      c1: '#2a78d6', c2: '#eb6834', c3: '#1baf7a', c4: '#eda100', add: '#1a7f37', del: '#cf222e',
+      h0: '#eaeef2', h1: '#4ac26b', h2: '#2da44e', h3: '#1a7f37', h4: '#116329', h5: '#044f1e',
     },
     dark: {
-      surface: '#0d1117', ink: '#e6edf3', ink2: '#c9d1d9', muted: '#8b949e', grid: '#30363d', axis: '#3d444d', 'ramp-low': '#4d5560',
-      c1: '#3987e5', c2: '#d95926', c3: '#199e70', c4: '#c98500', add: '#3987e5', del: '#e66767',
-      h0: '#21262d', h1: '#004791', h2: '#0e63bf', h3: '#3683e2', h4: '#5ca3ff', h5: '#99c5fe',
+      surface: '#0d1117', ink: '#e6edf3', ink2: '#c9d1d9', muted: '#8b949e', grid: '#30363d', axis: '#3d444d', 'ramp-low': '#4d5560', accent: '#3fb950',
+      c1: '#3987e5', c2: '#d95926', c3: '#199e70', c4: '#c98500', add: '#3fb950', del: '#f85149',
+      h0: '#21262d', h1: '#0f5323', h2: '#196c2e', h3: '#2ea043', h4: '#3fb950', h5: '#56d364',
     },
   },
   /**
    * Tokyo Night in dark mode and its Day variant in light mode. Its blue, orange, cyan and
    * yellow are kept, at the lightness a chart needs; its green is left out, because next
-   * to yellow and orange it can't be told apart with red-green color blindness.
+   * to yellow and orange it can't be told apart with red-green color blindness. Magnitude
+   * is its blue, and added and removed a blue and a red of equal lightness.
    */
   'tokyo-night': {
     light: {
-      surface: '#e1e2e7', ink: '#3760bf', ink2: '#475692', muted: '#596089', grid: '#c4c8da', axis: '#a8aecb', 'ramp-low': '#a1a6c5',
+      surface: '#e1e2e7', ink: '#3760bf', ink2: '#475692', muted: '#596089', grid: '#c4c8da', axis: '#a8aecb', 'ramp-low': '#a1a6c5', accent: '#2e7de9',
       c1: '#2e7de9', c2: '#b15c00', c3: '#007197', c4: '#a0731c', add: '#2e7de9', del: '#e8155b',
       h0: '#c4c8da', h1: '#5a9efe', h2: '#3483f0', h3: '#176ad4', h4: '#0053b2', h5: '#013e89',
     },
     dark: {
-      surface: '#1a1b26', ink: '#c0caf5', ink2: '#a9b1d6', muted: '#7f86ad', grid: '#292e42', axis: '#3b4261', 'ramp-low': '#4a5175',
+      surface: '#1a1b26', ink: '#c0caf5', ink2: '#a9b1d6', muted: '#7f86ad', grid: '#292e42', axis: '#3b4261', 'ramp-low': '#4a5175', accent: '#698fe3',
       c1: '#698fe3', c2: '#d3763b', c3: '#0aa4bc', c4: '#b88841', add: '#698fe3', del: '#e1627b',
       h0: '#292e42', h1: '#2a4b98', h2: '#4468b8', h3: '#6086d9', h4: '#7da6fb', h5: '#acc7ff',
     },
@@ -192,15 +198,6 @@ function legend(x: number, y: number, items: { label: string; fill: string }[]):
   return out;
 }
 
-export function niceMax(value: number): number {
-  if (value <= 0) return 1;
-  const magnitude = 10 ** Math.floor(Math.log10(value));
-  for (const step of [1, 1.5, 2, 2.5, 3, 4, 5, 6, 8, 10]) {
-    if (step * magnitude >= value) return step * magnitude;
-  }
-  return 10 * magnitude;
-}
-
 /** Skewed activity data reads better on a square-root scale: quiet cells stay visible. */
 function heatStep(value: number, max: number): number {
   if (value <= 0 || max <= 0) return 0;
@@ -224,7 +221,7 @@ function miniBars(x: number, y: number, values: number[], width: number, height:
     .map((value, index) => {
       const size = value > 0 ? Math.max(2, (value / max) * height) : 0;
       const last = index === values.length - 1;
-      return barUp(x + index * slot, y + height, Math.max(1, slot - 2), size, last ? 'c1' : 'ramp-low');
+      return barUp(x + index * slot, y + height, Math.max(1, slot - 2), size, last ? 'accent' : 'ramp-low');
     })
     .join('');
 }
@@ -282,7 +279,7 @@ function statusPill(status: ProfileStatus): { width: number; body: string } {
   return { width, body };
 }
 
-function careerTiles({ github, tokens }: Metrics): { label: string; value: string; note: string; wordy?: boolean }[] {
+function careerTiles({ github, tokens, rank }: Metrics): { label: string; value: string; note: string; wordy?: boolean }[] {
   const tiles: { label: string; value: string; note: string; wordy?: boolean }[] = [];
   if (github) {
     const active = github.years.filter((year) => year.calendar > 0);
@@ -297,6 +294,7 @@ function careerTiles({ github, tokens }: Metrics): { label: string; value: strin
   }
   if (tokens) {
     tiles.push({ label: 'AI tokens', value: compact(tokens.total), note: github ? `${percent(github.pulse.aiShare, 0)} of commits AI-assisted` : `${commas(tokens.activeDays)} active days` });
+    if (rank?.rank) tiles.push({ label: 'Token rank', value: `#${commas(rank.rank)}`, note: `of ${profiles(rank.participants)}` });
   } else if (github) {
     tiles.push({ label: 'Current streak', value: `${commas(github.pulse.streak)} days`, note: `best ${commas(github.pulse.bestStreak)} days` });
   }
@@ -344,7 +342,8 @@ function profileSection(metrics: Metrics): Section {
   const tiles = careerTiles(metrics);
   if (!tiles.length) return { height: Math.max(AVATAR, y + 6), body };
   const top = Math.max(AVATAR, y + 6) + 28;
-  const slot = INNER / 4;
+  // Four to a row, or five once the profile is ranked.
+  const slot = INNER / Math.max(4, tiles.length);
   tiles.forEach((tile, index) => {
     const x = index * slot;
     body += text(x, top + 14, tile.label, 'label');
@@ -377,7 +376,8 @@ function rhythmSection(github: GitHubMetrics, timezone: string): Section {
     body += text(labelWidth + hour * (cell + gap), axisY, `${String(hour).padStart(2, '0')}:00`, 'axis');
   }
 
-  body += heatLegend(labelWidth + 24 * (cell + gap), axisY);
+  // Beside the heading, clear of the hours along the bottom.
+  body += heatLegend(labelWidth + 24 * (cell + gap) - gap, 32);
 
   const barX = labelWidth + 24 * (cell + gap) + 40;
   const barWidth = INNER - barX;
@@ -389,7 +389,7 @@ function rhythmSection(github: GitHubMetrics, timezone: string): Section {
     body += text(barX, y + 10, `${bucket.label} ${bucket.range}`, 'label');
     body += text(barX + barWidth, y + 10, percent(bucket.share, 0), 'value', 'end');
     body += `<rect x="${barX}" y="${y + 18}" width="${barWidth}" height="8" rx="4" fill="var(--grid)"/>`;
-    body += barRight(barX, y + 18, (bucket.share / peakShare) * barWidth, 8, 'c1', `${bucket.label}: ${commas(bucket.count)}`);
+    body += barRight(barX, y + 18, (bucket.share / peakShare) * barWidth, 8, 'accent', `${bucket.label}: ${commas(bucket.count)}`);
   });
   return { height: axisY + 6, body };
 }
@@ -447,7 +447,7 @@ function coauthorsPanel(github: GitHubMetrics, width: number): Section {
     const label = row.label.length > 20 ? `${row.label.slice(0, 19)}…` : row.label;
     body += text(0, y + 12, label, 'label');
     const size = (row.commits / maxCommits) * (width - nameWidth - valueWidth);
-    body += barRight(nameWidth, y, Math.max(2, size), 14, 'c1', `${row.label}: ${commas(row.commits)} commits`);
+    body += barRight(nameWidth, y, Math.max(2, size), 14, 'accent', `${row.label}: ${commas(row.commits)} commits`);
     body += text(nameWidth + Math.max(2, size) + 6, y + 12, compact(row.commits), 'value');
   });
   return { height: 72 + rows.length * 26, body };
@@ -494,23 +494,35 @@ export const listPrice = (tokens: TokenMetrics) =>
 
 /**
  * Providers as chart series, most used first. A chart has four colors, so past four providers
- * the smaller ones are drawn together. Claude Code, Codex and Gemini CLI keep their color
- * wherever they rank.
+ * the smaller ones are drawn together, in gray. Gemini CLI, Claude Code and Codex keep their
+ * color wherever they rank, the same one the website gives them.
  */
 function providerSeries(tools: string[]): { label: string; tools: string[]; fill: string }[] {
   // Keep the compact embed readable; the text card lists every provider individually.
-  const visible = tools.slice(0, tools.length > 4 ? 3 : 4);
-  const groups = visible.map((tool) => ({ label: providerName(tool), tools: [tool] }));
-  if (visible.length < tools.length) groups.push({ label: 'Others', tools: tools.slice(visible.length) });
-  const colors = new Map([['claude', 'c1'], ['codex', 'c2'], ['gemini', 'c3']]);
-  const usedColors = new Set(visible.map((tool) => colors.get(tool)));
-  const spare = ['c1', 'c2', 'c3', 'c4'].filter((color) => !usedColors.has(color));
-  return groups.map((group) => ({
-    ...group, fill: (group.tools.length === 1 && colors.get(group.tools[0])) || spare.shift()!,
-  }));
+  const visible = tools.slice(0, 4);
+  const colors = new Map([['gemini', 'c1'], ['claude', 'c2'], ['codex', 'c3']]);
+  const taken = new Set(visible.map((tool) => colors.get(tool)));
+  // The color no tool is promised goes first, as on the website.
+  const spare = ['c4', 'c1', 'c2', 'c3'].filter((color) => !taken.has(color));
+  const groups = visible.map((tool) => ({ label: providerName(tool), tools: [tool], fill: colors.get(tool) ?? spare.shift()! }));
+  if (visible.length < tools.length) groups.push({ label: 'Others', tools: tools.slice(visible.length), fill: 'ramp-low' });
+  return groups;
 }
 
-function tokensSection(tokens: TokenMetrics): Section {
+const profiles = (count: number) => `${commas(count)} ranked public ${count === 1 ? 'profile' : 'profiles'}`;
+
+/** Where the profile stands on the public board, as a sentence for whoever can't see the image. */
+const rankSummary = (rank: RankMetrics | null | undefined) => (rank?.rank ? ` Rank #${commas(rank.rank)} of ${profiles(rank.participants)}, by lifetime AI tokens.` : '');
+
+/** A rounded label in the top right corner of a section. */
+function rankPill(rank: RankMetrics): string {
+  const label = `Rank #${commas(rank.rank!)} of ${commas(rank.participants)}`;
+  const width = 24 + textWidth(label, 12 * BOLD);
+  const x = INNER - width;
+  return `<rect x="${n(x)}" y="-3" width="${n(width)}" height="26" rx="13" class="outline"><title>${esc(`#${commas(rank.rank!)} of ${profiles(rank.participants)}, by lifetime AI tokens`)}</title></rect>${text(x + 12, 14, label, 'chip')}`;
+}
+
+function tokensSection(tokens: TokenMetrics, rank: RankMetrics | null = null): Section {
   const machineCount = (count: number) => (count === 1 ? '1 machine' : `${count} machines`);
   const reach = {
     machine: (count: number) => `on ${machineCount(count)}`,
@@ -524,6 +536,7 @@ function tokensSection(tokens: TokenMetrics): Section {
     ['At API list price', listPrice(tokens)],
   ];
   let body = text(0, 14, 'AI token trace', 'h1');
+  if (rank?.rank) body += rankPill(rank);
   body += text(0, 32, clip(tokens.tools.map((row) => `${providerName(row.tool)} ${reach[row.scope](row.machines)}`).join(', '), 110), 'note');
   const tileWidth = INNER / tileItems.length;
   tileItems.forEach(([label, value], index) => {
@@ -665,7 +678,7 @@ function weeklySection(tokens: TokenMetrics): Section {
   week.days.forEach((day, index) => {
     const x = start + index * 46;
     const height = day.total ? Math.max(2, 53 * day.total / peak) : 0;
-    body += barUp(x, 85, 30, height, 'c1', `${day.date} · ${commas(day.total)} tokens`);
+    body += barUp(x, 85, 30, height, 'accent', `${day.date} · ${commas(day.total)} tokens`);
     body += text(x + 15, 105, day.date.slice(5), 'axis', 'middle');
   });
   return { height: 125, body };
@@ -816,7 +829,7 @@ function yearModelsPanel(year: TokenYear, width: number): Section {
     const y = 50 + index * 26;
     const size = Math.max(2, (total / rows[0][1]) * (width - nameWidth - valueWidth));
     return fitted(0, y + 12, model, nameWidth - 12, 13, 'label')
-      + barRight(nameWidth, y, size, 14, 'c1', `${model}: ${commas(total)} tokens`)
+      + barRight(nameWidth, y, size, 14, 'accent', `${model}: ${commas(total)} tokens`)
       + text(nameWidth + size + 6, y + 12, `${compact(total)} · ${percent(total / logged, 0)}`, 'value');
   });
   const note = `By tokens in synced logs, of ${models.length === 1 ? '1 model' : `${commas(models.length)} models`}`;
@@ -914,7 +927,7 @@ function profileSummary({ profile }: Metrics): string {
 type Component =
   | { label: string; source: 'profile' | 'recap'; draw(metrics: Metrics): Section; summary(metrics: Metrics): string }
   | { label: string; source: 'github'; draw(github: GitHubMetrics, timezone: string): Section; summary(github: GitHubMetrics): string }
-  | { label: string; source: 'tokens'; draw(tokens: TokenMetrics): Section; summary(tokens: TokenMetrics): string }
+  | { label: string; source: 'tokens'; draw(tokens: TokenMetrics, rank?: RankMetrics | null): Section; summary(tokens: TokenMetrics): string }
   /** Drawn for one year at a time, so it is a part of its own and not in the dashboard. */
   | { label: string; source: 'year' };
 
@@ -991,11 +1004,13 @@ export function renderComponent(metrics: Metrics, key: ComponentKey, theme: Them
   const heading = `oh-my-stats: ${component.label}`;
   const review = component.source === 'year' ? yearReview(metrics, year) : null;
   if (review) return frame(theme, `oh-my-stats: ${review.heading}`, review.summary, review.sections, null);
+  // The profile and the token trace draw the rank, so they say it in words too.
+  const ranked = key === 'profile' || key === 'tokens' ? rankSummary(metrics.rank) : '';
   if (component.source === 'profile' || (component.source === 'recap' && hasMonthlyRecap(metrics))) {
-    return frame(theme, heading, component.summary(metrics), [component.draw(metrics)], null);
+    return frame(theme, heading, component.summary(metrics) + ranked, [component.draw(metrics)], null);
   }
   if (component.source === 'tokens' && metrics.tokens) {
-    return frame(theme, heading, component.summary(metrics.tokens), [component.draw(metrics.tokens)], null);
+    return frame(theme, heading, component.summary(metrics.tokens) + ranked, [component.draw(metrics.tokens, metrics.rank)], null);
   }
   if (component.source === 'github' && metrics.github) {
     return frame(theme, heading, component.summary(metrics.github), [component.draw(metrics.github, metrics.timezone)], null);
@@ -1024,9 +1039,9 @@ export function renderDashboard(metrics: Metrics, theme: Theme = DEFAULT_THEME):
     });
     sections.push(churnSection(github));
   }
-  if (tokens) sections.push(tokensSection(tokens));
+  if (tokens) sections.push(tokensSection(tokens, metrics.rank));
   if (github) sections.push(historySection(github));
 
-  const summary = `${profileSummary(metrics)} ${github ? contributionsSummary(github) : tokens ? tokensSummary(tokens) : 'No data yet.'}`;
+  const summary = `${profileSummary(metrics)} ${github ? contributionsSummary(github) : tokens ? tokensSummary(tokens) : 'No data yet.'}${rankSummary(metrics.rank)}`;
   return frame(theme, 'oh-my-stats developer dashboard', summary, sections, `oh-my-stats · updated ${metrics.generatedDate} · ${metrics.timezone}`);
 }

@@ -43,7 +43,7 @@ async function shown(user: UserRow, origin: string, deps: Parameters<typeof buil
   return {
     shown: {
       user,
-      svg: renderDashboard(await withAvatar(metrics, user, origin, deps)),
+      svg: renderDashboard(await withAvatar({ ...metrics, rank: position }, user, origin, deps)),
       tokens,
       cards: buildCards(metrics).map(({ key, title }) => ({ key, title })),
       parts: availableComponents(metrics),

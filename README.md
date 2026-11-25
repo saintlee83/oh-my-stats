@@ -132,7 +132,7 @@ Or show only the parts you want, in any order. Each part is its own image, as wi
 
 | Part | Shows |
 |---|---|
-| `profile` | Your name, role, company, location, status and bio, with when you started contributing, lifetime contributions, top languages and AI tokens |
+| `profile` | Your name, role, company, location, status and bio, with when you started contributing, lifetime contributions, top languages, AI tokens and your rank among published profiles |
 | `weekly` | Last seven days of AI tokens, change from the preceding seven days, largest provider increase and daily bars |
 | `recap` | Last complete calendar month’s dated AI tokens, commits, pull requests and reviews in one README card |
 | `contributions` | Contributions this year and lifetime, and commits, PRs, reviews and issues by month |
@@ -140,7 +140,7 @@ Or show only the parts you want, in any order. Each part is its own image, as wi
 | `languages` | Top languages by lines added, split by personal, organization, gist and other repos |
 | `coauthors` | Who you co-author commits with |
 | `churn` | Lines added and removed, by language |
-| `tokens` | AI tokens by tool, cache hit rate, API list price, and tokens per day for 60 days |
+| `tokens` | AI tokens by tool, cache hit rate, API list price, your rank among published profiles, and tokens per day for 60 days |
 | `history` | Every year by month, streaks, and time to merge and review |
 | `year` | One calendar year in review: AI tokens, active days, longest streak, busiest day, responses, API list price, top three models, providers by share, that year's GitHub numbers, and a calendar of every day. It is not part of the dashboard |
 
@@ -182,7 +182,7 @@ The badge shows one figure. Choose it with `?metric=`:
 
 A badge shows `n/a` until its figure exists, and `unranked` until you have a place.
 
-Images follow the viewer's light or dark mode. By default they use GitHub's colors, so they blend into a GitHub page. For [Tokyo Night](https://github.com/tokyo-night/tokyo-night-vscode-theme) colors, add `?theme=tokyo-night` to any image address. Dark mode uses Tokyo Night, and light mode uses its Day variant:
+Images follow the viewer's light or dark mode. By default they use GitHub's colors, so they blend into a GitHub page: its backgrounds and grays, and the greens of its contribution graph for calendars, heat maps and bars. Lines added and removed are green and red, as in a GitHub diff. In a chart of providers, Claude Code is orange, Codex is aqua and Gemini CLI is blue, the same as on the website. For [Tokyo Night](https://github.com/tokyo-night/tokyo-night-vscode-theme) colors, add `?theme=tokyo-night` to any image address. Dark mode uses Tokyo Night, and light mode uses its Day variant:
 
 ```markdown
 ![Developer stats](https://ohmystats.dev/u/<login>/dashboard.svg?theme=tokyo-night)

@@ -405,10 +405,22 @@ const svg = (body: string, cacheable: boolean) =>
     },
   });
 
+/** The place on the lifetime public board, which the profile page shows too. */
+export const lifetimePosition = async (user: UserRow, deps: Deps) => (await publicRankings(deps.db, rankingPeriod('all', deps.now()), user.id)).position;
+
+/** The metrics with the profile's place on the lifetime public board, for the images that draw it. */
+async function rankedMetrics(user: UserRow, deps: Deps): Promise<Metrics> {
+  const [{ metrics }, rank] = await Promise.all([buildMetrics(user, deps), lifetimePosition(user, deps)]);
+  return { ...metrics, rank };
+}
+
+/** The parts of the dashboard that draw the rank. Ranking every profile is costly, so no other part asks for it. */
+const RANKED_PARTS = new Set(['profile', 'tokens']);
+
 async function serveDashboardSvg(login: string, theme: Theme, origin: string, deps: Deps): Promise<Response> {
   const user = await publicProfile(login, deps);
   if (!user) return svgNotFound();
-  const { metrics } = await buildMetrics(user, deps);
+  const metrics = await rankedMetrics(user, deps);
   return svg(renderDashboard(await withAvatar(metrics, user, origin, deps), theme), hasData(metrics));
 }
 
@@ -417,15 +429,13 @@ async function serveComponentSvg(login: string, key: string, theme: Theme, origi
   if (!isComponentKey(key)) return svgNotFound();
   const user = await publicProfile(login, deps);
   if (!user) return svgNotFound();
-  const { metrics } = await buildMetrics(user, deps);
+  const metrics = RANKED_PARTS.has(key) ? await rankedMetrics(user, deps) : (await buildMetrics(user, deps)).metrics;
   const drawn = key === 'profile' ? await withAvatar(metrics, user, origin, deps) : metrics;
   // A review of a named year is drawn each time: one copy per year a person could name
   // would be more than making a profile private could remove.
   return svg(renderComponent(drawn, key, theme, year), year === null && availableComponents(metrics).some((item) => item.key === key));
 }
 
-/** The place on the lifetime public board, which the profile page shows too. */
-export const lifetimePosition = async (user: UserRow, deps: Deps) => (await publicRankings(deps.db, rankingPeriod('all', deps.now()), user.id)).position;
 
 async function serveBadge(login: string, metric: BadgeMetric, deps: Deps): Promise<Response> {
   const user = await publicProfile(login, deps);
@@ -545,7 +555,8 @@ async function finishLogin(request: Request, deps: Deps): Promise<Response> {
 async function serveReport(request: Request, deps: Deps): Promise<Response> {
   const viewer = await viewerFromCookie(request, deps);
   if (!viewer) return redirect('/login');
-  const { metrics } = await buildMetrics(viewer, deps);
+  // A private profile is on no board, so its report shows no rank.
+  const metrics = await rankedMetrics(viewer, deps);
   return svg(renderDashboard(await withAvatar(metrics, viewer, new URL(request.url).origin, deps)), false);
 }
 

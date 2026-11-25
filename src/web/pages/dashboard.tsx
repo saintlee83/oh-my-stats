@@ -1,8 +1,8 @@
 import type { CSSProperties } from 'react';
-import { commas, compact, percent } from '../../shared/format.ts';
+import { commas, compact, niceMax, percent } from '../../shared/format.ts';
 import type { GitHubProfile, Metrics, TokenMetrics } from '../../shared/metrics.ts';
 import { manualProfileFromJson, PROFILE_LIMITS, STATUS_CHOICES, type ManualProfile } from '../../shared/profile.ts';
-import { availableComponents, niceMax } from '../../shared/render/svg.ts';
+import { availableComponents } from '../../shared/render/svg.ts';
 import { lastDays } from '../../shared/time.ts';
 import { usageCalendar, type CalendarView } from '../../shared/usage.ts';
 import { buildMetrics } from '../../server/app.ts';

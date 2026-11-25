@@ -22,12 +22,12 @@ export function renderRankingCard(login: string, position: CardPosition, lifetim
   const step = (RIGHT - chartX) / days.length;
   const peak = Math.max(1, ...days.map(day => day.tokens));
   body += text(chartX, 59, 'Daily tokens · UTC', 'note');
-  body += `<rect x="${RIGHT - 74}" y="51" width="8" height="8" rx="2" fill="var(--c1)"/>` + text(RIGHT - 61, 59, 'Last 7 days', 'note');
+  body += `<rect x="${RIGHT - 74}" y="51" width="8" height="8" rx="2" fill="var(--accent)"/>` + text(RIGHT - 61, 59, 'Last 7 days', 'note');
   body += `<line x1="${chartX}" x2="${RIGHT}" y1="${baseline}" y2="${baseline}" class="grid"/>`;
   days.forEach(({ date, tokens }, i) => {
     if (!tokens) return;
     const height = Math.max(1, 43 * tokens / peak);
-    const color = i >= days.length - 7 ? 'c1' : 'ramp-low';
+    const color = i >= days.length - 7 ? 'accent' : 'ramp-low';
     body += `<rect x="${(chartX + i * step + 1).toFixed(1)}" y="${(baseline - height).toFixed(1)}" width="${(step - 2).toFixed(1)}" height="${height.toFixed(1)}" rx="1.5" fill="var(--${color})"><title>${date} · ${commas(tokens)} tokens</title></rect>`;
   });
   body += text(chartX, 130, days[0].date.slice(5), 'axis') + text(RIGHT, 130, days[days.length - 1].date.slice(5), 'axis', 'end');

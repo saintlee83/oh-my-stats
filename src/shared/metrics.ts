@@ -88,6 +88,12 @@ export interface TokenYear {
   cost: number;
 }
 
+/** Where a profile stands among public profiles, by lifetime tokens. */
+export interface RankMetrics {
+  rank: number | null;
+  participants: number;
+}
+
 export interface TokenMetrics {
   total: number;
   /** Input, output and cache writes. Only covers tokens with a known breakdown. */
@@ -233,5 +239,7 @@ export interface Metrics {
   profile: ProfileMetrics;
   github: GitHubMetrics | null;
   tokens: TokenMetrics | null;
+  /** The place on the public board, for the images that show it. Left out where nothing ranks the profile. */
+  rank?: RankMetrics | null;
 }
 
