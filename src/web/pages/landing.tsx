@@ -146,7 +146,7 @@ function LandingView({ origin, viewer, board }: LandingProps) {
   const [leader] = board.leaders;
   const login = leader ? encodeURIComponent(leader.label) : '';
   return (
-    <Layout title={`${SITE} · Your real developer stats, from every machine`} viewer={viewer} bleed origin={origin} icons={PROVIDERS.keys()}>
+    <Layout title={`${SITE} · Your real developer stats, from every machine`} viewer={viewer} bleed origin={origin} icons={[...PROVIDERS.keys()]}>
       <section className="hero">
         <HeroArt />
         <div className="wrap">

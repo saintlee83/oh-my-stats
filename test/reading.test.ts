@@ -1,7 +1,9 @@
 import assert from 'node:assert/strict';
 import { test } from 'node:test';
+import type { ReactElement } from 'react';
 import { PROVIDER_ICONS } from '../src/server/provider-icons.ts';
 import { PROVIDERS } from '../src/shared/format.ts';
+import { landing } from '../src/web/pages/landing.tsx';
 import { api, app, countingDb, fakeCache, MACHINE_A, machine, mark, octo, ORIGIN, published, SECRET_NAME, upload, webLogin, webPost } from './harness.ts';
 
 const READING = ['/how-we-count', '/privacy', '/terms'];
@@ -278,6 +280,18 @@ test('the landing page shows the mark of every tool oms reads beside its name', 
   }
   // A mark takes the color of the name beside it, so it reads in light and in dark.
   for (const [id, drawing] of PROVIDER_ICONS) assert.doesNotMatch(drawing, /fill=|stroke=|style=|<script|href=/, id);
+});
+
+test('the landing page names its marks in a list that can be read more than once', async () => {
+  // In development React reads what the frame is given before the frame does. Given a
+  // map's `keys()`, the frame then found nothing left and drew no marks.
+  const context = app();
+  const loaded = await landing.load({ url: new URL(ORIGIN), request: new Request(ORIGIN), viewer: null, deps: context.deps, params: {} });
+  assert.ok('props' in loaded);
+  const frame = landing.View(loaded.props) as ReactElement<{ icons: Iterable<string> }>;
+  const read = () => [...frame.props.icons].sort();
+  assert.deepEqual(read(), [...PROVIDERS.keys()].sort());
+  assert.deepEqual(read(), [...PROVIDERS.keys()].sort(), 'and the same the second time');
 });
 
 test('the figures strip counts profiles and their tokens only once three are ranked', async () => {

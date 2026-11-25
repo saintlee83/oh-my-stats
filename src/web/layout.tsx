@@ -7,8 +7,13 @@ import { Avatar, iconId } from './common.tsx';
 interface LayoutProps extends PageOptions {
   title: string;
   viewer: UserRow | null;
-  /** Every tool the page marks, so each drawing is on the page once however many rows show it. */
-  icons?: Iterable<string>;
+  /**
+   * Every tool the page marks, so each drawing is on the page once however many rows show it.
+   * A list, and not something that can be read only once, such as a map's `keys()`: in
+   * development React reads what a component is given before the component does, which
+   * would leave nothing here to draw.
+   */
+  icons?: readonly string[];
   children: ReactNode;
 }
 
@@ -22,7 +27,7 @@ export function Layout({ title, viewer, icons = [], children, ...page }: LayoutP
   const description = page.description ?? DESCRIPTION;
   const image = page.image
     ?? (page.origin ? { url: `${page.origin}/og.png`, width: 2400, height: 1260, alt: `${SITE}. Your real developer stats, from every machine.` } : null);
-  const marks = [...new Set([...icons].map(iconId))];
+  const marks = [...new Set(icons.map(iconId))];
   return (
     <>
       <title>{title}</title>
