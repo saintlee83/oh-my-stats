@@ -127,6 +127,14 @@ export function computeTokens(
     day[tool] = (day[tool] ?? 0) + value;
     days.set(date, day);
   };
+  // What logged responses name a model for, each day. Maps, because a model's name is whatever an upload says.
+  const dayModels = new Map<string, Map<string, number>>();
+  const addDayModel = (date: string, model: string, value: number) => {
+    const models = dayModels.get(date) ?? new Map<string, number>();
+    models.set(model, (models.get(model) ?? 0) + value);
+    dayModels.set(date, models);
+  };
+  const modelsOn = (date: string) => Object.fromEntries(dayModels.get(date) ?? []);
   const perMachine: TokenMetrics['machines'] = [];
   const toolKnownPerMachine = new Map<string, number>(); // machine-scope totals, summed
   const accountNewer = new Map<string, number>();
@@ -169,6 +177,7 @@ export function computeTokens(
         const sum = tuple[0] + tuple[1] + tuple[2] + tuple[3];
         day[tool] = (day[tool] ?? 0) + sum;
         logDays.set(date, day);
+        if (sum > 0) addDayModel(date, model, sum);
         if (window30.has(date)) {
           last30Fresh += tuple[0] + tuple[1] + tuple[3];
           const usage = responseUsage.get(tool) ?? { responses: 0, tokens: 0 };
@@ -317,7 +326,11 @@ export function computeTokens(
     if (total > (peak?.total ?? 0)) peak = { date, total };
   }
 
-  const dated = allDates.map((date) => ({ date, total: dayTotal(date), byTool: { ...days.get(date) } })).filter((day) => day.total > 0);
+  const dated = allDates.map((date) => ({ date, total: dayTotal(date), byTool: { ...days.get(date) }, byModel: modelsOn(date) })).filter((day) => day.total > 0);
+  // A tool's own daily figures can put a logged response on the day before or after its log
+  // does. Where that leaves a log's date with no usage, its models are kept apart.
+  const withUsage = new Set(dated.map((day) => day.date));
+  const modelOnly = [...dayModels.keys()].filter((date) => !withUsage.has(date)).sort().map((date) => ({ date, byModel: modelsOn(date) }));
   const sum = (pick: (row: ModelUsage) => number) => modelRows.reduce((total, row) => total + pick(row), 0);
   const input = sum((row) => row.input);
   const cacheRead = sum((row) => row.cacheRead);
@@ -338,8 +351,9 @@ export function computeTokens(
     tools: toolRows,
     machines: perMachine.sort((a, b) => b.total - a.total),
     unassigned,
-    daily: lastDays(today, 60).map((date) => ({ date, total: dayTotal(date), byTool: { ...days.get(date) } })),
+    daily: lastDays(today, 60).map((date) => ({ date, total: dayTotal(date), byTool: { ...days.get(date) }, byModel: modelsOn(date) })),
     dated,
+    modelOnly,
     years: yearsOf(dated, machines, prices),
     monthly: [...monthly.values()].sort((a, b) => a.month.localeCompare(b.month)),
     undated: toolRows.reduce((total, row) => total + Math.max(0, row.total - (datedByTool[row.tool] ?? 0)), 0),

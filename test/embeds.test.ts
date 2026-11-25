@@ -164,6 +164,83 @@ test('the rank badge reads only the ranking, and the other badges never rank any
   assert.ok(!db.sql.slice(from).some((sql) => sql.includes('RANK() OVER')), 'ranking every profile is left to the badge that shows it');
 });
 
+test('the private report is limited for each account, since it is drawn for every request', async () => {
+  const seen: string[] = [];
+  let open = true;
+  const context = app({ allow: async (kind, key) => (seen.push(`${kind} ${key}`), open) });
+  await signIn(context);
+  const cookie = await webLogin(context);
+  const report = () => context.call('/me/report.svg', { headers: { cookie, 'cf-connecting-ip': '203.0.113.9' } });
+
+  assert.equal((await report()).status, 200);
+  // Counted by account and not by address: only its owner can ask for it, from anywhere.
+  assert.deepEqual(seen.filter((call) => call.includes('report:')), ['public report:1']);
+  open = false;
+  const refused = await report();
+  assert.deepEqual([refused.status, refused.headers.get('retry-after'), refused.headers.get('cache-control')], [429, '60', 'no-store']);
+
+  // A visitor who isn't signed in is sent to sign in, and counts against no account.
+  seen.length = 0;
+  assert.equal((await context.call('/me/report.svg')).headers.get('location'), '/login');
+  assert.deepEqual(seen.filter((call) => call.includes('report:')), []);
+});
+
+test('the dashboard shows the lifetime rank, as its profile and token parts do, and no other part ranks anyone', async () => {
+  const db = countingDb();
+  const everyone = { 'gh-token': { id: 1, login: 'octo', name: 'Octo Cat' }, 'web-token': { id: 1, login: 'octo', name: 'Octo Cat' }, rival: { id: 2, login: 'rival' } };
+  const context = app({ db }, everyone);
+  const token = await signIn(context);
+  await context.call('/v1/usage', api(token, 'PUT', upload(MACHINE_A)));
+  await context.call('/v1/github', api(token, 'PUT', githubMetrics()));
+  // A second public profile with more tokens, so the first is second of two.
+  const signedIn = await context.call('/v1/auth/token', api(null, 'POST', { githubToken: 'rival', machine: { id: MACHINE_B, name: 'other', platform: 'linux', agentVersion: '0.1.0' } }));
+  const rival = ((await signedIn.json()) as { token: string }).token;
+  await context.call('/v1/usage', api(rival, 'PUT', { ...upload(MACHINE_B, '2026-11-08', [500, 0, 0, 0, 1]) }));
+  await context.call('/v1/me', api(rival, 'PATCH', { public: true }));
+
+  const cookie = await webLogin(context);
+  const report = async () => (await context.call('/me/report.svg', { headers: { cookie } })).text();
+  const before = db.sql.length;
+  assert.doesNotMatch(await report(), /Token rank|Rank #/, 'a private profile is on no board, so its own report shows no rank');
+  assert.ok(!db.sql.slice(before).some((sql) => sql.includes('RANK() OVER')), 'and ranks no one to find that out');
+
+  await context.call('/v1/me', api(token, 'PATCH', { public: true }));
+  const ranked = (svg: string) => svg.includes('>Token rank</text>') || /Rank #\d/.test(svg);
+  const dashboard = await (await context.call('/u/octo/dashboard.svg')).text();
+  for (const piece of ['>Token rank</text>', '>#2</text>', '>of 2 ranked public profiles</text>', '>Rank #2 of 2</text>']) assert.ok(dashboard.includes(piece), piece);
+  assert.match(dashboard, /<desc id="omg-desc">[^<]* Rank #2 of 2 ranked public profiles, by lifetime AI tokens\.<\/desc>/, 'and says so in words');
+  assert.ok(ranked(await report()), 'the owner’s report shows it once the profile is public');
+
+  const profile = await (await context.call('/u/octo/components/profile.svg')).text();
+  assert.ok(profile.includes('>#2</text>') && !profile.includes('>Rank #2 of 2</text>'), 'the profile part has it among its figures');
+  assert.match(profile, /<desc id="omg-desc">Octo Cat \(@octo\)\. Rank #2 of 2 ranked public profiles, by lifetime AI tokens\.<\/desc>/);
+  const trace = await (await context.call('/u/octo/components/tokens.svg?theme=tokyo-night')).text();
+  assert.ok(trace.includes('>Rank #2 of 2</text>') && trace.includes('Rank #2 of 2 ranked public profiles, by lifetime AI tokens.</desc>'), 'the token trace has it beside its heading');
+  assert.ok((await (await context.call('/u/octo')).text()).includes('>Token rank</text>'), 'the dashboard on the profile page is the same image');
+  assert.ok((await (await context.call('/u/rival/dashboard.svg')).text()).includes('>#1</text>'));
+
+  // Ranking every profile is the costly part, so the parts that don't show a rank never ask for one.
+  for (const key of ['weekly', 'recap', 'contributions', 'rhythm', 'languages', 'coauthors', 'churn', 'history', 'year']) {
+    const from = db.sql.length;
+    const part = await (await context.call(`/u/octo/components/${key}.svg`)).text();
+    assert.ok(!ranked(part), `${key} shows no rank`);
+    assert.ok(!db.sql.slice(from).some((sql) => sql.includes('RANK() OVER')), `${key} ranks no one`);
+  }
+});
+
+test('the dashboard’s providers wear the colors the website gives them, and the rest are drawn together in gray', () => {
+  const day = (tools: string[]) => Object.fromEntries(tools.map((tool, index): [string, [number, number, number, number, number]] => [`${tool}/m`, [100 - index * 10, 0, 0, 0, 1]]));
+  const legend = (tools: string[]) => {
+    const svg = renderComponent(metricsOf({ '2026-11-09': day(tools) }, '2026-11-09T05:00:00Z'), 'tokens');
+    return [...svg.matchAll(/<rect [^>]*width="10" height="10" rx="2" fill="var\(--([a-z0-9-]+)\)"\/><text [^>]*class="note">([^<]+)<\/text>/g)].map(([, fill, label]) => `${label} ${fill}`);
+  };
+  assert.deepEqual(legend(['codex', 'claude', 'gemini']), ['Codex c3', 'Claude Code c2', 'Gemini CLI c1'], 'whatever their order');
+  assert.deepEqual(legend(['pi', 'claude']), ['Pi c4', 'Claude Code c2'], 'a tool with no color of its own takes the one no tool is promised');
+  assert.deepEqual(legend(['claude', 'codex', 'pi', 'gemini', 'amp', 'goose']), ['Claude Code c2', 'Codex c3', 'Pi c4', 'Gemini CLI c1', 'Others ramp-low'], 'four are named, and the rest share a gray');
+  const bars = renderComponent(metricsOf({ '2026-11-09': day(['claude', 'codex', 'pi', 'gemini', 'amp', 'goose']) }, '2026-11-09T05:00:00Z'), 'tokens');
+  assert.match(bars, /fill="var\(--ramp-low\)"><title>2026-11-09, Others: 110<\/title>/);
+});
+
 test('the ranking SVG shows lifetime public rank and reconciled 7- and 30-day totals ending today in UTC', async () => {
   const context = app({ cache: fakeCache() });
   context.setTime('2026-11-09T23:30:00Z'); // Already November 10 in the profile timezone.

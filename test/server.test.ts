@@ -1132,8 +1132,7 @@ test('weekly card, day drilldown and provider shares agree across private and pu
   const cookie = await webLogin(context);
   for (const [path, headers] of [['/me', { cookie }], ['/u/octo', {}]] as const) {
     const page = await (await context.call(path, { headers })).text();
-    assert.match(page, /popover[tT]arget="day-2026-11-09"[^>]*aria-label="2026-11-09 · 200 tokens"/, `${path}: React writes the attribute in camel case, which HTML reads the same`);
-    assert.match(page, /<p>200 tokens<\/p><ul><li>Codex · 125<\/li><li>Pi · 75<\/li>/);
+    assert.match(page, /data-date="2026-11-09" title="2026-11-09 · 200 tokens · Codex 125, Pi 75"/, path);
     assert.match(page, /Codex<\/td><td class="num">100.0%<\/td><td class="num">50.0%/);
   }
   const weekly = await (await context.call('/u/octo/components/weekly.svg')).text();

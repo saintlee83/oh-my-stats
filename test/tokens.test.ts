@@ -4,6 +4,7 @@ import { buildCards, CARD_LINES, CARD_WIDTH, cardContent } from '../src/shared/r
 import { renderDashboard } from '../src/shared/render/svg.ts';
 import { computeTokens } from '../src/shared/tokens.ts';
 import { monthlyRecap, providerMix, weeklyUsage } from '../src/shared/insights.ts';
+import { usageBetween, usageWindow } from '../src/shared/usage.ts';
 import type { MachineUsage, PriceTable, ToolTotals } from '../src/shared/types.ts';
 import { displayWidth } from '../src/shared/format.ts';
 import { githubMetrics } from './fixtures.ts';
@@ -170,6 +171,40 @@ test('every day with usage is kept, and each year is summed up on its own', () =
   assert.equal(y2026.cost, 12 + 5, 'input and output of the priced models; the unpriced one adds nothing');
   assert.deepEqual([y2025.total, y2025.activeDays, y2025.bestStreak], [20, 2, 2], 'a run across New Year is cut at the year');
   assert.deepEqual([y2024.total, y2024.activeDays, y2024.bestStreak, y2024.messages, y2024.models.length, y2024.cost], [300, 2, 2, 0, 0, 0]);
+});
+
+test('each day names the models its logs name, and a model reached through two tools counts once', () => {
+  const tokens = compute([laptop(), desktop()]);
+  const day = (date: string) => tokens.dated.find((row) => row.date === date)!;
+  // October 20 is counted by the tools themselves: 600 and 150 by Claude Code on two machines, 400 by Codex.
+  // Its models come from the logs, which hold less.
+  assert.deepEqual([day('2026-10-20').total, day('2026-10-20').byTool], [1150, { claude: 750, codex: 400 }]);
+  assert.deepEqual(day('2026-10-20').byModel, { 'claude-opus-5-5': 10, 'gpt-6-astra': 20 });
+  assert.deepEqual(day('2026-11-09').byModel, { 'claude-opus-5-5': 8, 'gpt-6-astra': 11 }, 'both machines’ logs together');
+  assert.deepEqual(day('2026-08-01').byModel, {}, 'a day only a tool’s own figure covers names no model');
+  assert.deepEqual(tokens.daily.at(-1), { date: '2026-11-09', total: 19, byTool: { claude: 8, codex: 11 }, byModel: { 'claude-opus-5-5': 8, 'gpt-6-astra': 11 } });
+
+  // A name from an upload may be one that every object has. It is counted like any other.
+  const odd = compute([{ id: 'c'.repeat(16), days: { '2026-11-09': { 'claude/constructor': [1, 0, 0, 0, 1], 'amp/constructor': [2, 0, 0, 0, 1], 'amp/toString': [4, 0, 0, 0, 1] } } }]);
+  assert.deepEqual(Object.entries(odd.dated[0].byModel), [['constructor', 3], ['toString', 4]]);
+});
+
+test('a logged response keeps its model when the tool’s own figures put its tokens on the day before', () => {
+  // Claude counted 1,000 tokens on the 8th, through the 9th. Its log dates 100 of them on the 9th.
+  const tokens = compute([{
+    id: 'a'.repeat(16),
+    days: { '2026-11-09': { 'claude/claude-opus-5-5': [100, 0, 0, 0, 1] } },
+    totals: { claude: { scope: 'machine', total: 1000, asOf: '2026-11-09', daily: { '2026-11-08': 1000 } } },
+  }]);
+  assert.deepEqual(tokens.dated.map((day) => [day.date, day.total, day.byModel]), [['2026-11-08', 1000, {}]], 'the figure wins, so the 9th has no usage of its own');
+  assert.deepEqual(tokens.modelOnly, [{ date: '2026-11-09', byModel: { 'claude-opus-5-5': 100 } }]);
+
+  const week = usageWindow(tokens, 7);
+  assert.deepEqual([week.total, week.activeDays, week.named], [1000, 1, 100], 'the period’s tokens and days are the figure’s');
+  assert.deepEqual(week.models, [{ key: 'claude-opus-5-5', tokens: 100, share: 1 }], 'and its logged response still names its model');
+  assert.deepEqual(usageBetween(tokens, 'before', 'Before', '2026-11-01', '2026-11-08').models, [], 'only in a period that holds the log’s date');
+  // A day with usage keeps its models on the day itself, and is not listed twice.
+  assert.deepEqual(compute([laptop()]).modelOnly, []);
 });
 
 test('undated account totals do not invent weekly growth or monthly activity', () => {

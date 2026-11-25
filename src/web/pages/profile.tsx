@@ -43,7 +43,7 @@ async function shown(user: UserRow, origin: string, deps: Parameters<typeof buil
   return {
     shown: {
       user,
-      svg: renderDashboard(await withAvatar(metrics, user, origin, deps)),
+      svg: renderDashboard(await withAvatar({ ...metrics, rank: position }, user, origin, deps)),
       tokens,
       cards: buildCards(metrics).map(({ key, title }) => ({ key, title })),
       parts: availableComponents(metrics),
@@ -88,9 +88,9 @@ function ProfileView({ user, svg, tokens, cards, parts, position, origin, viewer
           <a className="button" href={share} rel="noopener" title="Share on X">Share</a>
         </div>
       </div>
-      <div className="dash" dangerouslySetInnerHTML={{ __html: svg }} />
       <ActivityPanels tokens={tokens} />
       <ProviderActivity tokens={tokens} />
+      <div className="dash" dangerouslySetInnerHTML={{ __html: svg }} />
       <div className="panel" id="embed">
         <h2>Add this to your GitHub profile</h2>
         <EmbedCode url={url} parts={parts} />

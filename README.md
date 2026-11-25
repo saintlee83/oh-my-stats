@@ -132,7 +132,7 @@ Or show only the parts you want, in any order. Each part is its own image, as wi
 
 | Part | Shows |
 |---|---|
-| `profile` | Your name, role, company, location, status and bio, with when you started contributing, lifetime contributions, top languages and AI tokens |
+| `profile` | Your name, role, company, location, status and bio, with when you started contributing, lifetime contributions, top languages, AI tokens and your rank among published profiles |
 | `weekly` | Last seven days of AI tokens, change from the preceding seven days, largest provider increase and daily bars |
 | `recap` | Last complete calendar month’s dated AI tokens, commits, pull requests and reviews in one README card |
 | `contributions` | Contributions this year and lifetime, and commits, PRs, reviews and issues by month |
@@ -140,7 +140,7 @@ Or show only the parts you want, in any order. Each part is its own image, as wi
 | `languages` | Top languages by lines added, split by personal, organization, gist and other repos |
 | `coauthors` | Who you co-author commits with |
 | `churn` | Lines added and removed, by language |
-| `tokens` | AI tokens by tool, cache hit rate, API list price, and tokens per day for 60 days |
+| `tokens` | AI tokens by tool, cache hit rate, API list price, your rank among published profiles, and tokens per day for 60 days |
 | `history` | Every year by month, streaks, and time to merge and review |
 | `year` | One calendar year in review: AI tokens, active days, longest streak, busiest day, responses, API list price, top three models, providers by share, that year's GitHub numbers, and a calendar of every day. It is not part of the dashboard |
 
@@ -182,7 +182,7 @@ The badge shows one figure. Choose it with `?metric=`:
 
 A badge shows `n/a` until its figure exists, and `unranked` until you have a place.
 
-Images follow the viewer's light or dark mode. By default they use GitHub's colors, so they blend into a GitHub page. For [Tokyo Night](https://github.com/tokyo-night/tokyo-night-vscode-theme) colors, add `?theme=tokyo-night` to any image address. Dark mode uses Tokyo Night, and light mode uses its Day variant:
+Images follow the viewer's light or dark mode. By default they use GitHub's colors, so they blend into a GitHub page: its backgrounds and grays, and the greens of its contribution graph for calendars, heat maps and bars. Lines added and removed are green and red, as in a GitHub diff. In a chart of providers, Claude Code is orange, Codex is aqua and Gemini CLI is blue, the same as on the website. For [Tokyo Night](https://github.com/tokyo-night/tokyo-night-vscode-theme) colors, add `?theme=tokyo-night` to any image address. Dark mode uses Tokyo Night, and light mode uses its Day variant:
 
 ```markdown
 ![Developer stats](https://ohmystats.dev/u/<login>/dashboard.svg?theme=tokyo-night)
@@ -289,9 +289,9 @@ An account can own 5 groups and be in 20, and a group holds 200 members. A group
 
 ## Provider activity
 
-On your personal dashboard (`/me`), **Overview** compares daily tokens and provider shares over the last 7, 30 or 60 days in your profile timezone. Hover or tap the chart to inspect a day, or focus it and use the arrow keys. **Activity** holds the calendar and detailed usage tables. **Machines** shows your devices, and **Settings** controls your profile and its visibility.
+On your personal dashboard (`/me`), **Overview** charts daily tokens over the last 7, 30 or 60 days in your profile timezone, each day's bar split by provider or by model, and lists the period's share of tokens by provider and by model. Split by model, a bar keeps a paler part for the tokens no logged response names a model for. Hover or tap the chart to see a day's total, providers and models, or focus it and use the arrow keys. **Activity** holds the calendar and detailed usage tables. **Machines** shows your devices, and **Settings** controls your profile and its visibility.
 
-The dashboard and published profiles include an AI usage calendar of the last 53 weeks, which can switch to each calendar year with usage, up to the newest four. In the last 53 weeks, select a day to see its exact token total and provider breakdown. **Usage by period** shows tokens, active days, the most used provider and the busiest day for your lifetime, the last 30 and 7 days, this month and last month. Lifetime includes tokens from before a tool's daily records begin. They have no date, so the calendar and the other periods leave them out. **Token mix** splits tokens into input, output, cache reads and cache writes, and covers only tokens with a known breakdown. The provider share table compares the previous calendar month with the current month to date in the profile timezone. The weekly card also appears in `oms status`. A missing comparison period has no percentage change.
+The dashboard and published profiles include an AI usage calendar of the last 53 weeks, which can switch to each calendar year with usage, up to the newest four. Point at a day or tap it to see its exact token total with its providers and models, or focus the calendar and move through the days with the arrow keys. **Usage by period** shows tokens, active days, the most used provider and the busiest day for your lifetime, the last 30 and 7 days, this month and last month, and how each period's tokens split by provider and by model. A provider or a model keeps one color in every chart and every period of a page. A profile has eight such colors, and names past the eighth are shown together in gray. Only logged responses name a model, so a period's models can cover fewer tokens than its total, and the page says how many. Lifetime includes tokens from before a tool's daily records begin. They have no date, so the calendar and the other periods leave them out. **Token mix** splits tokens into input, output, cache reads and cache writes, and covers only tokens with a known breakdown. The provider share table compares the previous calendar month with the current month to date in the profile timezone. The weekly card also appears in `oms status`. A missing comparison period has no percentage change.
 
 Signed-in users can compare lifetime and seven-day public positions on **My rankings**, including ranks below the top 100. Each rank shows the number of public profiles with positive usage in that period. The private device table shows account usage with no matching device for each window.
 

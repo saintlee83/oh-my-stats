@@ -55,6 +55,16 @@ export function compact(value: number): string {
   ]);
 }
 
+/** The top of a chart's scale: the next round number at or above the largest value. */
+export function niceMax(value: number): number {
+  if (value <= 0) return 1;
+  const magnitude = 10 ** Math.floor(Math.log10(value));
+  for (const step of [1, 1.5, 2, 2.5, 3, 4, 5, 6, 8, 10]) {
+    if (step * magnitude >= value) return step * magnitude;
+  }
+  return 10 * magnitude;
+}
+
 export function signed(value: number): string {
   return `${value >= 0 ? '+' : '-'}${compact(Math.abs(value))}`;
 }

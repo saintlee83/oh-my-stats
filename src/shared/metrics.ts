@@ -88,6 +88,24 @@ export interface TokenYear {
   cost: number;
 }
 
+/**
+ * One day of usage. `byTool` adds up to `total`. `byModel` is what logged responses name a
+ * model for, a model reached through two tools counted once, so it can fall short of the total
+ * on a day a tool counted itself, and has nothing for a day with no logs.
+ */
+export interface TokenDay {
+  date: string;
+  total: number;
+  byTool: Record<string, number>;
+  byModel: Record<string, number>;
+}
+
+/** Where a profile stands among public profiles, by lifetime tokens. */
+export interface RankMetrics {
+  rank: number | null;
+  participants: number;
+}
+
 export interface TokenMetrics {
   total: number;
   /** Input, output and cache writes. Only covers tokens with a known breakdown. */
@@ -109,9 +127,15 @@ export interface TokenMetrics {
   /** Account totals exceeding attributable device usage, reconciled separately for each provider. */
   unassigned: { total: number; last7: number; last30: number };
   /** Trailing 60 days, oldest first. */
-  daily: { date: string; total: number; byTool: Record<string, number> }[];
+  daily: TokenDay[];
   /** Every day with usage, oldest first, however long ago: what a year's calendar is drawn from. */
-  dated: { date: string; total: number; byTool: Record<string, number> }[];
+  dated: TokenDay[];
+  /**
+   * Days with no usage of their own whose logs still name models, oldest first: a tool's own
+   * daily figures put those tokens on a neighbouring day. A period counts their models, so a
+   * logged response inside it is never left out, and nothing else reads them.
+   */
+  modelOnly: { date: string; byModel: Record<string, number> }[];
   /** Calendar years with dated usage, newest first. */
   years: TokenYear[];
   monthly: { month: string; total: number; byTool: Record<string, number> }[];
@@ -233,5 +257,7 @@ export interface Metrics {
   profile: ProfileMetrics;
   github: GitHubMetrics | null;
   tokens: TokenMetrics | null;
+  /** The place on the public board, for the images that show it. Left out where nothing ranks the profile. */
+  rank?: RankMetrics | null;
 }
 
