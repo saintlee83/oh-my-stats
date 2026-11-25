@@ -90,7 +90,7 @@ export function sentence(date: string, day: DayInfo | undefined): string {
   const named = sum(day.models);
   const providers = `Providers: ${said(leading(day.providers, DAY_MODELS, 'Other providers'), day.total)}.`;
   const models = day.models.length
-    ? `Models${partly(named, day.total) ? `, named for ${compact(named)} of them` : ''}: ${said(leading(day.models, DAY_MODELS, 'Other models'), named)}.`
+    ? `Models${!partly(named, day.total) ? '' : named < day.total ? `, named for ${compact(named)} of them` : `, from logs of ${compact(named)} tokens`}: ${said(leading(day.models, DAY_MODELS, 'Other models'), named)}.`
     : 'No model named.';
   return `${longDate(date)}: ${commas(day.total)} tokens. ${providers} ${models}`;
 }
@@ -193,6 +193,22 @@ const MOVES: Record<string, number> = { ArrowLeft: -7, ArrowRight: 7, ArrowUp: -
 
 const cellOf = (target: EventTarget) => (target instanceof Element ? target.closest('[data-date]') : null);
 
+/** Whether any of a day can be seen: on the screen, and inside the calendar that scrolls it. */
+function inView(cell: Element): boolean {
+  const box = cell.getBoundingClientRect();
+  const frame = cell.closest('.weeks-scroll')?.getBoundingClientRect();
+  const right = Math.min(document.documentElement.clientWidth, frame?.right ?? Infinity);
+  const bottom = Math.min(document.documentElement.clientHeight, frame?.bottom ?? Infinity);
+  return box.right > Math.max(0, frame?.left ?? 0) && box.left < right && box.bottom > Math.max(0, frame?.top ?? 0) && box.top < bottom;
+}
+
+/** Where the keyboard starts: the newest day with usage, or the newest day. */
+function newestDay(holder: Element): Element | null {
+  const used = holder.querySelectorAll('[data-date][data-level]:not([data-level="0"])');
+  const all = holder.querySelectorAll('[data-date]');
+  return used[used.length - 1] ?? all[all.length - 1] ?? null;
+}
+
 /**
  * What makes days answer when they are pointed at. `bind` goes on anything that holds
  * elements carrying a `data-date`; `tip` is drawn once, wherever the page likes.
@@ -205,24 +221,31 @@ export function useDayTips(days: Map<string, DayInfo>) {
   const marked = useRef<Element | null>(null);
 
   const point = useCallback((cell: Element | null, speak = false) => {
-    if (cell === marked.current) return;
-    marked.current?.classList.remove('on');
-    marked.current = cell;
     const date = cell?.getAttribute('data-date');
-    if (!cell || !date) return setShown(null);
-    cell.classList.add('on');
-    setShown({ date, anchor: anchorOf(cell) });
-    if (speak) setSpoken(sentence(date, days.get(date)));
+    if (cell !== marked.current) {
+      marked.current?.classList.remove('on');
+      marked.current = cell;
+      if (cell && date) {
+        cell.classList.add('on');
+        setShown({ date, anchor: anchorOf(cell) });
+      } else {
+        setShown(null);
+      }
+    }
+    // Said even for the day already shown: a screen reader's click comes after its pointer has moved there.
+    if (speak && cell && date) setSpoken(sentence(date, days.get(date)));
   }, [days]);
 
   const visible = shown !== null;
   useEffect(() => {
     if (!visible) return;
-    // The days can scroll under the pointer, so the details follow the day they describe.
+    // The days can scroll under the pointer, so the details follow the day they describe,
+    // and go when it scrolls out of sight: they would be left at an edge, describing nothing.
     const follow = () => {
       const cell = marked.current;
       const date = cell?.getAttribute('data-date');
-      if (cell && date) setShown({ date, anchor: anchorOf(cell) });
+      if (cell && date && inView(cell)) setShown({ date, anchor: anchorOf(cell) });
+      else point(null);
     };
     const away = (event: Event) => {
       if (!(event.target instanceof Element) || !event.target.closest('[data-date]')) point(null);
@@ -247,15 +270,15 @@ export function useDayTips(days: Map<string, DayInfo>) {
       if (event.pointerType !== 'touch') point(null);
     },
     onClick(event: MouseEvent<HTMLElement>) {
-      point(cellOf(event.target));
+      // Said as well as shown: a screen reader on a touchscreen has no arrow keys, only this.
+      point(cellOf(event.target), true);
     },
     onFocus(event: FocusEvent<HTMLElement>) {
       const holder = event.currentTarget;
       if (event.target !== holder || !holder.matches(':focus-visible')) return;
-      // Start at the newest day with usage, or the newest day.
-      const used = holder.querySelectorAll('[data-date][data-level]:not([data-level="0"])');
-      const all = holder.querySelectorAll('[data-date]');
-      point(used[used.length - 1] ?? all[all.length - 1] ?? null, true);
+      const start = newestDay(holder);
+      start?.scrollIntoView({ block: 'nearest', inline: 'nearest' });
+      point(start, true);
     },
     onBlur() {
       point(null);
@@ -263,10 +286,12 @@ export function useDayTips(days: Map<string, DayInfo>) {
     onKeyDown(event: KeyboardEvent<HTMLElement>) {
       if (event.key === 'Escape') return point(null);
       const move = MOVES[event.key];
-      const from = marked.current?.getAttribute('data-date');
-      if (!move || !from || !event.currentTarget.contains(marked.current)) return;
+      const holder = event.currentTarget;
+      if (!move || event.target !== holder) return;
       event.preventDefault();
-      const next = event.currentTarget.querySelector(`[data-date="${shifted(from, move)}"]`);
+      // With no day pointed at, after Escape or the mouse leaving, the keys start over.
+      const from = holder.contains(marked.current) ? marked.current?.getAttribute('data-date') : null;
+      const next = from ? holder.querySelector(`[data-date="${shifted(from, move)}"]`) : newestDay(holder);
       if (!next) return;
       next.scrollIntoView({ block: 'nearest', inline: 'nearest' });
       point(next, true);
@@ -284,6 +309,9 @@ export function useDayTips(days: Map<string, DayInfo>) {
 }
 
 type Bind = ReturnType<typeof useDayTips>['bind'];
+
+/** What names a day with usage for a screen reader. A day without is passed over. */
+const named = (day: CalendarDay) => (day.total ? { role: 'img', 'aria-label': `${day.date} · ${commas(day.total)} tokens` } : null);
 
 const dayCount = (count: number) => `${commas(count)} ${count === 1 ? 'day' : 'days'}`;
 
@@ -318,8 +346,11 @@ const CalendarPane = memo(function CalendarPane({ view, newest, ready, days, bin
     const providers = newest ? days.get(day.date)?.providers.map((part) => `${part.label} ${compact(part.tokens)}`).join(', ') : '';
     return `${day.date} · ${commas(day.total)} tokens${providers ? ` · ${providers}` : ''}`;
   };
-  const cell = (day: CalendarDay | null, index: number) =>
-    day ? <span key={index} className="day" data-level={day.level || undefined} data-date={day.date} title={title(day)}></span> : <span key={index}></span>;
+  // A day with usage is named for a screen reader, with scripts or without. Its details are
+  // said when it is activated, or reached with the arrow keys.
+  const cell = (day: CalendarDay | null, index: number) => (day
+    ? <span key={index} className="day" data-level={day.level || undefined} data-date={day.date} title={title(day)} {...named(day)}></span>
+    : <span key={index}></span>);
   const summary = `AI usage per day from ${view.start} to ${view.end}: ${view.total ? `${commas(view.total)} tokens on ${dayCount(view.activeDays)}` : 'none'}.`;
   return (
     <>
@@ -387,7 +418,7 @@ export function HeatSummary({ data }: { data: DayData }) {
           <div key={index} className="heat-week">
             <small>{week.month ?? ''}</small>
             {week.days.map((day, at) => (day
-              ? <i key={at} data-level={day.level} data-date={day.date} title={ready ? undefined : `${day.date} · ${commas(day.total)} tokens`}></i>
+              ? <i key={at} data-level={day.level} data-date={day.date} title={ready ? undefined : `${day.date} · ${commas(day.total)} tokens`} {...named(day)}></i>
               : <i key={at}></i>))}
           </div>
         ))}

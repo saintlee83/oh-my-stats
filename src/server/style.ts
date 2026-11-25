@@ -318,7 +318,7 @@ const SOURCE = `
   .panes > input:nth-of-type(4):checked ~ .pane:nth-of-type(4), .panes > input:nth-of-type(5):checked ~ .pane:nth-of-type(5) { display: block; }
   .panes > .pane > p:last-child { margin-bottom: 0; }
   /* A year of days. A narrow screen scrolls it sideways, and the last 12 months start at their newest week. */
-  .weeks-scroll { overflow-x: auto; padding: 5px 5px 5px 0; margin: -5px -5px -5px 0; }
+  .weeks-scroll { overflow-x: auto; padding: 6px; margin: -6px; scroll-padding-left: 38px; }
   .weeks-scroll.newest { direction: rtl; }
   /* The weeks share the panel's width, and keep days large enough to tap where it is narrow. */
   .weeks-fit { min-width: 900px; direction: ltr; }

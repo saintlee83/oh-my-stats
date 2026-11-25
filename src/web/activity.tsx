@@ -3,7 +3,7 @@ import { commas, compact, percent, providerName } from '../shared/format.ts';
 import { providerMix } from '../shared/insights.ts';
 import type { TokenMetrics } from '../shared/metrics.ts';
 import { seriesOf, type Series } from '../shared/series.ts';
-import { dayData, tokenMix, usagePeriods, type DayData, type Share, type UsagePeriod } from '../shared/usage.ts';
+import { DAY_MODELS, dayData, tokenMix, usagePeriods, type DayData, type Share, type UsagePeriod } from '../shared/usage.ts';
 import type { Part } from '../server/pages.ts';
 import { ProviderLabel } from './common.tsx';
 import { UsageCalendar } from './days.tsx';
@@ -87,23 +87,21 @@ interface ShareRow {
   icon?: string;
 }
 
-/** Each name with a color of its own, most used first, then every other name as one gray row. */
+/**
+ * Most used first: each name with a color of its own, and the period's largest few whatever
+ * their color, since a color goes by lifetime use and a model that is new can lead a week
+ * without one. Every other name is added up in one gray row.
+ */
 function shareRows(rows: Share[], series: Series[], kind: 'providers' | 'models'): ShareRow[] {
   const known = new Map(series.map((item) => [item.key, item]));
-  const named: ShareRow[] = [];
-  const others = { count: 0, tokens: 0, share: 0 };
-  for (const { key, tokens, share } of rows) {
-    const item = known.get(key);
-    if (item?.slot) {
-      named.push({ key, label: item.label, slot: item.slot, tokens, share, icon: kind === 'providers' ? key : undefined });
-    } else {
-      others.count += 1;
-      others.tokens += tokens;
-      others.share += share;
-    }
-  }
-  if (!others.count) return named;
-  return [...named, { key: '', label: `${commas(others.count)} other ${others.count === 1 ? kind.slice(0, -1) : kind}`, slot: 0, tokens: others.tokens, share: others.share }];
+  const row = ({ key, tokens, share }: Share): ShareRow =>
+    ({ key, label: known.get(key)?.label ?? key, slot: known.get(key)?.slot ?? 0, tokens, share, icon: kind === 'providers' ? key : undefined });
+  const named = rows.filter(({ key }, index) => index < DAY_MODELS || known.get(key)?.slot);
+  const others = rows.filter((item) => !named.includes(item));
+  // One name left over keeps its row: adding it up would only hide it.
+  if (others.length < 2) return rows.map(row);
+  const sum = (pick: (item: Share) => number) => others.reduce((total, item) => total + pick(item), 0);
+  return [...named.map(row), { key: '', label: `${commas(others.length)} other ${kind}`, slot: 0, tokens: sum((item) => item.tokens), share: sum((item) => item.share) }];
 }
 
 /**
@@ -154,8 +152,11 @@ export function ShareBreakdown({ title, kind, rows, series, note, empty }: {
 
 /** Says when the models listed cover less than the period's tokens, and why. */
 export function modelNote({ total, named, models }: Pick<UsagePeriod, 'total' | 'named' | 'models'>): string | null {
-  if (!models.length || named >= total * 0.995) return null;
-  return `Models are named for ${compact(named)} of these ${compact(total)} tokens: only logged responses say which model answered.`;
+  if (!models.length) return null;
+  if (named < total * 0.995) return `Models are named for ${compact(named)} of these ${compact(total)} tokens: only logged responses say which model answered.`;
+  // A tool's own daily figures can put a logged response on the day before or after its log does.
+  if (named > total * 1.005) return `Logged responses name models for ${compact(named)} tokens, more than the ${compact(total)} counted in this period: a tool’s own daily figures can put a response on a neighbouring day.`;
+  return null;
 }
 
 /** A period's providers and its models, side by side. */

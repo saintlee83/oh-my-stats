@@ -8,6 +8,7 @@ import { modelSeries, providerSeries } from '../src/shared/series.ts';
 import { computeTokens } from '../src/shared/tokens.ts';
 import type { MachineUsage, UsageTuple } from '../src/shared/types.ts';
 import { dayData, tokenMix, usageCalendar, usagePeriods, type DayData } from '../src/shared/usage.ts';
+import { modelNote } from '../src/web/activity.tsx';
 import { DayTip, indexDays, sentence, tipPlace } from '../src/web/days.tsx';
 import { segments } from '../src/web/pages/workspace.tsx';
 import { api, app, MACHINE_A, mark, octo, ORIGIN, SECRET_NAME, signIn, upload, webLogin, webPost } from './harness.ts';
@@ -166,18 +167,20 @@ test('before scripts run, a day with usage says its total in a title, with its p
     assert.equal(count(grid, /class="day" data-level/g), 3);
     // Every day carries its date, which is how the scripts know what was pointed at.
     assert.equal(count(grid, /class="day" (data-level="\d" )?data-date="\d{4}-\d\d-\d\d"/g), 365);
-    assert.match(recent, /<span class="day" data-level="4" data-date="2026-11-09" title="2026-11-09 · 200 tokens · Codex 125, Pi 75"><\/span>/);
-    assert.match(recent, /<span class="day" data-level="2" data-date="2025-11-10" title="2025-11-10 · 40 tokens · Claude Code 40"><\/span>/, 'the first day of the 53 weeks');
+    assert.match(recent, /<span class="day" data-level="4" data-date="2026-11-09" title="2026-11-09 · 200 tokens · Codex 125, Pi 75" role="img" aria-label="2026-11-09 · 200 tokens"><\/span>/);
+    assert.match(recent, /<span class="day" data-level="2" data-date="2025-11-10" title="2025-11-10 · 40 tokens · Claude Code 40" role="img" aria-label="2025-11-10 · 40 tokens"><\/span>/, 'the first day of the 53 weeks');
+    // A day with usage has a name a screen reader can read, whether or not the scripts run. The title is for a mouse.
+    assert.equal(count(grid, /role="img" aria-label="\d{4}-\d\d-\d\d · [\d,]+ tokens"/g), 3);
     assert.match(recent, /<span class="day" data-date="2026-11-08"><\/span>/, 'a day without usage has nothing to say');
     assert.doesNotMatch(recent, /2025-11-09/, 'the day before the 53 weeks begin');
     assert.match(recent, /<p class="muted">2025-11-10 – 2026-11-09 · 290 tokens on 3 days<\/p>/);
 
     // The calendar years show the same days, with their totals.
-    assert.match(thisYear, /<span class="day" data-level="4" data-date="2026-11-09" title="2026-11-09 · 200 tokens"><\/span>/);
+    assert.match(thisYear, /<span class="day" data-level="4" data-date="2026-11-09" title="2026-11-09 · 200 tokens" role="img" aria-label="2026-11-09 · 200 tokens"><\/span>/);
     assert.match(thisYear, /2026-01-01 – 2026-11-09 · 250 tokens on 2 days/);
     assert.equal(count(thisYear, /class="day" (data-level="\d" )?data-date=/g), 313, 'the year in progress stops at today');
-    assert.match(lastYear, /<span class="day" data-level="4" data-date="2025-11-09" title="2025-11-09 · 30 tokens"><\/span>/, 'a day the 53 weeks no longer reach');
-    assert.match(lastYear, /<span class="day" data-level="4" data-date="2025-11-10" title="2025-11-10 · 40 tokens"><\/span>/);
+    assert.match(lastYear, /<span class="day" data-level="4" data-date="2025-11-09" title="2025-11-09 · 30 tokens" role="img" aria-label="2025-11-09 · 30 tokens"><\/span>/, 'a day the 53 weeks no longer reach');
+    assert.match(lastYear, /<span class="day" data-level="4" data-date="2025-11-10" title="2025-11-10 · 40 tokens" role="img" aria-label="2025-11-10 · 40 tokens"><\/span>/);
     assert.match(lastYear, /2025-01-01 – 2025-12-31 · 70 tokens on 2 days/);
     // Nothing in the calendar is a stop for the Tab key until the scripts make the days answer to the arrow keys.
     assert.doesNotMatch(calendar, /<button|popover|tabindex/i);
@@ -443,6 +446,44 @@ test('names without a color of their own are shown together, as one gray part', 
   assert.match(lifetime, /<td><i style="background:var\(--s0\)"><\/i>2 other models<\/td><td class="num" title="183 tokens">183<\/td>/);
   assert.doesNotMatch(lifetime, /model-8|model-9/);
   assert.equal(count(lifetime.slice(lifetime.indexOf('<h3>By model</h3>')), /<span style="flex-grow:/g), 9, 'eight colors and one gray part');
+});
+
+test('a period names its largest models even when they have no color, as a model that is new has none', async () => {
+  // Eight older models hold the eight colors. This week was two newer ones and a little of an old one.
+  const old = Object.fromEntries(Array.from({ length: 8 }, (_, index): [string, UsageTuple] => [`claude/old-${index}`, [1000 - index, 0, 0, 0, 1]]));
+  const { profile } = await pages({ days: {
+    '2026-09-01': old,
+    '2026-11-08': { 'claude/brand-new': [600, 0, 0, 0, 1], 'claude/second-new': [300, 0, 0, 0, 1], 'claude/old-7': [100, 0, 0, 0, 1] },
+  } });
+  const [lifetime, , last7] = panesOf(periodsOf(profile));
+  const models = (pane: string) => [...pane.slice(pane.indexOf('<h3>By model</h3>')).matchAll(/<td><i style="background:var\(--s(\d)\)"><\/i>([^<]+)<\/td><td class="num" title="[^"]+">([^<]+)<\/td>/g)].map(([, slot, name, tokens]) => [slot, name, tokens].join(' '));
+  assert.deepEqual(models(last7), ['0 brand-new 600', '0 second-new 300', '1 old-7 100'], 'named, in gray, ahead of a model that has a color');
+  // Lifetime has ten names: the eight with colors, and the two without, which are added up.
+  assert.deepEqual(models(lifetime).slice(-3), ['7 old-5 995', '8 old-6 994', '0 2 other models 900']);
+});
+
+test('a period whose logs name more tokens than it counted says why', () => {
+  const note = (total: number, named: number) => modelNote({ total, named, models: [{ key: 'gpt', tokens: named, share: 1 }] });
+  assert.equal(note(1000, 1000), null);
+  assert.equal(note(1000, 400), 'Models are named for 400 of these 1k tokens: only logged responses say which model answered.');
+  // A tool’s own figure put a logged response outside the period, or counted less than its logs hold.
+  assert.equal(note(300, 900), 'Logged responses name models for 900 tokens, more than the 300 counted in this period: a tool’s own daily figures can put a response on a neighbouring day.');
+  assert.match(note(0, 500) ?? '', /^Logged responses name models for 500 tokens, more than the 0 counted/);
+  assert.equal(modelNote({ total: 1000, named: 0, models: [] }), null, 'no models, nothing to explain');
+
+  // A day says the same aloud, without calling more than its total a part of it.
+  const data: DayData = { today: '2026-11-09', years: [2026], ...KEYS, days: [['2026-11-08', 300, [0, 300], [0, 900]]] };
+  assert.equal(sentence('2026-11-08', indexDays(data).get('2026-11-08')), 'Sun, Nov 8, 2026: 300 tokens. Providers: Codex 300, 100%. Models, from logs of 900 tokens: gpt-6-astra 900, 100%.');
+});
+
+test('a long name wraps in the chart’s key, and a day scrolled to stays clear of the weekday labels', () => {
+  const css = readFileSync(new URL('../public/dashboard.css', import.meta.url), 'utf8');
+  // A model’s name can be 120 characters with nowhere to break, wider than a phone.
+  assert.match(css, /^\.plot-keys li \{ min-width: 0; overflow-wrap: anywhere; \}/m);
+  assert.match(css, /^\.plot-keys ul \{[^}]*min-width: 0;/m);
+  // The weekday labels stay put over the days, 26 pixels wide. A day brought into view stops short of them.
+  assert.ok(STYLE.includes('.weeks-scroll{overflow-x:auto;padding:6px;margin:-6px;scroll-padding-left:38px;}'));
+  assert.match(STYLE, /\.weeks\{[^}]*grid-template-columns:26px;/);
 });
 
 test('periods follow the profile’s date across New Year and a leap day', () => {

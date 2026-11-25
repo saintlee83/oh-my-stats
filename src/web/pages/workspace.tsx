@@ -171,11 +171,15 @@ export function ActivityChart({ data, size }: { data: DayData; size: number }) {
   useEffect(() => {
     if (!shown) return;
     const hide = () => setAnchor(null);
+    // A touch doesn't always focus a slider, so nothing would blur: a press elsewhere hides them too.
+    const away = (event: Event) => { if (event.target !== slider.current) hide(); };
     window.addEventListener('scroll', hide, { capture: true, passive: true });
     window.addEventListener('resize', hide);
+    document.addEventListener('pointerdown', away);
     return () => {
       window.removeEventListener('scroll', hide, { capture: true });
       window.removeEventListener('resize', hide);
+      document.removeEventListener('pointerdown', away);
     };
   }, [shown]);
 
