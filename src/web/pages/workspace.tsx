@@ -4,7 +4,7 @@ import { useEffect, useMemo, useRef, useState, useSyncExternalStore, type MouseE
 import { commas, compact, niceMax, percent } from '../../shared/format.ts';
 import { lastDays } from '../../shared/time.ts';
 import type { DayData } from '../../shared/usage.ts';
-import { anchorOf, DayTip, indexDays, shortDate, useReady, type Anchor, type DayInfo, type DayPart } from '../days.tsx';
+import { anchorOf, DayTip, indexDays, sentence, shortDate, useReady, type Anchor, type DayInfo, type DayPart } from '../days.tsx';
 
 /**
  * The dashboard's moving parts. Without scripts, the page reads the way the server draws it:
@@ -214,7 +214,8 @@ export function ActivityChart({ data, size }: { data: DayData; size: number }) {
             max={size}
             value={day}
             aria-label="Inspect daily token usage"
-            aria-valuetext={ready ? label(day - 1) : undefined}
+            // Everything the day's details show, which a screen reader is not given.
+            aria-valuetext={ready ? sentence(dates[day - 1], days[day - 1]) : undefined}
             onChange={(event) => show(event.currentTarget.valueAsNumber - 1)}
             // A tap on the day already chosen changes nothing, and a touch sends no click to a
             // slider, so lifting the finger asks for the details itself.
@@ -241,7 +242,7 @@ export function ActivityChart({ data, size }: { data: DayData; size: number }) {
         ) : null}
       </div>
       <p className="plot-detail"><span>{ready ? 'Selected day' : 'Daily total'}</span> <b>{label(day - 1)}</b></p>
-      {anchor ? <DayTip date={dates[day - 1]} day={days[day - 1]} anchor={anchor} /> : null}
+      {anchor ? <DayTip key={day} date={dates[day - 1]} day={days[day - 1]} anchor={anchor} /> : null}
     </section>
   );
 }

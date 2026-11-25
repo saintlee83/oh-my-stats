@@ -555,8 +555,10 @@ async function finishLogin(request: Request, deps: Deps): Promise<Response> {
 async function serveReport(request: Request, deps: Deps): Promise<Response> {
   const viewer = await viewerFromCookie(request, deps);
   if (!viewer) return redirect('/login');
-  // A private profile is on no board, so its report shows no rank.
-  const metrics = await rankedMetrics(viewer, deps);
+  // The image is drawn for every request and kept nowhere, so its owner is limited too.
+  if (deps.allow && !(await deps.allow('public', `report:${viewer.id}`))) return tooMany();
+  // A private profile is on no board, so nothing is ranked for its report.
+  const metrics = viewer.is_public ? await rankedMetrics(viewer, deps) : (await buildMetrics(viewer, deps)).metrics;
   return svg(renderDashboard(await withAvatar(metrics, viewer, new URL(request.url).origin, deps)), false);
 }
 

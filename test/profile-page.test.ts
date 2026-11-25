@@ -1,4 +1,5 @@
 import assert from 'node:assert/strict';
+import { readFileSync } from 'node:fs';
 import { test } from 'node:test';
 import { createElement } from 'react';
 import { renderToStaticMarkup } from 'react-dom/server';
@@ -7,7 +8,7 @@ import { modelSeries, providerSeries } from '../src/shared/series.ts';
 import { computeTokens } from '../src/shared/tokens.ts';
 import type { MachineUsage, UsageTuple } from '../src/shared/types.ts';
 import { dayData, tokenMix, usageCalendar, usagePeriods, type DayData } from '../src/shared/usage.ts';
-import { DayTip, indexDays } from '../src/web/days.tsx';
+import { DayTip, indexDays, sentence, tipPlace } from '../src/web/days.tsx';
 import { segments } from '../src/web/pages/workspace.tsx';
 import { api, app, MACHINE_A, mark, octo, ORIGIN, SECRET_NAME, signIn, upload, webLogin, webPost } from './harness.ts';
 
@@ -231,6 +232,62 @@ test('the days sent to the browser name each provider and model once, and add up
   const tip = renderToStaticMarkup(createElement(DayTip, { date: '2026-11-08', day: indexDays(data).get('2026-11-08'), anchor: { left: 0, right: 0, top: 0, bottom: 0 } }));
   const rows = [...tip.matchAll(/<p class="tip-row"><i style="background:var\(--s(\d)\)"><\/i><span>([^<]+)<\/span><b>([^<]+)<\/b>/g)].map(([, slot, name, count]) => [slot, name, count].join(' '));
   assert.deepEqual(rows, ['3 Codex 550', '1 a 100', '2 b 90', '3 c 80', '4 d 70', '5 e 60', '0 Other models 150']);
+});
+
+test('a day’s details stay on the screen: above the day, below it, or over it when neither side has room', () => {
+  const screen = { width: 800, height: 600 };
+  const at = (top: number, left = 400) => ({ left, right: left + 12, top, bottom: top + 12 });
+  assert.deepEqual(tipPlace(at(400), { width: 240, height: 350 }, screen), { left: 286, top: 40 }, 'above, where there is room');
+  assert.deepEqual(tipPlace(at(100), { width: 240, height: 350 }, screen), { left: 286, top: 122 }, 'below, when there is none above');
+  // 350 tall fits on neither side of a day at 300 in a screen of 600. Below would run 84 past the bottom.
+  assert.deepEqual(tipPlace(at(300), { width: 240, height: 350 }, screen), { left: 286, top: 8 }, 'on the roomier side, held inside the screen');
+  assert.equal(tipPlace(at(280), { width: 240, height: 350 }, screen).top, 242, 'which is below when below is roomier');
+  for (const top of [0, 150, 300, 450, 588]) {
+    const placed = tipPlace(at(top), { width: 240, height: 350 }, screen);
+    assert.ok(placed.top >= 8 && placed.top + 350 <= 592, `a day at ${top} keeps its details between the edges`);
+  }
+  assert.deepEqual([tipPlace(at(400, 0), { width: 240, height: 100 }, screen).left, tipPlace(at(400, 790), { width: 240, height: 100 }, screen).left], [8, 552], 'and never past the left or the right edge');
+  // Taller than the screen itself, it starts at the top. `DayTip` names fewer rows before it comes to that.
+  assert.equal(tipPlace(at(300), { width: 240, height: 700 }, screen).top, 8);
+});
+
+test('a day’s details name five providers and five models, and add up the rest in a row that says so', () => {
+  const names = (prefix: string, count: number) => Array.from({ length: count }, (_, index) => ({ key: `${prefix}${index}`, label: `${prefix}${index}`, slot: index < 8 ? index + 1 : 0 }));
+  const pairs = (count: number) => Array.from({ length: count }, (_, index) => [index, (count - index) * 10]).flat();
+  const data: DayData = { today: '2026-11-09', years: [2026], providers: names('tool', 7), models: names('model', 6), days: [['2026-11-09', 280, pairs(7), pairs(6)]] };
+  const tip = renderToStaticMarkup(createElement(DayTip, { date: '2026-11-09', day: indexDays(data).get('2026-11-09'), anchor: { left: 0, right: 0, top: 0, bottom: 0 } }));
+  const rows = [...tip.matchAll(/<p class="tip-row"><i style="background:var\(--s(\d)\)"><\/i><span>([^<]+)<\/span><b>([^<]+)<\/b>/g)].map(([, slot, name, count]) => [slot, name, count].join(' '));
+  assert.deepEqual(rows, [
+    '1 tool0 70', '2 tool1 60', '3 tool2 50', '4 tool3 40', '5 tool4 30', '0 Other providers 30',
+    // One model past the fifth keeps its name: a row that adds up one name would only hide it.
+    '1 model0 60', '2 model1 50', '3 model2 40', '4 model3 30', '5 model4 20', '6 model5 10',
+  ]);
+});
+
+test('a screen reader hears everything a day’s details show, as one sentence', () => {
+  const data: DayData = { today: '2026-11-09', years: [2026], ...KEYS, days: [
+    ['2026-11-07', 500, [0, 500], []],
+    ['2026-11-08', 400, [1, 400], [1, 400]],
+    ['2026-11-09', 2000, [0, 1500, 1, 500], [0, 1200, 1, 300, -1, 100]],
+  ] };
+  const days = indexDays(data);
+  // The details are hidden from it, so the sentence has their tokens and shares, models too.
+  assert.equal(
+    sentence('2026-11-09', days.get('2026-11-09')),
+    'Mon, Nov 9, 2026: 2,000 tokens. Providers: Codex 1.5k, 75%; Pi 500, 25%. Models, named for 1.6k of them: gpt-6-astra 1.2k, 75%; kimi 300, 19%; Other models 100, 6.3%.',
+  );
+  assert.equal(sentence('2026-11-08', days.get('2026-11-08')), 'Sun, Nov 8, 2026: 400 tokens. Providers: Pi 400, 100%. Models: kimi 400, 100%.');
+  assert.equal(sentence('2026-11-07', days.get('2026-11-07')), 'Sat, Nov 7, 2026: 500 tokens. Providers: Codex 500, 100%. No model named.');
+  assert.equal(sentence('2026-11-06', days.get('2026-11-06')), 'Fri, Nov 6, 2026: no usage.');
+});
+
+test('the gaps inside a day’s bar shrink with the bar, so a small day keeps its colors', () => {
+  const css = readFileSync(new URL('../public/dashboard.css', import.meta.url), 'utf8');
+  const bar = css.match(/^\.plot-bar \{([^}]*)\}/m)?.[1] ?? '';
+  // A fixed gap between two parts is all of a bar two pixels tall, and would leave it empty.
+  assert.doesNotMatch(bar, /\bgap:/, 'no fixed gap');
+  assert.match(bar, /container-type: size/, 'the bar is what its parts measure against');
+  assert.match(css, /^\.plot-bar b \+ b \{ margin-bottom: 0; margin-bottom: min\(2px, 4cqh\); \}/m, 'a gap is at most a twenty-fifth of the bar, and none where that can’t be measured');
 });
 
 test('a day’s bar by model keeps each color’s own tokens, and leaves pale what no model is named for', () => {

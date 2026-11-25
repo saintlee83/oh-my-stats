@@ -164,6 +164,27 @@ test('the rank badge reads only the ranking, and the other badges never rank any
   assert.ok(!db.sql.slice(from).some((sql) => sql.includes('RANK() OVER')), 'ranking every profile is left to the badge that shows it');
 });
 
+test('the private report is limited for each account, since it is drawn for every request', async () => {
+  const seen: string[] = [];
+  let open = true;
+  const context = app({ allow: async (kind, key) => (seen.push(`${kind} ${key}`), open) });
+  await signIn(context);
+  const cookie = await webLogin(context);
+  const report = () => context.call('/me/report.svg', { headers: { cookie, 'cf-connecting-ip': '203.0.113.9' } });
+
+  assert.equal((await report()).status, 200);
+  // Counted by account and not by address: only its owner can ask for it, from anywhere.
+  assert.deepEqual(seen.filter((call) => call.includes('report:')), ['public report:1']);
+  open = false;
+  const refused = await report();
+  assert.deepEqual([refused.status, refused.headers.get('retry-after'), refused.headers.get('cache-control')], [429, '60', 'no-store']);
+
+  // A visitor who isn't signed in is sent to sign in, and counts against no account.
+  seen.length = 0;
+  assert.equal((await context.call('/me/report.svg')).headers.get('location'), '/login');
+  assert.deepEqual(seen.filter((call) => call.includes('report:')), []);
+});
+
 test('the dashboard shows the lifetime rank, as its profile and token parts do, and no other part ranks anyone', async () => {
   const db = countingDb();
   const everyone = { 'gh-token': { id: 1, login: 'octo', name: 'Octo Cat' }, 'web-token': { id: 1, login: 'octo', name: 'Octo Cat' }, rival: { id: 2, login: 'rival' } };
@@ -179,7 +200,9 @@ test('the dashboard shows the lifetime rank, as its profile and token parts do, 
 
   const cookie = await webLogin(context);
   const report = async () => (await context.call('/me/report.svg', { headers: { cookie } })).text();
+  const before = db.sql.length;
   assert.doesNotMatch(await report(), /Token rank|Rank #/, 'a private profile is on no board, so its own report shows no rank');
+  assert.ok(!db.sql.slice(before).some((sql) => sql.includes('RANK() OVER')), 'and ranks no one to find that out');
 
   await context.call('/v1/me', api(token, 'PATCH', { public: true }));
   const ranked = (svg: string) => svg.includes('>Token rank</text>') || /Rank #\d/.test(svg);

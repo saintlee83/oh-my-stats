@@ -66,21 +66,33 @@ const shareOf = (tokens: number, whole: number) => {
 const sum = (rows: DayPart[]) => rows.reduce((total, row) => total + row.tokens, 0);
 
 /**
- * A day's largest few models, then the rest as one row. A day is sent every model that has a
- * color of its own, for the chart, which can be more than its details have room for.
+ * A day's largest few providers or models, then the rest as one row named `rest`. A day is
+ * sent every model that has a color of its own, for the chart, and can use any number of
+ * tools, which can be more than its details have room for.
  */
-function leading(models: DayPart[]): DayPart[] {
-  const head = models.filter((row) => row.place >= 0).slice(0, DAY_MODELS);
-  const rest = models.filter((row) => !head.includes(row));
+function leading(rows: DayPart[], limit: number, rest: string): DayPart[] {
+  const head = rows.filter((row) => row.place >= 0).slice(0, limit);
+  const others = rows.filter((row) => !head.includes(row));
   // One row left over is shown as it is: adding it up would only hide its name.
-  return rest.length < 2 ? models : [...head, { label: 'Other models', slot: 0, place: -1, tokens: sum(rest) }];
+  return others.length < 2 ? rows : [...head, { label: rest, slot: 0, place: -1, tokens: sum(others) }];
 }
 
-/** A day as one sentence, for a screen reader moving through the days with the arrow keys. */
-function sentence(date: string, day: DayInfo | undefined): string {
+/** Whether a day's models cover visibly less, or more, than its total. Only logged responses name a model. */
+const partly = (named: number, total: number) => Math.abs(named - total) > total * 0.01;
+
+/**
+ * A day as one sentence, for a screen reader: everything the day's details show, tokens and
+ * shares of its providers and its models, since the details are drawn for the eye alone.
+ */
+export function sentence(date: string, day: DayInfo | undefined): string {
   if (!day) return `${longDate(date)}: no usage.`;
-  const providers = day.providers.map((part) => `${part.label} ${shareOf(part.tokens, day.total)}`).join(', ');
-  return `${longDate(date)}: ${commas(day.total)} tokens. ${providers}.`;
+  const said = (rows: DayPart[], whole: number) => rows.map((row) => `${row.label} ${compact(row.tokens)}, ${shareOf(row.tokens, whole)}`).join('; ');
+  const named = sum(day.models);
+  const providers = `Providers: ${said(leading(day.providers, DAY_MODELS, 'Other providers'), day.total)}.`;
+  const models = day.models.length
+    ? `Models${partly(named, day.total) ? `, named for ${compact(named)} of them` : ''}: ${said(leading(day.models, DAY_MODELS, 'Other models'), named)}.`
+    : 'No model named.';
+  return `${longDate(date)}: ${commas(day.total)} tokens. ${providers} ${models}`;
 }
 
 /** Where on the screen what is pointed at is, so its details can sit beside it. */
@@ -89,6 +101,23 @@ export interface Anchor {
   right: number;
   top: number;
   bottom: number;
+}
+
+/** How near an edge of the screen a day's details may come. */
+const TIP_EDGE = 8;
+
+/**
+ * Where a day's details go: above what was pointed at where there is room, below it otherwise,
+ * on the roomier side when neither has enough, and never past an edge of the screen.
+ */
+export function tipPlace(anchor: Anchor, tip: { width: number; height: number }, screen: { width: number; height: number }): { left: number; top: number } {
+  const gap = 10;
+  const fits = (top: number) => top >= TIP_EDGE && top + tip.height <= screen.height - TIP_EDGE;
+  const above = anchor.top - tip.height - gap;
+  const below = anchor.bottom + gap;
+  const top = fits(above) || (!fits(below) && anchor.top > screen.height - anchor.bottom) ? above : below;
+  const within = (value: number, size: number, room: number) => Math.round(Math.max(TIP_EDGE, Math.min(value, room - size - TIP_EDGE)));
+  return { left: within((anchor.left + anchor.right) / 2 - tip.width / 2, tip.width, screen.width), top: within(top, tip.height, screen.height) };
 }
 
 export const anchorOf = (element: Element): Anchor => {
@@ -120,15 +149,22 @@ function TipRows({ title, rows, whole }: { title: string; rows: DayPart[]; whole
  */
 export function DayTip({ date, day, anchor }: { date: string; day: DayInfo | undefined; anchor: Anchor }) {
   const box = useRef<HTMLDivElement>(null);
+  // How many providers and models are named one by one. The rest are one row, so nothing is cut off.
+  const [rows, setRows] = useState(DAY_MODELS);
   useLayoutEffect(() => {
     const tip = box.current;
     if (!tip) return;
     const { width, height } = tip.getBoundingClientRect();
-    const edge = 8;
-    const left = (anchor.left + anchor.right) / 2 - width / 2;
-    const above = anchor.top - height - 10;
-    tip.style.left = `${Math.round(Math.max(edge, Math.min(left, document.documentElement.clientWidth - width - edge)))}px`;
-    tip.style.top = `${Math.round(above >= edge ? above : anchor.bottom + 10)}px`;
+    const screen = { width: document.documentElement.clientWidth, height: document.documentElement.clientHeight };
+    // On a screen too short for every row, fewer are named until the details fit. They can't
+    // be scrolled: they follow the pointer and take no input themselves.
+    if (height > screen.height - TIP_EDGE * 2 && rows > 1) {
+      setRows(Math.max(1, rows - 2));
+      return;
+    }
+    const { left, top } = tipPlace(anchor, { width, height }, screen);
+    tip.style.left = `${left}px`;
+    tip.style.top = `${top}px`;
     tip.style.visibility = 'visible';
   });
   const named = day ? sum(day.models) : 0;
@@ -138,9 +174,9 @@ export function DayTip({ date, day, anchor }: { date: string; day: DayInfo | und
       {day ? (
         <>
           <p className="tip-total"><strong>{commas(day.total)}</strong> tokens</p>
-          <TipRows title="Providers" rows={day.providers} whole={day.total} />
-          {day.models.length ? <TipRows title="Models" rows={leading(day.models)} whole={named} /> : null}
-          {day.models.length && Math.abs(named - day.total) > day.total * 0.01 ? <p className="tip-note">{`Models from synced logs: ${compact(named)} tokens`}</p> : null}
+          <TipRows title="Providers" rows={leading(day.providers, rows, 'Other providers')} whole={day.total} />
+          {day.models.length ? <TipRows title="Models" rows={leading(day.models, rows, 'Other models')} whole={named} /> : null}
+          {day.models.length && partly(named, day.total) ? <p className="tip-note">{`Models from synced logs: ${compact(named)} tokens`}</p> : null}
         </>
       ) : (
         <p className="tip-total">No usage</p>
@@ -240,7 +276,7 @@ export function useDayTips(days: Map<string, DayInfo>) {
   const day = shown ? days.get(shown.date) : undefined;
   const tip = (
     <>
-      {shown ? <DayTip date={shown.date} day={day} anchor={shown.anchor} /> : null}
+      {shown ? <DayTip key={shown.date} date={shown.date} day={day} anchor={shown.anchor} /> : null}
       <span className="sr" aria-live="polite">{spoken}</span>
     </>
   );
