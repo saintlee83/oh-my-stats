@@ -79,8 +79,8 @@ function calendarView(key: string, label: string, start: string, end: string, la
 const calendarYears = (tokens: TokenMetrics, today: string) =>
   tokens.years.map((row) => row.year).filter((year) => year <= Number(today.slice(0, 4))).slice(0, 4);
 
-/** How many of a day's models are named one by one. The rest are added up. */
-const DAY_MODELS = 5;
+/** How many of a day's models its details name one by one. The rest are added up. */
+export const DAY_MODELS = 5;
 
 /**
  * Every day with usage, small enough to send to the browser, which draws the calendar and the
@@ -96,7 +96,8 @@ export interface DayData {
   models: Series[];
   /**
    * Oldest first: a date, its total, then its providers and its models, each as place and
-   * tokens in turn, most used first. A place of -1 is every model past the day's largest few.
+   * tokens in turn, most used first. A day names its largest few models and every model with
+   * a color of its own, so a color can be followed from day to day. A place of -1 is the rest.
    */
   days: [date: string, total: number, providers: number[], models: number[]][];
 }
@@ -120,14 +121,16 @@ export function dayData(tokens: TokenMetrics): DayData {
   const { providers, models } = seriesOf(tokens);
   const providerAt = new Map(providers.map(({ key }, index) => [key, index]));
   const modelAt = new Map(models.map(({ key }, index) => [key, index]));
+  const colored = (model: string) => (models[modelAt.get(model) ?? -1]?.slot ?? 0) > 0;
   const days = tokens.dated.map(({ date, total, byTool, byModel }): DayData['days'][number] => {
     const named = descending(byModel);
-    const rest = named.slice(DAY_MODELS).reduce((sum, [, count]) => sum + count, 0);
+    const kept = named.filter(([model], index) => index < DAY_MODELS || colored(model));
+    const rest = named.reduce((sum, [, count]) => sum + count, 0) - kept.reduce((sum, [, count]) => sum + count, 0);
     return [
       date,
       total,
       descending(byTool).flatMap(([tool, count]) => [providerAt.get(tool) ?? -1, count]),
-      [...named.slice(0, DAY_MODELS).flatMap(([model, count]) => [modelAt.get(model) ?? -1, count]), ...(rest ? [-1, rest] : [])],
+      [...kept.flatMap(([model, count]) => [modelAt.get(model) ?? -1, count]), ...(rest ? [-1, rest] : [])],
     ];
   });
   return { today, years: calendarYears(tokens, today), providers, models, days };
@@ -172,7 +175,7 @@ export interface UsagePeriod {
 
 const topOf = ([first]: Share[]): UsagePeriod['top'] => (first ? { tool: first.key, share: first.share } : null);
 
-function summed(days: Day[]) {
+function summed(days: Day[], modelOnly: TokenMetrics['modelOnly'] = []) {
   const byTool = new Map<string, number>();
   const byModel = new Map<string, number>();
   let total = 0;
@@ -183,13 +186,17 @@ function summed(days: Day[]) {
     for (const [tool, count] of Object.entries(day.byTool)) byTool.set(tool, (byTool.get(tool) ?? 0) + count);
     for (const [model, count] of Object.entries(day.byModel)) byModel.set(model, (byModel.get(model) ?? 0) + count);
   }
+  for (const day of modelOnly) {
+    for (const [model, count] of Object.entries(day.byModel)) byModel.set(model, (byModel.get(model) ?? 0) + count);
+  }
   const models = shares(byModel);
   return { total, busiest, activeDays: days.length, providers: shares(byTool), models, named: models.reduce((sum, row) => sum + row.tokens, 0) };
 }
 
 /** The dated days from `start` through `end`, added up. */
 export function usageBetween(tokens: TokenMetrics, key: string, label: string, start: string, end: string): UsagePeriod {
-  const { total, busiest, activeDays, providers, models, named } = summed(tokens.dated.filter((day) => day.date >= start && day.date <= end));
+  const inside = (day: { date: string }) => day.date >= start && day.date <= end;
+  const { total, busiest, activeDays, providers, models, named } = summed(tokens.dated.filter(inside), tokens.modelOnly.filter(inside));
   return { key, label, range: { start, end, days: (time(end) - time(start)) / 86_400_000 + 1 }, total, activeDays, top: topOf(providers), busiest, providers, models, named };
 }
 

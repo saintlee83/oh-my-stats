@@ -3,7 +3,7 @@
 import { memo, useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, type FocusEvent, type KeyboardEvent, type MouseEvent, type PointerEvent } from 'react';
 import { commas, compact, percent } from '../shared/format.ts';
 import type { Series } from '../shared/series.ts';
-import { usageCalendar, type CalendarDay, type CalendarView, type DayData } from '../shared/usage.ts';
+import { DAY_MODELS, usageCalendar, type CalendarDay, type CalendarView, type DayData } from '../shared/usage.ts';
 import { TabbedPanel } from './panes.tsx';
 
 /**
@@ -16,7 +16,7 @@ export interface DayPart {
   label: string;
   /** A series color, 1 to 8, or 0 for names drawn together. */
   slot: number;
-  /** Its place among the profile's providers or models, most used first, or -1 for the rest of a day's models. */
+  /** Its place among the profile's providers or models, most used first, or -1 for the day's models that are added up. */
   place: number;
   tokens: number;
 }
@@ -64,6 +64,17 @@ const shareOf = (tokens: number, whole: number) => {
 };
 
 const sum = (rows: DayPart[]) => rows.reduce((total, row) => total + row.tokens, 0);
+
+/**
+ * A day's largest few models, then the rest as one row. A day is sent every model that has a
+ * color of its own, for the chart, which can be more than its details have room for.
+ */
+function leading(models: DayPart[]): DayPart[] {
+  const head = models.filter((row) => row.place >= 0).slice(0, DAY_MODELS);
+  const rest = models.filter((row) => !head.includes(row));
+  // One row left over is shown as it is: adding it up would only hide its name.
+  return rest.length < 2 ? models : [...head, { label: 'Other models', slot: 0, place: -1, tokens: sum(rest) }];
+}
 
 /** A day as one sentence, for a screen reader moving through the days with the arrow keys. */
 function sentence(date: string, day: DayInfo | undefined): string {
@@ -128,7 +139,7 @@ export function DayTip({ date, day, anchor }: { date: string; day: DayInfo | und
         <>
           <p className="tip-total"><strong>{commas(day.total)}</strong> tokens</p>
           <TipRows title="Providers" rows={day.providers} whole={day.total} />
-          {day.models.length ? <TipRows title="Models" rows={day.models} whole={named} /> : null}
+          {day.models.length ? <TipRows title="Models" rows={leading(day.models)} whole={named} /> : null}
           {day.models.length && Math.abs(named - day.total) > day.total * 0.01 ? <p className="tip-note">{`Models from synced logs: ${compact(named)} tokens`}</p> : null}
         </>
       ) : (

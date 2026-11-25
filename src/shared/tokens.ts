@@ -327,6 +327,10 @@ export function computeTokens(
   }
 
   const dated = allDates.map((date) => ({ date, total: dayTotal(date), byTool: { ...days.get(date) }, byModel: modelsOn(date) })).filter((day) => day.total > 0);
+  // A tool's own daily figures can put a logged response on the day before or after its log
+  // does. Where that leaves a log's date with no usage, its models are kept apart.
+  const withUsage = new Set(dated.map((day) => day.date));
+  const modelOnly = [...dayModels.keys()].filter((date) => !withUsage.has(date)).sort().map((date) => ({ date, byModel: modelsOn(date) }));
   const sum = (pick: (row: ModelUsage) => number) => modelRows.reduce((total, row) => total + pick(row), 0);
   const input = sum((row) => row.input);
   const cacheRead = sum((row) => row.cacheRead);
@@ -349,6 +353,7 @@ export function computeTokens(
     unassigned,
     daily: lastDays(today, 60).map((date) => ({ date, total: dayTotal(date), byTool: { ...days.get(date) }, byModel: modelsOn(date) })),
     dated,
+    modelOnly,
     years: yearsOf(dated, machines, prices),
     monthly: [...monthly.values()].sort((a, b) => a.month.localeCompare(b.month)),
     undated: toolRows.reduce((total, row) => total + Math.max(0, row.total - (datedByTool[row.tool] ?? 0)), 0),

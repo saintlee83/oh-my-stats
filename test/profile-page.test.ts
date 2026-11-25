@@ -8,6 +8,7 @@ import { computeTokens } from '../src/shared/tokens.ts';
 import type { MachineUsage, UsageTuple } from '../src/shared/types.ts';
 import { dayData, tokenMix, usageCalendar, usagePeriods, type DayData } from '../src/shared/usage.ts';
 import { DayTip, indexDays } from '../src/web/days.tsx';
+import { segments } from '../src/web/pages/workspace.tsx';
 import { api, app, MACHINE_A, mark, octo, ORIGIN, SECRET_NAME, signIn, upload, webLogin, webPost } from './harness.ts';
 
 const TZ = 'Asia/Seoul';
@@ -206,21 +207,44 @@ test('a day that is pointed at shows its total, then its providers and its model
   assert.match(empty, /<p class="tip-date">Sun, Nov 8, 2026<\/p><p class="tip-total">No usage<\/p><\/div>$/);
 });
 
-test('the days sent to the browser name each provider and model once, and add up a day’s models past its largest five', () => {
-  const models = ['a', 'b', 'c', 'd', 'e', 'f', 'g'];
+test('the days sent to the browser name each provider and model once, and add up only a day’s models that have no color', () => {
+  const models = ['a', 'b', 'c', 'd', 'e', 'f', 'g', 'h', 'i', 'j'];
   const tokens = tokensFor({ days: {
+    '2026-11-07': { 'codex/j': [3, 0, 0, 0, 1] },
     '2026-11-08': Object.fromEntries(models.map((model, index): [string, UsageTuple] => [`codex/${model}`, [100 - index * 10, 0, 0, 0, 1]])),
     '2026-11-09': { 'claude/a': [30, 0, 0, 0, 1], 'codex/a': [20, 0, 0, 0, 1], 'local-ai/h': [5, 0, 0, 0, 1] },
   } }, '2026-11-09T05:00:00Z');
   const data = dayData(tokens);
   assert.deepEqual([data.today, data.years], ['2026-11-09', [2026]]);
   assert.deepEqual(data.providers, [{ key: 'codex', label: 'Codex', slot: 3 }, { key: 'claude', label: 'Claude Code', slot: 2 }, { key: 'local-ai', label: 'local-ai', slot: 4 }]);
-  assert.deepEqual(data.models.map((item) => [item.key, item.slot]), [['a', 1], ['b', 2], ['c', 3], ['d', 4], ['e', 5], ['f', 6], ['g', 7], ['h', 8]]);
+  assert.deepEqual(data.models.map((item) => [item.key, item.slot]), [['a', 1], ['b', 2], ['c', 3], ['d', 4], ['e', 5], ['f', 6], ['g', 7], ['h', 8], ['i', 0], ['j', 0]]);
   assert.deepEqual(data.days, [
-    ['2026-11-08', 490, [0, 490], [0, 100, 1, 90, 2, 80, 3, 70, 4, 60, -1, 90]],
+    // A model among a day's largest five is named, with a color of its own or without.
+    ['2026-11-07', 3, [0, 3], [9, 3]],
+    // Past the fifth, a model with a color stays itself, so its color can be followed from day to day. Only the others are added up.
+    ['2026-11-08', 550, [0, 550], [0, 100, 1, 90, 2, 80, 3, 70, 4, 60, 5, 50, 6, 40, 7, 30, -1, 30]],
     // A model reached through two tools is one model.
     ['2026-11-09', 55, [1, 30, 0, 20, 2, 5], [0, 50, 7, 5]],
   ]);
+
+  // The details of a day have room for five models, and add up the rest themselves.
+  const tip = renderToStaticMarkup(createElement(DayTip, { date: '2026-11-08', day: indexDays(data).get('2026-11-08'), anchor: { left: 0, right: 0, top: 0, bottom: 0 } }));
+  const rows = [...tip.matchAll(/<p class="tip-row"><i style="background:var\(--s(\d)\)"><\/i><span>([^<]+)<\/span><b>([^<]+)<\/b>/g)].map(([, slot, name, count]) => [slot, name, count].join(' '));
+  assert.deepEqual(rows, ['3 Codex 550', '1 a 100', '2 b 90', '3 c 80', '4 d 70', '5 e 60', '0 Other models 150']);
+});
+
+test('a day’s bar by model keeps each color’s own tokens, and leaves pale what no model is named for', () => {
+  // Logs name models for 400 of the day’s 1,000 tokens. The models must not be stretched over the rest.
+  const data: DayData = { today: '2026-11-09', years: [2026], ...KEYS, days: [
+    ['2026-11-08', 1000, [0, 1000], [1, 300, 0, 100]],
+    ['2026-11-09', 500, [0, 500], []],
+  ] };
+  const days = indexDays(data);
+  const bar = (date: string, by: 'providers' | 'models') => segments(days.get(date), by).map((part) => [part.label, part.slot, part.tokens]);
+  assert.deepEqual(bar('2026-11-08', 'models'), [['gpt-6-astra', 1, 100], ['kimi', 2, 300], ['No model named', -1, 600]], 'in the profile’s order, not the day’s');
+  assert.deepEqual(bar('2026-11-09', 'models'), [['No model named', -1, 500]], 'a day only a tool’s own figure covers');
+  assert.deepEqual(bar('2026-11-08', 'providers'), [['Codex', 3, 1000]], 'providers always add up to the day');
+  assert.deepEqual(segments(undefined, 'models'), []);
 });
 
 test('the calendar switches between the last 12 months and the years with radio inputs the stylesheet pairs with panes', async () => {

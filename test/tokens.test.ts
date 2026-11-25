@@ -4,6 +4,7 @@ import { buildCards, CARD_LINES, CARD_WIDTH, cardContent } from '../src/shared/r
 import { renderDashboard } from '../src/shared/render/svg.ts';
 import { computeTokens } from '../src/shared/tokens.ts';
 import { monthlyRecap, providerMix, weeklyUsage } from '../src/shared/insights.ts';
+import { usageBetween, usageWindow } from '../src/shared/usage.ts';
 import type { MachineUsage, PriceTable, ToolTotals } from '../src/shared/types.ts';
 import { displayWidth } from '../src/shared/format.ts';
 import { githubMetrics } from './fixtures.ts';
@@ -186,6 +187,24 @@ test('each day names the models its logs name, and a model reached through two t
   // A name from an upload may be one that every object has. It is counted like any other.
   const odd = compute([{ id: 'c'.repeat(16), days: { '2026-11-09': { 'claude/constructor': [1, 0, 0, 0, 1], 'amp/constructor': [2, 0, 0, 0, 1], 'amp/toString': [4, 0, 0, 0, 1] } } }]);
   assert.deepEqual(Object.entries(odd.dated[0].byModel), [['constructor', 3], ['toString', 4]]);
+});
+
+test('a logged response keeps its model when the tool’s own figures put its tokens on the day before', () => {
+  // Claude counted 1,000 tokens on the 8th, through the 9th. Its log dates 100 of them on the 9th.
+  const tokens = compute([{
+    id: 'a'.repeat(16),
+    days: { '2026-11-09': { 'claude/claude-opus-5-5': [100, 0, 0, 0, 1] } },
+    totals: { claude: { scope: 'machine', total: 1000, asOf: '2026-11-09', daily: { '2026-11-08': 1000 } } },
+  }]);
+  assert.deepEqual(tokens.dated.map((day) => [day.date, day.total, day.byModel]), [['2026-11-08', 1000, {}]], 'the figure wins, so the 9th has no usage of its own');
+  assert.deepEqual(tokens.modelOnly, [{ date: '2026-11-09', byModel: { 'claude-opus-5-5': 100 } }]);
+
+  const week = usageWindow(tokens, 7);
+  assert.deepEqual([week.total, week.activeDays, week.named], [1000, 1, 100], 'the period’s tokens and days are the figure’s');
+  assert.deepEqual(week.models, [{ key: 'claude-opus-5-5', tokens: 100, share: 1 }], 'and its logged response still names its model');
+  assert.deepEqual(usageBetween(tokens, 'before', 'Before', '2026-11-01', '2026-11-08').models, [], 'only in a period that holds the log’s date');
+  // A day with usage keeps its models on the day itself, and is not listed twice.
+  assert.deepEqual(compute([laptop()]).modelOnly, []);
 });
 
 test('undated account totals do not invent weekly growth or monthly activity', () => {

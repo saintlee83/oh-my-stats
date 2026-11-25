@@ -130,6 +130,12 @@ export interface TokenMetrics {
   daily: TokenDay[];
   /** Every day with usage, oldest first, however long ago: what a year's calendar is drawn from. */
   dated: TokenDay[];
+  /**
+   * Days with no usage of their own whose logs still name models, oldest first: a tool's own
+   * daily figures put those tokens on a neighbouring day. A period counts their models, so a
+   * logged response inside it is never left out, and nothing else reads them.
+   */
+  modelOnly: { date: string; byModel: Record<string, number> }[];
   /** Calendar years with dated usage, newest first. */
   years: TokenYear[];
   monthly: { month: string; total: number; byTool: Record<string, number> }[];

@@ -109,16 +109,21 @@ const fill = (slot: number) => (slot < 0 ? 'var(--line)' : `var(--s${slot})`);
 
 /**
  * A day's bar from the baseline up: the same name always in the same place, so a color can be
- * followed across the days. Names without a color of their own are one gray part, on top.
+ * followed across the days. Names without a color of their own are one gray part above them.
+ * On top, paler, are the tokens no model is named for: only logged responses name one, so a
+ * day's models can cover less than its total, and a day a tool counted itself names none.
  */
-function segments(day: DayInfo | undefined, by: ColorBy): DayPart[] {
+export function segments(day: DayInfo | undefined, by: ColorBy): DayPart[] {
   if (!day?.total) return [];
   const parts = by === 'providers' ? day.providers : day.models;
-  // A day only a tool's own figure covers has no model to name.
-  if (!parts.length) return [{ label: 'No model named', slot: -1, place: Infinity, tokens: day.total }];
   const named = parts.filter((part) => part.slot > 0).sort((a, b) => a.place - b.place);
   const rest = parts.reduce((sum, part) => sum + (part.slot > 0 ? 0 : part.tokens), 0);
-  return rest ? [...named, { label: by === 'providers' ? 'Other providers' : 'Other models', slot: 0, place: Infinity, tokens: rest }] : named;
+  const unnamed = by === 'models' ? day.total - parts.reduce((sum, part) => sum + part.tokens, 0) : 0;
+  return [
+    ...named,
+    ...(rest ? [{ label: by === 'providers' ? 'Other providers' : 'Other models', slot: 0, place: Infinity, tokens: rest }] : []),
+    ...(unnamed > 0 ? [{ label: 'No model named', slot: -1, place: Infinity, tokens: unnamed }] : []),
+  ];
 }
 
 /**
@@ -211,6 +216,9 @@ export function ActivityChart({ data, size }: { data: DayData; size: number }) {
             aria-label="Inspect daily token usage"
             aria-valuetext={ready ? label(day - 1) : undefined}
             onChange={(event) => show(event.currentTarget.valueAsNumber - 1)}
+            // A tap on the day already chosen changes nothing, and a touch sends no click to a
+            // slider, so lifting the finger asks for the details itself.
+            onPointerUp={(event) => { if (event.pointerType !== 'mouse') show(event.currentTarget.valueAsNumber - 1); }}
             onPointerMove={point}
             onPointerLeave={(event) => { if (event.pointerType === 'mouse') setAnchor(null); }}
             onFocus={(event) => { if (event.currentTarget.matches(':focus-visible')) show(day - 1); }}
