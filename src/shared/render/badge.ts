@@ -58,8 +58,11 @@ export function badgeFor(metric: BadgeMetric, facts: BadgeFacts): Badge {
   return { label: LABELS[metric], value: value ?? (metric === 'rank' ? 'unranked' : 'n/a'), known: value !== null };
 }
 
-/** White text on each of these clears 4.5:1. */
-export const BADGE_COLORS = { label: '#555555', value: '#0969da', unknown: '#6e7781', text: '#ffffff' };
+/**
+ * White text on each of these clears 4.5:1. The greens are GitHub's, as in the other images:
+ * `value` for a badge's figure, and `deep` for a second figure beside it.
+ */
+export const BADGE_COLORS = { label: '#555555', value: '#1a7f37', deep: '#116329', unknown: '#6e7781', text: '#ffffff' };
 
 /**
  * Verdana's advance widths in thousandths of the font size, the font a badge asks for first.
@@ -102,6 +105,65 @@ export function renderBadge({ label, value, known }: Badge): string {
 <path d="M${split} 0v${HEIGHT}H${RADIUS}${corner(-RADIUS, -RADIUS)}V${RADIUS}${corner(RADIUS, -RADIUS)}z" fill="${BADGE_COLORS.label}"/>
 <path d="M${split} 0H${width - RADIUS}${corner(RADIUS, RADIUS)}V${HEIGHT - RADIUS}${corner(-RADIUS, RADIUS)}H${split}z" fill="${known ? BADGE_COLORS.value : BADGE_COLORS.unknown}"/>
 <g fill="${BADGE_COLORS.text}" font-family="Verdana,Geneva,DejaVu Sans,sans-serif" font-size="${FONT_SIZE}" text-anchor="middle" text-rendering="geometricPrecision">${words(label, split / 2, labelLength)}${words(value, split + (width - split) / 2, valueLength)}</g>
+</svg>
+`;
+}
+
+/** The side of the avatar on the rank badge. */
+const AVATAR = 14;
+
+/** What the rank badge is drawn from. */
+export interface RankBadge {
+  login: string;
+  /** The avatar as a data: URL, or null to draw the badge without one. */
+  avatar: string | null;
+  rank: string;
+  tokens: string;
+  /** The whole badge in words, for whoever can't see it. */
+  summary: string;
+  /** False until the profile has a place among published profiles. */
+  known: boolean;
+}
+
+export function rankBadgeFor(who: { login: string; avatar: string | null }, tokens: TokenMetrics | null, position: BadgeFacts['position']): RankBadge {
+  const place = position?.rank ? `#${commas(position.rank)} of ${commas(position.participants)}` : null;
+  const count = tokens ? `${compact(tokens.total)} tokens` : null;
+  const standing = place ? `${place} published profiles by lifetime AI tokens` : 'unranked';
+  return {
+    ...who,
+    rank: place ?? 'unranked',
+    tokens: count ?? 'n/a',
+    summary: `@${who.login} is ${standing}, with ${count ? `${count} in all` : 'no AI tokens yet'}.`,
+    known: place !== null,
+  };
+}
+
+/**
+ * A profile in one line: who it is, where it stands among published profiles, and its
+ * lifetime tokens, in that order. It has the height and the lettering of the other badges,
+ * so they sit in one row of a README.
+ */
+export function renderRankBadge({ login, avatar, rank, tokens, summary, known }: RankBadge): string {
+  const who = `@${login}`;
+  const [whoLength, rankLength, tokensLength] = [who, rank, tokens].map(verdanaWidth);
+  const lead = avatar ? AVATAR + 4 : 0;
+  const first = PADDING + lead + whoLength + PADDING;
+  const second = first + rankLength + PADDING * 2;
+  const width = second + tokensLength + PADDING * 2;
+  const corner = (dx: number, dy: number) => `a${RADIUS} ${RADIUS} 0 0 1 ${dx} ${dy}`;
+  const face = avatar
+    ? `<clipPath id="oms-face"><circle cx="${PADDING + AVATAR / 2}" cy="${HEIGHT / 2}" r="${AVATAR / 2}"/></clipPath><image href="${esc(avatar)}" x="${PADDING}" y="${(HEIGHT - AVATAR) / 2}" width="${AVATAR}" height="${AVATAR}" clip-path="url(#oms-face)" preserveAspectRatio="xMidYMid slice"/>`
+    : '';
+  const name = esc(summary);
+  const [rankFill, tokensFill] = [known ? BADGE_COLORS.value : BADGE_COLORS.unknown, tokens === 'n/a' ? BADGE_COLORS.unknown : BADGE_COLORS.deep];
+  // Two boxes of one gray would read as one, so a line parts them.
+  const parted = rankFill === tokensFill ? `<path d="M${second} 0h1v${HEIGHT}h-1z" fill="#010101" fill-opacity=".25"/>` : '';
+  return `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 ${width} ${HEIGHT}" width="${width}" height="${HEIGHT}" role="img" aria-label="${name}">
+<title>${name}</title>
+<path d="M${first} 0v${HEIGHT}H${RADIUS}${corner(-RADIUS, -RADIUS)}V${RADIUS}${corner(RADIUS, -RADIUS)}z" fill="${BADGE_COLORS.label}"/>
+<path d="M${first} 0H${second}V${HEIGHT}H${first}z" fill="${rankFill}"/>
+<path d="M${second} 0H${width - RADIUS}${corner(RADIUS, RADIUS)}V${HEIGHT - RADIUS}${corner(-RADIUS, RADIUS)}H${second}z" fill="${tokensFill}"/>
+${parted}${face}<g fill="${BADGE_COLORS.text}" font-family="Verdana,Geneva,DejaVu Sans,sans-serif" font-size="${FONT_SIZE}" text-anchor="middle" text-rendering="geometricPrecision">${words(who, PADDING + lead + whoLength / 2, whoLength)}${words(rank, first + (second - first) / 2, rankLength)}${words(tokens, second + (width - second) / 2, tokensLength)}</g>
 </svg>
 `;
 }

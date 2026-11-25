@@ -1,7 +1,7 @@
 import type { GitHubMetrics, Metrics } from '../shared/metrics.ts';
 import { weeklyUsage } from '../shared/insights.ts';
 import { manualProfileFromForm, manualProfileFromJson, manualProfileJson, profileOf } from '../shared/profile.ts';
-import { BADGE_METRICS, badgeFor, badgeMetricNamed, DEFAULT_BADGE_METRIC, renderBadge, type BadgeMetric } from '../shared/render/badge.ts';
+import { BADGE_METRICS, badgeFor, badgeMetricNamed, DEFAULT_BADGE_METRIC, rankBadgeFor, renderBadge, renderRankBadge, type BadgeMetric } from '../shared/render/badge.ts';
 import { buildCards, cardContent, type Card } from '../shared/render/cards.ts';
 import { previewData, renderPreview } from '../shared/render/preview.ts';
 import { renderSmallCard } from '../shared/render/small-card.ts';
@@ -195,6 +195,8 @@ export async function buildMetrics(user: UserRow, deps: Deps): Promise<{ metrics
 const AVATAR_HOST = 'avatars.githubusercontent.com';
 /** Twice the size it's drawn at, for sharp screens. */
 const AVATAR_PIXELS = 144;
+/** The rank badge draws it 14 pixels wide, and a README can be zoomed. */
+const BADGE_AVATAR_PIXELS = 56;
 const AVATAR_MAX_BYTES = 200_000;
 
 function base64(bytes: Uint8Array): string {
@@ -208,12 +210,12 @@ function base64(bytes: Uint8Array): string {
  * GitHub's avatar server is asked, and its answer is kept at this location for a day.
  * Without it, the header shows an initial instead.
  */
-async function avatarData(avatarUrl: string | null, origin: string, deps: Deps): Promise<string | null> {
+async function avatarData(avatarUrl: string | null, origin: string, deps: Deps, pixels = AVATAR_PIXELS): Promise<string | null> {
   if (!avatarUrl) return null;
   try {
     const url = new URL(avatarUrl);
     if (url.protocol !== 'https:' || url.hostname !== AVATAR_HOST) return null;
-    url.searchParams.set('s', String(AVATAR_PIXELS));
+    url.searchParams.set('s', String(pixels));
     const key = new Request(`${origin}/avatars${url.pathname}${url.search}`);
     let image = await deps.cache?.match(key);
     if (!image) {
@@ -280,9 +282,11 @@ const publicKey = (request: Request) => {
   if (!path.endsWith('.svg')) return new Request(key);
   const query = url.searchParams;
   const theme = themeNamed(query.get('theme'));
-  const [, image] = /^\/u\/[^/]+\/(badge|card|components\/year)\.svg$/.exec(path) ?? [];
+  const [, image] = /^\/u\/[^/]+\/(badge|rank-badge|card|components\/year)\.svg$/.exec(path) ?? [];
   // A metric that doesn't exist is refused before the cache is asked, so it never gets here.
   if (image === 'badge') return new Request(badgeAddress(key, badgeMetricNamed(query.get('metric')) ?? DEFAULT_BADGE_METRIC));
+  // The rank badge offers no choice, not even a theme: its colors are fixed.
+  if (image === 'rank-badge') return new Request(key);
   if (image === 'card') return new Request(cardAddress(key, theme, graphAsked(query)));
   if (image === 'components/year') return new Request(reviewAddress(key, theme, yearAsked(query)));
   return new Request(themed(key, theme));
@@ -366,6 +370,7 @@ async function purgeProfile(request: Request, deps: Deps, login: string): Promis
     landingBoardKey(origin).url,
     `${origin}/sitemap.xml`,
     `${base}/${PREVIEW_IMAGE}`,
+    `${base}/rank-badge.svg`,
     ...BADGE_METRICS.map((metric) => badgeAddress(`${base}/badge.svg`, metric)),
     ...THEME_NAMES.flatMap((theme) => [false, true].map((graph) => cardAddress(`${base}/card.svg`, theme, graph))),
     ...images.flatMap((image) => THEME_NAMES.map((theme) => themed(image, theme))),
@@ -446,6 +451,20 @@ async function serveBadge(login: string, metric: BadgeMetric, deps: Deps): Promi
     : badgeFor(metric, { ...(await buildMetrics(user, deps)).metrics, position: null });
   // A badge without its figure isn't cached, so the first upload shows at once.
   return svg(renderBadge(badge), badge.known);
+}
+
+/** Who a profile is, where it stands and its lifetime tokens, as one badge. */
+async function serveRankBadge(login: string, origin: string, deps: Deps): Promise<Response> {
+  const user = await publicProfile(login, deps);
+  if (!user) return svgNotFound();
+  const [{ metrics }, position, avatar] = await Promise.all([
+    buildMetrics(user, deps),
+    lifetimePosition(user, deps),
+    avatarData(user.avatar_url, origin, deps, BADGE_AVATAR_PIXELS),
+  ]);
+  const badge = rankBadgeFor({ login: user.login, avatar }, metrics.tokens, position);
+  // Like any badge, it isn't kept until it has its figure, so the first upload shows at once.
+  return svg(renderRankBadge(badge), badge.known);
 }
 
 async function serveSmallCard(login: string, theme: Theme, graph: boolean, deps: Deps): Promise<Response> {
@@ -757,6 +776,7 @@ async function route(request: Request, deps: Deps): Promise<Response> {
       const metric = badgeMetricNamed(url.searchParams.get('metric'));
       return metric ? cachedPublic(request, deps, () => serveBadge(login, metric, deps)) : svgNotFound();
     }
+    if (resource === 'rank-badge.svg') return cachedPublic(request, deps, () => serveRankBadge(login, url.origin, deps));
     if (resource === 'card.svg') return cachedPublic(request, deps, () => serveSmallCard(login, theme, graphAsked(url.searchParams), deps));
     const [, cardKey] = /^cards\/([a-z]+)\.txt$/.exec(resource) ?? [];
     if (cardKey) return cachedPublic(request, deps, () => serveCard(login, cardKey, deps));

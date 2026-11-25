@@ -163,6 +163,8 @@ For a README with less room, choose a 495-pixel stats or ranking card, or a badg
 
 ![Token ranking](https://ohmystats.dev/u/<login>/ranking.svg)
 
+![Token rank](https://ohmystats.dev/u/<login>/rank-badge.svg)
+
 ![AI tokens](https://ohmystats.dev/u/<login>/badge.svg)
 ```
 
@@ -182,7 +184,11 @@ The badge shows one figure. Choose it with `?metric=`:
 
 A badge shows `n/a` until its figure exists, and `unranked` until you have a place.
 
-Images follow the viewer's light or dark mode. By default they use GitHub's colors, so they blend into a GitHub page: its backgrounds and grays, and the greens of its contribution graph for calendars, heat maps and bars. Lines added and removed are green and red, as in a GitHub diff. In a chart of providers, Claude Code is orange, Codex is aqua and Gemini CLI is blue, the same as on the website. For [Tokyo Night](https://github.com/tokyo-night/tokyo-night-vscode-theme) colors, add `?theme=tokyo-night` to any image address. Dark mode uses Tokyo Night, and light mode uses its Day variant:
+The token rank badge, `rank-badge.svg`, puts three things in one line, in this order: your avatar and username, your place among published profiles by lifetime AI tokens, and your lifetime AI tokens. It takes no `?metric=`.
+
+Badges have fixed colors, a gray label and GitHub's green for the figure, so they read the same on a light page and a dark one. They take no theme.
+
+The other images follow the viewer's light or dark mode. By default they use GitHub's colors, so they blend into a GitHub page: its backgrounds and grays, and the greens of its contribution graph for calendars, heat maps and bars. Lines added and removed are green and red, as in a GitHub diff. In a chart of providers, Claude Code is orange, Codex is aqua and Gemini CLI is blue, the same as on the website. For [Tokyo Night](https://github.com/tokyo-night/tokyo-night-vscode-theme) colors, add `?theme=tokyo-night` to any image address. Dark mode uses Tokyo Night, and light mode uses its Day variant:
 
 ```markdown
 ![Developer stats](https://ohmystats.dev/u/<login>/dashboard.svg?theme=tokyo-night)

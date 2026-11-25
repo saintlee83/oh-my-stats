@@ -23,7 +23,7 @@ export function EmbedCode({ url, parts }: { url: string; parts: Part[] }) {
   if (parts.length === 0) return dashboard;
   // A blank line puts each image in its own paragraph, so GitHub spaces them evenly.
   const lines = parts.map((part) => `![${part.label}](${url}/components/${part.key}.svg)`).join('\n\n');
-  const small = `![Developer stats](${url}/card.svg)\n\n![Token ranking](${url}/ranking.svg)\n\n![AI tokens](${url}/badge.svg)`;
+  const small = `![Developer stats](${url}/card.svg)\n\n![Token ranking](${url}/ranking.svg)\n\n![Token rank](${url}/rank-badge.svg)\n\n![AI tokens](${url}/badge.svg)`;
   return (
     <>
       {dashboard}
