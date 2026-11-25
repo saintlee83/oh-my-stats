@@ -1,18 +1,18 @@
-import type { CSSProperties } from 'react';
-import { commas, compact, niceMax, percent } from '../../shared/format.ts';
+import { commas, compact } from '../../shared/format.ts';
 import type { GitHubProfile, Metrics, TokenMetrics } from '../../shared/metrics.ts';
 import { manualProfileFromJson, PROFILE_LIMITS, STATUS_CHOICES, type ManualProfile } from '../../shared/profile.ts';
 import { availableComponents } from '../../shared/render/svg.ts';
-import { lastDays } from '../../shared/time.ts';
-import { usageCalendar, type CalendarView } from '../../shared/usage.ts';
+import { seriesOf, type Series } from '../../shared/series.ts';
+import { dayData, usageWindow, type DayData } from '../../shared/usage.ts';
 import { buildMetrics } from '../../server/app.ts';
 import { listMachines, type MachineRow, type UserRow } from '../../server/db.ts';
 import { SITE, type Part } from '../../server/pages.ts';
-import { activityIcons, ActivityPanels, EmbedCode, ProviderActivity } from '../activity.tsx';
-import { GitHubSetup, InstallCommands, ProviderLabel } from '../common.tsx';
+import { activityIcons, ActivityPanels, EmbedCode, modelNote, ProviderActivity, ShareBreakdown } from '../activity.tsx';
+import { GitHubSetup, InstallCommands } from '../common.tsx';
+import { HeatSummary } from '../days.tsx';
 import { Layout } from '../layout.tsx';
 import type { PageModule } from '../page.ts';
-import { TrendCard, WorkspaceSections } from './workspace.tsx';
+import { ActivityChart, WorkspaceSections } from './workspace.tsx';
 
 /** The signed-in dashboard: a workspace only its owner sees, in four sections. */
 
@@ -86,111 +86,44 @@ function ProfileForm({ manual, github }: { manual: ManualProfile; github: GitHub
   );
 }
 
-const shortDate = new Intl.DateTimeFormat('en-US', { month: 'short', day: 'numeric', timeZone: 'UTC' });
-const dateLabel = (date: string) => shortDate.format(new Date(`${date}T00:00:00Z`));
 const windows = [7, 30, 60] as const;
 
-const series = (index: number | undefined): CSSProperties => ({ '--series': `var(--series-${index})` }) as CSSProperties;
-
-function UsageWindow({ tokens, size, palette }: { tokens: TokenMetrics; size: number; palette: Map<string, number> }) {
-  const days = tokens.daily.slice(-size);
-  const total = days.reduce((sum, day) => sum + day.total, 0);
-  const max = niceMax(Math.max(2, ...days.map((day) => day.total)));
-  const first = days[0];
-  const last = days[days.length - 1];
-  const priorStart = lastDays(last.date, size * 2)[0];
-  const previous = tokens.dated.reduce((sum, day) => sum + (day.date >= priorStart && day.date < first.date ? day.total : 0), 0);
-  const change = previous ? (total - previous) / previous : null;
-  const shares = new Map<string, number>();
-  for (const day of days) {
-    for (const [tool, count] of Object.entries(day.byTool)) {
-      if (count > 0) shares.set(tool, (shares.get(tool) ?? 0) + count);
-    }
-  }
-  const providers = [...shares].sort((a, b) => b[1] - a[1] || a[0].localeCompare(b[0]));
-  // Slot centers are also the pointer and keyboard inspection positions.
-  const halfSlot = 50 / size;
-  const points = days.map((day, i) => `${((2 * i + 1) * halfSlot).toFixed(3)},${(100 - (100 * day.total) / max).toFixed(3)}`).join(' ');
+/** One period: its daily chart, then how its tokens split by provider and by model. */
+function UsageWindow({ tokens, size, days, series }: { tokens: TokenMetrics; size: number; days: DayData; series: { providers: Series[]; models: Series[] } }) {
+  const period = usageWindow(tokens, size);
+  const empty = 'No dated usage in this period.';
   return (
     <div className="usage-window" data-window={size}>
-      <TrendCard
-        size={size}
-        total={compact(total)}
-        exactTotal={`${commas(total)} tokens`}
-        range={change !== null
-          ? <><strong>{`${change > 0 ? '+' : ''}${percent(change)}`}</strong>{` vs prior ${size} days`}</>
-          : `${dateLabel(first.date)} – ${dateLabel(last.date)}`}
-        max={compact(max)}
-        half={compact(max / 2)}
-        points={points}
-        halfSlot={halfSlot}
-        dates={[dateLabel(first.date), dateLabel(days[Math.floor(size / 2)].date), dateLabel(last.date)]}
-        days={days.map((day) => ({ label: `${day.date} · ${commas(day.total)} tokens`, y: 100 - (100 * day.total) / max }))}
-      />
+      <ActivityChart data={days} size={size} />
       <section className="provider-card panel">
         <h2>Provider breakdown</h2>
         <p className="muted">{`Share of tokens · last ${size} days`}</p>
-        {providers.length ? (
-          <>
-            <div className="provider-mix" aria-hidden="true">
-              {providers.map(([tool, count]) => <i key={tool} style={{ flexGrow: count, background: `var(--series-${palette.get(tool)})` }}></i>)}
-            </div>
-            <ol className="provider-list">
-              {providers.map(([tool, count]) => (
-                <li key={tool} style={series(palette.get(tool))}>
-                  <div><strong><ProviderLabel id={tool} /></strong><span>{percent(count / total)}</span></div>
-                  <small title={`${commas(count)} tokens`}>{`${compact(count)} tokens`}</small>
-                </li>
-              ))}
-            </ol>
-          </>
-        ) : (
-          <p className="provider-empty">No dated usage in this period.</p>
-        )}
+        <ShareBreakdown kind="providers" rows={period.providers} series={series.providers} empty={empty} />
+      </section>
+      <section className="provider-card panel">
+        <h2>Model breakdown</h2>
+        <p className="muted">{`Share of tokens with a model named · last ${size} days`}</p>
+        <ShareBreakdown kind="models" rows={period.models} series={series.models} note={modelNote(period)} empty={period.total ? 'No synced log names a model for this period.' : empty} />
       </section>
     </div>
   );
 }
 
 /** The period switch uses native radios so the same daily totals remain available without JavaScript. */
-function UsageExplorer({ tokens }: { tokens: TokenMetrics }) {
-  const palette = new Map(tokens.tools.map(({ tool }, i) => [tool, i % 6]));
+function UsageExplorer({ tokens, days }: { tokens: TokenMetrics; days: DayData }) {
+  const series = seriesOf(tokens);
   return (
     <div className="usage-explorer" role="group" aria-label="Token activity period">
       {windows.map((size) => <input key={size} className="sr" type="radio" name="window" id={`window-${size}`} defaultChecked={size === 30} />)}
       <div className="window-switch">
         {windows.map((size) => <label key={size} htmlFor={`window-${size}`}>{size}<span aria-hidden="true">D</span><span className="sr"> days</span></label>)}
       </div>
-      {windows.map((size) => <UsageWindow key={size} tokens={tokens} size={size} palette={palette} />)}
+      {windows.map((size) => <UsageWindow key={size} tokens={tokens} size={size} days={days} series={series} />)}
     </div>
   );
 }
 
-const LEVELS = [0, 1, 2, 3, 4];
-
-function CalendarSummary({ view }: { view: CalendarView }) {
-  const weeks = view.weeks.slice(-26);
-  const from = weeks[0].days[0]!.date;
-  return (
-    <div className="calendar-summary">
-      <div className="calendar-heading"><h2>Daily token activity</h2><a href="#activity">View activity <span aria-hidden="true">→</span></a></div>
-      <div className="heat-grid" role="img" aria-label={`Daily token activity from ${from} to ${view.end}`}>
-        {weeks.map((week, index) => (
-          <div key={index} className="heat-week">
-            <small>{week.month ?? ''}</small>
-            {week.days.map((day, i) => (day ? <i key={i} data-level={day.level} title={`${day.date} · ${commas(day.total)} tokens`}></i> : <i key={i}></i>))}
-          </div>
-        ))}
-      </div>
-      <div className="heat-caption">
-        <span>{`${dateLabel(from)} – ${dateLabel(view.end)}`}</span>
-        <span className="heat-key">{'Less '}{LEVELS.map((level) => <i key={level} data-level={level}></i>)}{' More'}</span>
-      </div>
-    </div>
-  );
-}
-
-function OverviewSummary({ metrics: { tokens, github }, calendar }: { metrics: Metrics; calendar?: CalendarView }) {
+function OverviewSummary({ metrics: { tokens, github }, days }: { metrics: Metrics; days: DayData | null }) {
   const metric = (label: string, value: number | undefined, short = false) => (
     <div key={label}>
       <dt>{label}</dt>
@@ -203,7 +136,7 @@ function OverviewSummary({ metrics: { tokens, github }, calendar }: { metrics: M
   return (
     <section className="overview-summary" aria-label="Lifetime statistics">
       <dl className="summary-stats">{stats}</dl>
-      {calendar ? <CalendarSummary view={calendar} /> : null}
+      {days ? <HeatSummary data={days} /> : null}
     </section>
   );
 }
@@ -242,7 +175,8 @@ const dashboardIcons = (tokens: TokenMetrics | null) =>
 
 function DashboardView({ user, machines, metrics, parts, origin, manual }: DashboardProps) {
   const { github, tokens } = metrics;
-  const calendars = tokens ? usageCalendar(tokens) : [];
+  // Worked out once: the calendar, the summary and each period's chart are drawn from the same days.
+  const days = tokens ? dayData(tokens) : null;
   const url = `${origin}/u/${encodeURIComponent(user.login)}`;
   const isPublic = user.is_public === 1;
   const githubSetup = github ? null : <GitHubSetup />;
@@ -264,8 +198,8 @@ function DashboardView({ user, machines, metrics, parts, origin, manual }: Dashb
           {githubSetup}
         </section>
       )}
-      {tokens || github ? <OverviewSummary metrics={metrics} calendar={calendars[0]} /> : null}
-      {tokens ? <UsageExplorer tokens={tokens} />
+      {tokens || github ? <OverviewSummary metrics={metrics} days={days} /> : null}
+      {tokens && days ? <UsageExplorer tokens={tokens} days={days} />
         : machines.length ? <section className="panel"><h2>Waiting for token usage</h2><p>Run <code>oms sync</code> on a connected machine to upload its usage.</p></section>
         : null}
       {github || tokens ? (
@@ -279,7 +213,7 @@ function DashboardView({ user, machines, metrics, parts, origin, manual }: Dashb
 
   const activity = tokens ? (
     <>
-      <ActivityPanels tokens={tokens} calendars={calendars} />
+      <ActivityPanels tokens={tokens} days={days ?? undefined} />
       <ProviderActivity tokens={tokens} />
     </>
   ) : (

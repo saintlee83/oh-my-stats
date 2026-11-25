@@ -1,14 +1,5 @@
 .workspace {
   --mono: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
-  --series-0: #278250; --series-1: #427ace; --series-2: #9673bd;
-  --series-3: #ad6c31; --series-4: #40828c; --series-5: #b45d81;
-  --chart: var(--spark);
-}
-@media (prefers-color-scheme: dark) {
-  .workspace {
-    --series-0: #57bb81; --series-1: #6b9de5; --series-2: #b197d7;
-    --series-3: #dc9e62; --series-4: #67b2b9; --series-5: #d589a7;
-  }
 }
 .workspace :is(main, .bar) { max-width: 1184px; padding-inline: clamp(16px, 3vw, 40px); }
 .workspace main { padding-top: 0; }
@@ -56,13 +47,15 @@
 .calendar-summary [data-level="2"] { background: #228149; }
 .calendar-summary [data-level="3"] { background: #37ad5f; }
 .calendar-summary [data-level="4"] { background: #8ae69b; }
+.heat-week i[data-date]:hover, .heat-week i.on { outline: 2px solid #f0f6fc; outline-offset: 1px; }
+.heat-grid:focus-visible { outline: 2px solid #58a6ff; outline-offset: 5px; border-radius: 3px; }
 .heat-key { display: inline-flex; align-items: center; gap: 3px; }
 .heat-key i { width: 8px; height: 8px; }
 .heat-key i:first-child { margin-left: 3px; }
 .heat-key i:last-child { margin-right: 3px; }
 
 .usage-explorer {
-  --columns: minmax(0, 1.8fr) minmax(275px, 1fr);
+  --columns: repeat(2, minmax(0, 1fr));
   display: grid; grid-template-columns: var(--columns); gap: 16px; position: relative;
 }
 .usage-window { display: none; grid-column: 1 / -1; grid-row: 1; grid-template-columns: var(--columns); gap: inherit; }
@@ -71,46 +64,46 @@
   min-width: 0; margin: 0; border: 1px solid var(--line); border-radius: 12px; background: var(--surface); box-shadow: var(--shadow);
 }
 .trend-card, .provider-card.panel { padding: 22px 24px; }
+.trend-card { grid-column: 1 / -1; }
 .trend-card h2, .provider-card h2 { margin: 0; font-size: 18px; line-height: 1.4; letter-spacing: -.025em; }
 .trend-card h2 { margin-right: 130px; }
-.window-switch { grid-column: 1; grid-row: 1; z-index: 1; justify-self: end; align-self: start; display: flex; padding: 2px; margin: 18px 22px; border: 1px solid var(--line-soft); border-radius: 7px; background: var(--raised); }
+.window-switch { grid-column: 1 / -1; grid-row: 1; z-index: 1; justify-self: end; align-self: start; display: flex; padding: 2px; margin: 18px 22px; border: 1px solid var(--line-soft); border-radius: 7px; background: var(--raised); }
 .window-switch label { padding: 3px 8px; border-radius: 4px; color: var(--muted); font: 550 12px/19px var(--mono); cursor: pointer; }
 .window-switch label:hover { color: var(--ink); }
 #window-7:checked ~ .window-switch [for="window-7"], #window-30:checked ~ .window-switch [for="window-30"], #window-60:checked ~ .window-switch [for="window-60"] { background: var(--ink); color: var(--surface); }
 #window-7:focus-visible ~ .window-switch [for="window-7"], #window-30:focus-visible ~ .window-switch [for="window-30"], #window-60:focus-visible ~ .window-switch [for="window-60"] { outline: 2px solid var(--focus); outline-offset: 2px; }
-.trend-total { margin-top: 14px; color: var(--ink); font-size: clamp(30px, 3vw, 40px); font-weight: 600; line-height: 1.05; letter-spacing: -.045em; font-variant-numeric: tabular-nums; }
+.trend-total { margin-top: 14px; color: var(--ink); font-size: clamp(30px, 3vw, 40px); font-weight: 600; line-height: 1.05; letter-spacing: -.045em; }
 .trend-total span { font-size: 14px; font-weight: 450; color: var(--muted); letter-spacing: 0; }
 .trend-range { margin: 4px 0 20px; font-size: 12px; color: var(--muted); }
 .trend-range strong { color: var(--ink2); font-weight: 650; }
 .plot-area { display: grid; grid-template-columns: 38px minmax(0, 1fr); }
 .plot-scale, .plot-dates, .plot-detail { font: 11px/1.4 var(--mono); color: var(--muted); }
 .plot-scale { display: flex; flex-direction: column; justify-content: space-between; }
-.plot { position: relative; height: 132px; border-block: 1px solid var(--line-soft); background: linear-gradient(to bottom, transparent calc(50% - .5px), var(--line-soft) calc(50% - .5px) calc(50% + .5px), transparent calc(50% + .5px)); }
-.trend-line, .plot-slots, .plot input { position: absolute; inset: 0; width: 100%; height: 100%; }
-.trend-line { color: var(--chart); overflow: visible; pointer-events: none; }
+.plot { position: relative; height: 168px; border-top: 1px solid var(--line-soft); border-bottom: 1px solid var(--line); background: linear-gradient(to bottom, transparent calc(50% - .5px), var(--line-soft) calc(50% - .5px) calc(50% + .5px), transparent calc(50% + .5px)); }
+.plot-slots, .plot input { position: absolute; inset: 0; width: 100%; height: 100%; }
 .plot-slots { display: flex; }
-.plot-slot { position: relative; flex: 1 1 0; }
-.plot-slot.selected::before { content: ''; position: absolute; inset: 0 50% 0 auto; border-right: 1px dashed var(--chart); opacity: .5; }
-.plot-slot.selected::after { content: ''; position: absolute; top: var(--y); left: 50%; transform: translate(-50%, -50%); width: 8px; height: 8px; border: 2px solid var(--surface); border-radius: 50%; background: var(--chart); box-shadow: 0 0 0 1px var(--chart); }
+/* A day's room. Its bar is thinner than the room, and never wider than 24px. */
+.plot-slot { flex: 1 1 0; min-width: 0; display: flex; align-items: flex-end; justify-content: center; padding: 0 1px; border-radius: 3px 3px 0 0; }
+.plot-slot.selected { background: var(--line-soft); }
+/* One day, split from the baseline up. The gaps are the surface showing through, which keeps neighbours apart. */
+.plot-bar { display: flex; flex-direction: column-reverse; gap: 2px; width: 100%; max-width: 24px; min-height: 2px; border-radius: 3px 3px 0 0; overflow: hidden; }
+.plot-bar b { flex: 1 1 0; min-height: 0; }
 .plot input { margin: 0; opacity: 0; cursor: crosshair; }
 .plot:has(input:focus-visible) { outline: 2px solid var(--focus); outline-offset: 3px; }
 .plot-dates { display: flex; justify-content: space-between; margin: 7px 0 0 38px; }
-.plot-detail { display: flex; flex-wrap: wrap; justify-content: space-between; gap: 4px 12px; margin: 16px 0 0; padding-top: 10px; border-top: 1px solid var(--line-soft); }
+.plot-keys { display: flex; flex-wrap: wrap; align-items: center; gap: 8px 18px; min-height: 27px; margin: 14px 0 0 38px; }
+.plot-keys ul { display: flex; flex-wrap: wrap; gap: 4px 16px; margin: 0; padding: 0; list-style: none; font-size: 12px; color: var(--ink2); }
+.plot-keys li i { display: inline-block; width: 10px; height: 10px; margin-right: 6px; border-radius: 3px; }
+.switch { display: inline-flex; padding: 2px; border: 1px solid var(--line-soft); border-radius: 7px; background: var(--raised); }
+.switch button { min-height: 0; padding: 3px 9px; border: 0; border-radius: 4px; background: none; color: var(--muted); font-size: 12px; font-weight: 550; line-height: 19px; }
+.switch button:hover { color: var(--ink); background: none; }
+.switch button[aria-pressed="true"] { background: var(--ink); color: var(--surface); }
+.plot-detail { display: flex; flex-wrap: wrap; justify-content: space-between; gap: 4px 12px; margin: 14px 0 0; padding-top: 10px; border-top: 1px solid var(--line-soft); }
 .plot-detail span { font: 12px/1.4 system-ui, sans-serif; }
 .plot-detail b { color: var(--ink2); font-weight: 500; }
 
-.provider-card > .muted { margin: 4px 0 0; }
-.provider-mix { display: flex; height: 14px; margin: 26px 0 14px; overflow: hidden; border-radius: 4px; }
-.provider-mix i + i { box-shadow: inset 1px 0 var(--surface); }
-.provider-list { list-style: none; margin: 0; padding: 0; max-height: 240px; overflow-y: auto; }
-.provider-list li { position: relative; padding: 12px 0 12px 18px; }
-.provider-list li + li { border-top: 1px solid var(--line-soft); }
-.provider-list li::before { content: ''; position: absolute; left: 0; top: 19px; width: 8px; height: 8px; background: var(--series); border-radius: 2px; }
-.provider-list li > div { display: flex; justify-content: space-between; align-items: baseline; gap: 8px; }
-.provider-list strong { min-width: 0; overflow-wrap: anywhere; color: var(--ink); font-size: 14px; font-weight: 600; }
-.provider-list li span { font: 550 13px/1.4 var(--mono); }
-.provider-list small { color: var(--muted); font-size: 12px; }
-.provider-empty { margin: 24px 0; color: var(--muted); }
+.provider-card > .muted { margin: 4px 0 18px; }
+.provider-card .breakdown > .muted { margin: 10px 0 0; }
 .report-preview { margin: 16px 0 0; overflow: hidden; }
 .report-preview summary { padding: 14px 22px; cursor: pointer; font-weight: 600; }
 .report-scroll { overflow-x: auto; }
@@ -123,6 +116,7 @@
   .workspace-head { padding-top: 24px; }
   .overview-summary { gap: 22px; grid-template-columns: minmax(0, .85fr) minmax(0, 1.15fr); }
   .usage-explorer, .setup-card { --columns: minmax(0, 1fr); grid-template-columns: minmax(0, 1fr); }
+  .plot-keys { margin-left: 0; }
   .heat-grid, .heat-week { gap: 3px; }
   .summary-stats { gap: 12px 18px; }
   .summary-stats > div:last-child { padding-left: 18px; }
@@ -153,6 +147,5 @@
   .window-switch { margin: 13px 13px; }
   .window-switch label { padding: 4px 7px; }
   .trend-card h2 { margin-right: 112px; }
-  .plot { height: 116px; }
-  .provider-mix { margin-top: 18px; }
+  .plot { height: 132px; }
 }

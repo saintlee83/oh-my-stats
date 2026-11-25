@@ -88,6 +88,18 @@ export interface TokenYear {
   cost: number;
 }
 
+/**
+ * One day of usage. `byTool` adds up to `total`. `byModel` is what logged responses name a
+ * model for, a model reached through two tools counted once, so it can fall short of the total
+ * on a day a tool counted itself, and has nothing for a day with no logs.
+ */
+export interface TokenDay {
+  date: string;
+  total: number;
+  byTool: Record<string, number>;
+  byModel: Record<string, number>;
+}
+
 /** Where a profile stands among public profiles, by lifetime tokens. */
 export interface RankMetrics {
   rank: number | null;
@@ -115,9 +127,9 @@ export interface TokenMetrics {
   /** Account totals exceeding attributable device usage, reconciled separately for each provider. */
   unassigned: { total: number; last7: number; last30: number };
   /** Trailing 60 days, oldest first. */
-  daily: { date: string; total: number; byTool: Record<string, number> }[];
+  daily: TokenDay[];
   /** Every day with usage, oldest first, however long ago: what a year's calendar is drawn from. */
-  dated: { date: string; total: number; byTool: Record<string, number> }[];
+  dated: TokenDay[];
   /** Calendar years with dated usage, newest first. */
   years: TokenYear[];
   monthly: { month: string; total: number; byTool: Record<string, number> }[];

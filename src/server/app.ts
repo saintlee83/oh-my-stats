@@ -322,7 +322,7 @@ const landingBoardKey = (origin: string) => new Request(`${origin}/cache/landing
  * Where a location keeps what a public profile page shows to signed-out visitors, so the
  * dashboard isn't drawn again for each of them. No page is served from here.
  */
-export const profilePageKey = (origin: string, login: string) => new Request(`${origin}/cache/profile-page-1/${login.toLowerCase()}`);
+export const profilePageKey = (origin: string, login: string) => new Request(`${origin}/cache/profile-page-2/${login.toLowerCase()}`);
 
 /**
  * The top of the public rankings, for the landing page. Ranking every profile is too much

@@ -46,6 +46,7 @@ app/                      The routes vinext serves: one page.tsx per page, the r
 src/web/                  The website's pages, in React
   routes.ts               Which address is which page, and what is checked before one is drawn
   layout.tsx, common.tsx  The frame every page shares, and the pieces several pages use
+  activity.tsx, days.tsx  The usage panels of a profile, and the days that answer when pointed at
   pages/                  Each page: what it loads, and how it is drawn
 src/server/               The API, images, sign-in, forms and queries
   app.ts                  Every route that isn't a page, the cache, and the security headers
@@ -163,7 +164,7 @@ Say in the pull request whether you ran the tool and compared the numbers, or wo
 
 1. Write it in `src/web/pages/` as a `PageModule`: `load` reads what the page shows, or sends the visitor elsewhere, or finds nothing; `View` draws it inside `Layout` from `src/web/layout.tsx`. Pass `origin` only for a page search engines should list. Without it, the page is marked `noindex`. Name every tool the page marks in `icons`.
 2. Give it an address: a pattern in `ROUTES` in `src/web/routes.ts`, with any rate limit and any check of its query in `gate`, and a `page.tsx` under `app/` that calls `serve`. A form posts to `handleWebPost` in `src/server/app.ts`.
-3. Add its styles to `src/server/style.ts`, with the colors already defined there, which have light and dark values.
+3. Add its styles to `src/server/style.ts`, with the colors already defined there, which have light and dark values. A chart that tells providers or models apart takes each one's color from `seriesOf` in `src/shared/series.ts`, so a name wears the same color in every chart, and always names it beside the color. What a day shows when it is pointed at is in `src/web/days.tsx`, one of the few files that run in the browser.
 4. Decide whether what it loads is kept. Anything kept that shows a profile's data has to be removed when that profile goes private. See the rule above.
 5. Add a page that search engines should find to `INDEXED_PATHS` in `src/server/reading.ts`, which is what the sitemap lists.
 6. List it in `PAGES` in `test/site.tsx`, and test it through `app()` in `test/harness.ts`, which gives you the website over a new database and a stand-in for GitHub. The tests draw each page the way vinext does, without a browser.

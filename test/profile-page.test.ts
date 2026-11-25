@@ -1,9 +1,13 @@
 import assert from 'node:assert/strict';
 import { test } from 'node:test';
+import { createElement } from 'react';
+import { renderToStaticMarkup } from 'react-dom/server';
 import { STYLE } from '../src/server/style.ts';
+import { modelSeries, providerSeries } from '../src/shared/series.ts';
 import { computeTokens } from '../src/shared/tokens.ts';
 import type { MachineUsage, UsageTuple } from '../src/shared/types.ts';
-import { tokenMix, usageCalendar, usagePeriods } from '../src/shared/usage.ts';
+import { dayData, tokenMix, usageCalendar, usagePeriods, type DayData } from '../src/shared/usage.ts';
+import { DayTip, indexDays } from '../src/web/days.tsx';
 import { api, app, MACHINE_A, mark, octo, ORIGIN, SECRET_NAME, signIn, upload, webLogin, webPost } from './harness.ts';
 
 const TZ = 'Asia/Seoul';
@@ -53,10 +57,23 @@ test('the private overview charts dated tokens and provider shares for the same 
     assert.equal(count(body, /class="plot-slot"/g), Number(size));
     assert.match(body, /title="2026-11-09 · 50 tokens"/);
   }
-  assert.ok(windows[1][2].includes(`<strong>${mark('codex')}Codex</strong><span>80.0%</span>`));
+  // Each provider beside its color, which is the same one in every window: Codex aqua, Claude Code orange.
+  const row = (slot: number, name: string, tokens: string, share: string) =>
+    `<td><i style="background:var(--s${slot})"></i>${name}</td><td class="num" title="${tokens} tokens">${tokens}</td><td class="num"><strong>${share}</strong></td>`;
+  assert.ok(windows[1][2].includes(row(3, `${mark('codex')}Codex`, '200', '80.0%')));
+  assert.ok(windows[1][2].includes(row(2, `${mark('claude')}Claude Code`, '50', '20.0%')));
+  assert.ok(windows[0][2].includes(row(2, `${mark('claude')}Claude Code`, '50', '100.0%')));
   assert.match(windows[1][2], /-50.0%<\/strong> vs prior 30 days/, 'compares dated tokens across adjacent windows');
   assert.doesNotMatch(windows[0][2], /vs prior 7 days/, 'a missing baseline has no percent change');
-  assert.doesNotMatch(windows[1][2], /<strong>Pi<\/strong>/);
+  assert.doesNotMatch(windows[1][2], /Pi<\/td>/);
+  // Every tool logged the same model, so each window names one model for all its tokens.
+  for (const [index, expected] of ['50', '250', '750'].entries()) assert.ok(windows[index][2].includes(row(1, 'm', expected, '100.0%')), `${expected} tokens of the model`);
+  assert.ok(windows[2][2].includes(row(4, `${mark('pi')}Pi`, '500', '66.7%')), 'a tool with no color of its own takes the first free one');
+  // A day's bar is split by provider, and the chart names each color it uses.
+  assert.match(windows[1][2], /title="2026-11-09 · 50 tokens"><i class="plot-bar" style="height:25\.00%"><b style="flex-grow:100\.00;background:var\(--s2\)"><\/b><\/i>/);
+  assert.match(windows[1][2], /<ul aria-label="Providers"><li><i style="background:var\(--s2\)"><\/i>Claude Code<\/li><li><i style="background:var\(--s3\)"><\/i>Codex<\/li><\/ul>/);
+  assert.match(windows[1][2], /title="2026-11-08 · 0 tokens"><\/span>/, 'a day without usage has no bar');
+  assert.doesNotMatch(dashboard, /aria-pressed/, 'the switch to models is offered once the scripts that work it run');
   assert.ok(dashboard.includes('title="1,750"'), 'undated usage still counts in lifetime');
   assert.doesNotMatch(profile, /dashboard\.js|me\/report\.svg|usage-window/);
   await context.call('/me/visibility', webPost(cookie, 'public=0'));
@@ -76,7 +93,7 @@ const count = (text: string, pattern: RegExp) => [...text.matchAll(pattern)].len
 test('the newest calendar view is the last 53 weeks, Monday first, through today', () => {
   // A Wednesday in Seoul.
   const tokens = tokensFor({ days: days({ '2026-11-11': { claude: 1600 }, '2026-11-10': { claude: 100 }, '2026-11-02': { claude: 1 } }) }, '2026-11-11T05:00:00Z');
-  const [recent] = usageCalendar(tokens);
+  const [recent] = usageCalendar(dayData(tokens));
   assert.deepEqual([recent.key, recent.label, recent.start, recent.end], ['recent', 'Last 12 months', '2025-11-10', '2026-11-11']);
   assert.equal(recent.weeks.length, 53);
   assert.ok(recent.weeks.every((week) => week.days.length === 7));
@@ -91,7 +108,7 @@ test('the newest calendar view is the last 53 weeks, Monday first, through today
 
 test('a month is named above its first week, unless the name would run into the next or off the edge', () => {
   const months = (now: string) => {
-    const [recent] = usageCalendar(tokensFor({ days: days({ '2026-11-02': { claude: 1 } }) }, now));
+    const [recent] = usageCalendar(dayData(tokensFor({ days: days({ '2026-11-02': { claude: 1 } }) }, now)));
     return recent.weeks.map((week) => week.month);
   };
   const named = (labels: (string | null)[]) => labels.filter(Boolean).join(' ');
@@ -114,7 +131,7 @@ test('each calendar year with usage gets its own view, the newest four at most',
     '2021-06-01': { claude: 1 }, '2022-06-01': { claude: 2 }, '2023-06-01': { claude: 3 }, '2024-02-29': { claude: 4 },
     '2025-12-31': { claude: 5 }, '2026-01-01': { claude: 6 }, '2026-11-09': { claude: 7 }, '2026-11-10': { claude: 800 },
   }) }, '2026-11-09T05:00:00Z');
-  const views = usageCalendar(tokens);
+  const views = usageCalendar(dayData(tokens));
   assert.deepEqual(views.map((view) => view.key), ['recent', '2026', '2025', '2024', '2023']);
 
   const drawn = (key: string) => views.find((view) => view.key === key)!.weeks.flatMap((week) => week.days).filter((slot) => slot !== null);
@@ -131,7 +148,7 @@ test('each calendar year with usage gets its own view, the newest four at most',
   assert.equal(thisYear.weeks.at(-1)!.month, null);
 });
 
-test('a day with usage in the last 12 months opens its providers, and every other day only has a title', async () => {
+test('before scripts run, a day with usage says its total in a title, with its providers in the last 12 months', async () => {
   const { profile, dashboard } = await pages({ days: days({
     '2026-11-09': { codex: 125, pi: 75 }, '2026-03-04': { claude: 50 }, '2025-11-10': { claude: 40 }, '2025-11-09': { claude: 30 },
   }) });
@@ -140,29 +157,70 @@ test('a day with usage in the last 12 months opens its providers, and every othe
     const [recent, thisYear, lastYear] = panesOf(calendar);
 
     // Today is a Monday: 52 whole weeks and one day, three of them with usage.
-    assert.equal(count(recent, /<div class="weeks">/g), 1);
-    const grid = recent.slice(recent.indexOf('<div class="weeks">'), recent.indexOf('<p class="scale"'));
+    assert.equal(count(recent, /<div class="weeks"/g), 1);
+    assert.match(recent, /<div class="weeks" role="group" aria-label="AI usage per day from 2025-11-10 to 2026-11-09: 290 tokens on 3 days\.">/);
+    const grid = recent.slice(recent.indexOf('<div class="weeks"'), recent.indexOf('<p class="scale"'));
     assert.equal(count(grid, /class="day"/g), 365);
-    assert.equal(count(grid, /<button class="day"/g), 3);
-    assert.equal(count(recent, /<section popover(?:="")? class="day-details"/g), 3);
-    assert.match(recent, /<button class="day" popover[tT]arget="day-2026-11-09" data-level="4" aria-label="2026-11-09 · 200 tokens" title="2026-11-09 · 200 tokens"><\/button>/);
-    assert.match(recent, /<section popover(?:="")? class="day-details" id="day-2026-11-09" aria-label="AI usage on 2026-11-09"><h2>2026-11-09<\/h2><p>200 tokens<\/p><ul><li>Codex · 125<\/li><li>Pi · 75<\/li><\/ul>/);
-    assert.match(recent, /popover[tT]arget="day-2025-11-10"[^>]*aria-label="2025-11-10 · 40 tokens"/, 'the first day of the 53 weeks');
-    assert.match(recent, /<span class="day" title="2026-11-08 · 0 tokens"><\/span>/, 'a day without usage');
+    assert.equal(count(grid, /class="day" data-level/g), 3);
+    // Every day carries its date, which is how the scripts know what was pointed at.
+    assert.equal(count(grid, /class="day" (data-level="\d" )?data-date="\d{4}-\d\d-\d\d"/g), 365);
+    assert.match(recent, /<span class="day" data-level="4" data-date="2026-11-09" title="2026-11-09 · 200 tokens · Codex 125, Pi 75"><\/span>/);
+    assert.match(recent, /<span class="day" data-level="2" data-date="2025-11-10" title="2025-11-10 · 40 tokens · Claude Code 40"><\/span>/, 'the first day of the 53 weeks');
+    assert.match(recent, /<span class="day" data-date="2026-11-08"><\/span>/, 'a day without usage has nothing to say');
     assert.doesNotMatch(recent, /2025-11-09/, 'the day before the 53 weeks begin');
-    assert.match(recent, /2025-11-10 – 2026-11-09 · 290 tokens on 3 days · Select a day for its providers\./);
-    assert.match(recent, /<a class="sr" href="#periods">Skip the calendar<\/a>/, 'a keyboard can pass the days that open');
+    assert.match(recent, /<p class="muted">2025-11-10 – 2026-11-09 · 290 tokens on 3 days<\/p>/);
 
-    // The calendar years show the same days, with a title and nothing to open.
-    for (const year of [thisYear, lastYear]) assert.doesNotMatch(year, /<button|popover|Select a day|Skip the calendar/);
-    assert.match(thisYear, /<span class="day" data-level="4" title="2026-11-09 · 200 tokens"><\/span>/);
+    // The calendar years show the same days, with their totals.
+    assert.match(thisYear, /<span class="day" data-level="4" data-date="2026-11-09" title="2026-11-09 · 200 tokens"><\/span>/);
     assert.match(thisYear, /2026-01-01 – 2026-11-09 · 250 tokens on 2 days/);
-    assert.equal(count(thisYear, /class="day" (data-level="\d" )?title=/g), 313, 'the year in progress stops at today');
-    assert.match(lastYear, /<span class="day" data-level="4" title="2025-11-09 · 30 tokens"><\/span>/, 'a day the 53 weeks no longer reach');
-    assert.match(lastYear, /<span class="day" data-level="4" title="2025-11-10 · 40 tokens"><\/span>/);
+    assert.equal(count(thisYear, /class="day" (data-level="\d" )?data-date=/g), 313, 'the year in progress stops at today');
+    assert.match(lastYear, /<span class="day" data-level="4" data-date="2025-11-09" title="2025-11-09 · 30 tokens"><\/span>/, 'a day the 53 weeks no longer reach');
+    assert.match(lastYear, /<span class="day" data-level="4" data-date="2025-11-10" title="2025-11-10 · 40 tokens"><\/span>/);
     assert.match(lastYear, /2025-01-01 – 2025-12-31 · 70 tokens on 2 days/);
-    assert.equal(count(page, /id="day-2026-11-09"/g), 1, 'an id appears once however many views show the day');
+    // Nothing in the calendar is a stop for the Tab key until the scripts make the days answer to the arrow keys.
+    assert.doesNotMatch(calendar, /<button|popover|tabindex/i);
   }
+});
+
+const KEYS = { providers: [{ key: 'codex', label: 'Codex', slot: 3 }, { key: 'pi', label: 'Pi', slot: 4 }], models: [{ key: 'gpt-6-astra', label: 'gpt-6-astra', slot: 1 }, { key: 'kimi', label: 'kimi', slot: 2 }] };
+
+test('a day that is pointed at shows its total, then its providers and its models with their shares', () => {
+  const data: DayData = { today: '2026-11-09', years: [2026], ...KEYS, days: [['2026-11-09', 2000, [0, 1500, 1, 500], [0, 1200, 1, 300, -1, 100]]] };
+  const day = indexDays(data).get('2026-11-09');
+  assert.deepEqual(day?.providers, [{ label: 'Codex', slot: 3, place: 0, tokens: 1500 }, { label: 'Pi', slot: 4, place: 1, tokens: 500 }]);
+  assert.deepEqual(day?.models.at(-1), { label: 'Other models', slot: 0, place: -1, tokens: 100 });
+
+  const tip = renderToStaticMarkup(createElement(DayTip, { date: '2026-11-09', day, anchor: { left: 0, right: 0, top: 0, bottom: 0 } }));
+  assert.match(tip, /<p class="tip-date">Mon, Nov 9, 2026<\/p><p class="tip-total"><strong>2,000<\/strong> tokens<\/p>/);
+  const rows = [...tip.matchAll(/<p class="tip-(head|row)">(?:<i style="background:var\(--s(\d)\)"><\/i><span>([^<]+)<\/span><b>([^<]+)<\/b><em>([^<]+)<\/em>|([^<]+))<\/p>/g)]
+    .map(([, kind, slot, name, tokens, share, heading]) => (kind === 'head' ? heading : [slot, name, tokens, share].join(' ')));
+  assert.deepEqual(rows, [
+    'Providers', '3 Codex 1.5k 75%', '4 Pi 500 25%',
+    // A model's share is of the tokens a model is named for, which the note below gives.
+    'Models', '1 gpt-6-astra 1.2k 75%', '2 kimi 300 19%', '0 Other models 100 6.3%',
+  ]);
+  assert.match(tip, /<p class="tip-note">Models from synced logs: 1\.6k tokens<\/p>/);
+  assert.match(tip, /^<div class="tip" aria-hidden="true"/, 'a screen reader hears the day as a sentence instead');
+
+  const empty = renderToStaticMarkup(createElement(DayTip, { date: '2026-11-08', day: undefined, anchor: { left: 0, right: 0, top: 0, bottom: 0 } }));
+  assert.match(empty, /<p class="tip-date">Sun, Nov 8, 2026<\/p><p class="tip-total">No usage<\/p><\/div>$/);
+});
+
+test('the days sent to the browser name each provider and model once, and add up a day’s models past its largest five', () => {
+  const models = ['a', 'b', 'c', 'd', 'e', 'f', 'g'];
+  const tokens = tokensFor({ days: {
+    '2026-11-08': Object.fromEntries(models.map((model, index): [string, UsageTuple] => [`codex/${model}`, [100 - index * 10, 0, 0, 0, 1]])),
+    '2026-11-09': { 'claude/a': [30, 0, 0, 0, 1], 'codex/a': [20, 0, 0, 0, 1], 'local-ai/h': [5, 0, 0, 0, 1] },
+  } }, '2026-11-09T05:00:00Z');
+  const data = dayData(tokens);
+  assert.deepEqual([data.today, data.years], ['2026-11-09', [2026]]);
+  assert.deepEqual(data.providers, [{ key: 'codex', label: 'Codex', slot: 3 }, { key: 'claude', label: 'Claude Code', slot: 2 }, { key: 'local-ai', label: 'local-ai', slot: 4 }]);
+  assert.deepEqual(data.models.map((item) => [item.key, item.slot]), [['a', 1], ['b', 2], ['c', 3], ['d', 4], ['e', 5], ['f', 6], ['g', 7], ['h', 8]]);
+  assert.deepEqual(data.days, [
+    ['2026-11-08', 490, [0, 490], [0, 100, 1, 90, 2, 80, 3, 70, 4, 60, -1, 90]],
+    // A model reached through two tools is one model.
+    ['2026-11-09', 55, [1, 30, 0, 20, 2, 5], [0, 50, 7, 5]],
+  ]);
 });
 
 test('the calendar switches between the last 12 months and the years with radio inputs the stylesheet pairs with panes', async () => {
@@ -199,7 +257,8 @@ const KNOWN: Omit<MachineUsage, 'id'> = {
 };
 
 test('each period adds up the dated days inside it, and lifetime takes the tools’ own totals', () => {
-  const [lifetime, last30, last7, month, lastMonth] = usagePeriods(tokensFor(KNOWN, '2026-11-09T05:00:00Z'));
+  // The shares have a test of their own, below.
+  const [lifetime, last30, last7, month, lastMonth] = usagePeriods(tokensFor(KNOWN, '2026-11-09T05:00:00Z')).map(({ providers: _, models: __, named: ___, ...period }) => period);
   assert.deepEqual(lifetime, {
     key: 'all', label: 'Lifetime', range: null, total: 16_684, activeDays: 10,
     top: { tool: 'claude', share: 16_029 / 16_684 }, busiest: { date: '2026-11-10', total: 9999 }, firstDay: '2026-09-30',
@@ -220,6 +279,89 @@ test('each period adds up the dated days inside it, and lifetime takes the tools
     key: 'last-month', label: 'Last month', range: { start: '2026-10-01', end: '2026-10-31', days: 31 }, total: 1123, activeDays: 4,
     top: { tool: 'claude', share: 1020 / 1123 }, busiest: { date: '2026-10-10', total: 1000 },
   });
+});
+
+test('each period splits its tokens by provider and by model, and says how many of them name a model', () => {
+  const mixed: Omit<MachineUsage, 'id'> = {
+    days: {
+      '2026-10-01': { 'claude/opus': [600, 0, 0, 0, 1], 'codex/gpt': [300, 0, 0, 0, 1] },
+      // The same model through two tools counts once, as one model.
+      '2026-11-05': { 'claude/opus': [50, 0, 0, 0, 1], 'amp/opus': [30, 0, 0, 0, 1], 'codex/gpt': [20, 0, 0, 0, 1] },
+      '2026-11-09': { 'claude/sonnet': [100, 0, 0, 0, 1] },
+    },
+    // Codex counts its own days, and counted more on November 5 than the logs hold.
+    totals: { codex: { scope: 'machine', total: 5000, asOf: '2026-11-06', daily: { '2026-10-01': 300, '2026-11-05': 120 } } },
+  };
+  const [lifetime, last30, last7] = usagePeriods(tokensFor(mixed, '2026-11-09T05:00:00Z'));
+  const rows = (list: { key: string; tokens: number; share: number }[]) => list.map((row) => [row.key, row.tokens, Number(row.share.toFixed(3))]);
+
+  assert.deepEqual([last7.total, last7.named], [300, 200]);
+  assert.deepEqual(rows(last7.providers), [['claude', 150, 0.5], ['codex', 120, 0.4], ['amp', 30, 0.1]]);
+  assert.deepEqual(rows(last7.models), [['sonnet', 100, 0.5], ['opus', 80, 0.4], ['gpt', 20, 0.1]], 'shares of the tokens a model is named for');
+  assert.deepEqual(last7.top, { tool: 'claude', share: 0.5 });
+  assert.deepEqual(rows(last30.providers), rows(last7.providers), 'October 1 is before the last 30 days');
+
+  // Lifetime takes each tool's own total, and each model's, which reach back before the dated days.
+  assert.equal(lifetime.total, 5780);
+  assert.deepEqual(rows(lifetime.providers), [['codex', 5000, 0.865], ['claude', 750, 0.13], ['amp', 30, 0.005]]);
+  assert.deepEqual(rows(lifetime.models), [['opus', 680, 0.618], ['gpt', 320, 0.291], ['sonnet', 100, 0.091]]);
+  assert.equal(lifetime.named, 1100);
+});
+
+test('the periods show their providers and models in colors that hold from one period to the next', async () => {
+  const { profile, dashboard } = await pages({
+    days: {
+      '2026-10-01': { 'codex/gpt': [900, 0, 0, 0, 1] },
+      '2026-11-09': { 'claude/opus': [60, 0, 0, 0, 1], 'pi/kimi': [40, 0, 0, 0, 1] },
+    },
+    totals: { codex: { scope: 'machine', total: 3000, asOf: '2026-11-01', daily: { '2026-10-01': 900 } } },
+  });
+  const breakdown = (pane: string, title: string) => {
+    const start = pane.indexOf(`<div class="breakdown"><h3>${title}</h3>`);
+    assert.notEqual(start, -1, title);
+    const part = pane.slice(start, pane.indexOf('</table>', start));
+    return {
+      bar: /<div class="mix-bar" role="img" aria-label="([^"]+)">/.exec(part)?.[1],
+      segments: [...part.matchAll(/<span style="flex-grow:([\d.]+);background:var\(--s(\d)\)" title="([^"]+)"><\/span>/g)].map((match) => match.slice(1)),
+      rows: [...part.matchAll(/<tr><td><i style="background:var\(--s(\d)\)"><\/i>(?:<svg[^>]*><use[^>]*\/><\/svg>)?([^<]+)<\/td><td class="num" title="([^"]+)">([^<]+)<\/td><td class="num"><strong>([^<]+)<\/strong><\/td><\/tr>/g)].map((match) => match.slice(1)),
+    };
+  };
+  for (const page of [profile, dashboard]) {
+    const [lifetime, , last7] = panesOf(periodsOf(page));
+    const providers = breakdown(lifetime, 'By provider');
+    assert.equal(providers.bar, 'Codex 96.8%, Claude Code 1.9%, Pi 1.3%');
+    assert.deepEqual(providers.segments, [['96.77', '3', 'Codex · 96.8% · 3,000 tokens'], ['1.94', '2', 'Claude Code · 1.9% · 60 tokens'], ['1.29', '4', 'Pi · 1.3% · 40 tokens']]);
+    // Each part is named beside its color, so the colors are never the only way to tell them apart.
+    assert.deepEqual(providers.rows, [['3', 'Codex', '3,000 tokens', '3k', '96.8%'], ['2', 'Claude Code', '60 tokens', '60', '1.9%'], ['4', 'Pi', '40 tokens', '40', '1.3%']]);
+    assert.deepEqual(breakdown(lifetime, 'By model').rows, [['1', 'gpt', '900 tokens', '900', '90.0%'], ['2', 'opus', '60 tokens', '60', '6.0%'], ['3', 'kimi', '40 tokens', '40', '4.0%']]);
+    assert.match(lifetime, /Models are named for 1k of these 3\.1k tokens: only logged responses say which model answered\./);
+
+    // The week has no Codex, and Claude Code, Pi and their models keep the colors they have for the lifetime.
+    assert.deepEqual(breakdown(last7, 'By provider').rows, [['2', 'Claude Code', '60 tokens', '60', '60.0%'], ['4', 'Pi', '40 tokens', '40', '40.0%']]);
+    assert.deepEqual(breakdown(last7, 'By model').rows, [['2', 'opus', '60 tokens', '60', '60.0%'], ['3', 'kimi', '40 tokens', '40', '40.0%']]);
+    assert.doesNotMatch(last7, /Models are named for/, 'nothing to explain when every token names its model');
+  }
+  for (const slot of [0, 1, 2, 3, 4, 5, 6, 7, 8]) assert.equal(count(STYLE, new RegExp(`--s${slot}:#[0-9a-f]{6}`, 'g')), 2, `series color ${slot} has a value for light and for dark`);
+});
+
+test('three tools keep one color on every profile, the rest take the free ones in order of use, and names past the eighth share gray', () => {
+  const slots = (tools: string[]) => providerSeries(tools).map((item) => item.slot);
+  assert.deepEqual(providerSeries(['codex', 'claude', 'gemini']).map((item) => [item.key, item.label, item.slot]), [['codex', 'Codex', 3], ['claude', 'Claude Code', 2], ['gemini', 'Gemini CLI', 1]]);
+  assert.deepEqual(slots(['pi', 'claude', 'amp']), [4, 2, 5], 'whatever its rank, Claude Code is orange');
+  assert.deepEqual(slots(['a1', 'a2', 'a3', 'a4', 'a5', 'claude', 'a6', 'a7', 'a8']), [4, 5, 6, 7, 8, 2, 1, 3, 0], 'a color promised to a tool the profile doesn’t use is given out last');
+  // A provider's ID comes from an upload, and may be the name of something every object has.
+  assert.deepEqual(slots(['constructor', 'claude']), [4, 2]);
+  assert.deepEqual(modelSeries(['m1', 'm2', 'm3', 'm4', 'm5', 'm6', 'm7', 'm8', 'm9', 'm10']).map((item) => item.slot), [1, 2, 3, 4, 5, 6, 7, 8, 0, 0]);
+});
+
+test('names without a color of their own are shown together, as one gray part', async () => {
+  const many = Object.fromEntries(Array.from({ length: 10 }, (_, index): [string, UsageTuple] => [`claude/model-${index}`, [100 - index, 0, 0, 0, 1]]));
+  const { profile } = await pages({ days: { '2026-11-09': many } });
+  const [lifetime] = panesOf(periodsOf(profile));
+  assert.match(lifetime, /<td><i style="background:var\(--s8\)"><\/i>model-7<\/td>/);
+  assert.match(lifetime, /<td><i style="background:var\(--s0\)"><\/i>2 other models<\/td><td class="num" title="183 tokens">183<\/td>/);
+  assert.doesNotMatch(lifetime, /model-8|model-9/);
+  assert.equal(count(lifetime.slice(lifetime.indexOf('<h3>By model</h3>')), /<span style="flex-grow:/g), 9, 'eight colors and one gray part');
 });
 
 test('periods follow the profile’s date across New Year and a leap day', () => {
@@ -273,7 +415,7 @@ test('usage that is all undated counts for lifetime only', async () => {
   const [lifetime, ...others] = usagePeriods(tokens);
   assert.deepEqual([lifetime.total, lifetime.activeDays, lifetime.top, lifetime.busiest, lifetime.firstDay], [5000, 0, { tool: 'claude', share: 1 }, null, null]);
   for (const period of others) assert.deepEqual([period.total, period.activeDays, period.top, period.busiest], [0, 0, null, null], period.label);
-  const views = usageCalendar(tokens);
+  const views = usageCalendar(dayData(tokens));
   assert.deepEqual(views.map((view) => [view.key, view.total, view.activeDays, view.weeks.length]), [['recent', 0, 0, 53]]);
   assert.deepEqual(tokenMix(tokens), { known: 0, parts: [
     { key: 'input', label: 'Input', tokens: 0, share: 0 }, { key: 'output', label: 'Output', tokens: 0, share: 0 },
@@ -365,7 +507,8 @@ test('a page draws each mark it shows once, and a made-up provider gets the mark
     assert.deepEqual([drawn(page, 'claude'), drawn(page, 'other'), drawn(page, 'codex')], [1, 1, 0], `${name}: only the marks it shows, once each`);
     assert.ok(!page.includes('provider-local-ai'), `${name}: an ID from an upload is never part of a reference`);
   }
-  assert.ok(dashboard.includes(`<strong>${mark('claude')}Claude Code</strong>`), 'the breakdown on the private overview');
+  assert.ok(dashboard.includes(`<i style="background:var(--s2)"></i>${mark('claude')}Claude Code</td>`), 'the breakdown on the private overview');
+  assert.ok(dashboard.includes(`<i style="background:var(--s4)"></i>${mark('other')}local-ai</td>`), 'which marks a made-up provider too');
   assert.doesNotMatch(await (await context.call('/privacy')).text(), /<symbol|class="marks"/, 'a page that names no tool draws none');
 });
 
@@ -381,5 +524,5 @@ test('the public page shows nothing private, and a private profile shows none of
   await context.call('/me/visibility', webPost(cookie, 'public=0'));
   const hidden = await context.call('/u/octo');
   assert.equal(hidden.status, 404);
-  assert.doesNotMatch(await hidden.text(), /Usage by period|AI usage calendar|Token mix|popover/);
+  assert.doesNotMatch(await hidden.text(), /Usage by period|AI usage calendar|Token mix|class="weeks"|By model/);
 });

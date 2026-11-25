@@ -88,9 +88,9 @@ function ProfileView({ user, svg, tokens, cards, parts, position, origin, viewer
           <a className="button" href={share} rel="noopener" title="Share on X">Share</a>
         </div>
       </div>
-      <div className="dash" dangerouslySetInnerHTML={{ __html: svg }} />
       <ActivityPanels tokens={tokens} />
       <ProviderActivity tokens={tokens} />
+      <div className="dash" dangerouslySetInnerHTML={{ __html: svg }} />
       <div className="panel" id="embed">
         <h2>Add this to your GitHub profile</h2>
         <EmbedCode url={url} parts={parts} />

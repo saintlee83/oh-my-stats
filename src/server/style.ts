@@ -21,6 +21,8 @@ const SOURCE = `
     --gold: #7d4e00; --gold-bg: #fff8c5; --silver: #424a53; --silver-bg: #e6eaef; --bronze: #762c00; --bronze-bg: #ffe2c8;
     --terminal: #0d1117;
     --shadow: 0 1px 2px rgba(31, 35, 40, 0.06); --shadow-lg: 0 16px 40px -16px rgba(31, 35, 40, 0.28);
+    /* Series colors, for telling providers and models apart: eight hues in an order checked for color-vision safety, then gray for names drawn together. */
+    --s1: #2a78d6; --s2: #eb6834; --s3: #1baf7a; --s4: #eda100; --s5: #e87ba4; --s6: #008300; --s7: #6250d6; --s8: #e34948; --s0: #afb8c1;
   }
   @media (prefers-color-scheme: dark) {
     :root {
@@ -37,6 +39,7 @@ const SOURCE = `
       --gold: #e3b341; --gold-bg: rgba(187, 128, 9, 0.2); --silver: #c9d1d9; --silver-bg: rgba(110, 118, 129, 0.25); --bronze: #f0883e; --bronze-bg: rgba(219, 109, 40, 0.2);
       --terminal: #010409;
       --shadow: none; --shadow-lg: 0 16px 40px -16px rgba(0, 0, 0, 0.9);
+      --s1: #3987e5; --s2: #d95926; --s3: #199e70; --s4: #c98500; --s5: #d55181; --s6: #0ca30c; --s7: #9085e9; --s8: #e66767; --s0: #6e7681;
     }
   }
 
@@ -177,15 +180,28 @@ const SOURCE = `
   /* Activity */
   .activity-panels { display: grid; grid-template-columns: repeat(auto-fit, minmax(min(100%, 350px), 1fr)); gap: 16px; margin: 16px 0; }
   .activity-panels .panel { margin: 0; }
-  button.day { min-height: 0; padding: 0; border: 0; border-radius: 4px; background: var(--line-soft); }
   .day[data-level="1"] { background: var(--g1); }
   .day[data-level="2"] { background: var(--g2); }
   .day[data-level="3"] { background: var(--g3); }
   .day[data-level="4"] { background: var(--g4); }
-  .day:focus-visible, .day:hover { outline: 2px solid var(--ink); outline-offset: 1px; }
-  .day-details { background: var(--surface); color: var(--ink); border: 1px solid var(--line); border-radius: 12px; padding: 20px 24px; max-width: 90vw; box-shadow: var(--shadow-lg); }
-  .day-details::backdrop { background: rgba(1, 4, 9, 0.4); }
-  .day-details ul { padding-inline-start: 20px; }
+  /* A day that is pointed at, by a mouse, a tap or the arrow keys. */
+  .day[data-date]:hover, .day.on { outline: 2px solid var(--ink); outline-offset: 1px; }
+  .weeks:focus-visible { outline: 2px solid var(--focus); outline-offset: 4px; border-radius: 4px; }
+  /* What a day says when it is pointed at. It floats over the page, placed by the script that shows it. */
+  .tip { position: fixed; z-index: 20; left: 0; top: 0; min-width: 200px; max-width: min(320px, calc(100vw - 16px)); padding: 10px 12px; border: 1px solid var(--line); border-radius: 10px;
+    background: var(--surface); color: var(--ink); box-shadow: var(--shadow-lg); font-size: 12px; line-height: 1.5; font-weight: 400; letter-spacing: 0; text-align: left; pointer-events: none; }
+  .tip p { margin: 0; color: inherit; }
+  .tip .tip-date { font-weight: 600; color: var(--muted); }
+  .tip .tip-total { color: var(--ink2); }
+  .tip-total strong { font-size: 16px; color: var(--ink); font-variant-numeric: tabular-nums; }
+  .tip .tip-head { margin-top: 8px; padding-top: 7px; border-top: 1px solid var(--line-soft); font-size: 11px; font-weight: 600; color: var(--muted); }
+  .tip-row { display: grid; grid-template-columns: 10px minmax(0, 1fr) auto 40px; align-items: center; gap: 8px; font-variant-numeric: tabular-nums; }
+  /* A short stroke of the series color: at this size a filled box would outweigh the figures. */
+  .tip-row i { height: 3px; border-radius: 2px; }
+  .tip-row span { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: var(--ink2); }
+  .tip-row b { font-weight: 600; text-align: right; }
+  .tip-row em { font-style: normal; text-align: right; color: var(--muted); }
+  .tip .tip-note { margin-top: 6px; font-size: 11px; color: var(--muted); }
 
   /* Install commands: one pane per system, switched without scripts */
   .terminal { display: grid; grid-template-columns: auto auto 1fr; position: relative; overflow: hidden; text-align: left; color: #e6edf3; background: var(--terminal); border: 1px solid #30363d; border-radius: 12px; }
@@ -284,7 +300,6 @@ const SOURCE = `
   .profile { flex-wrap: wrap; }
   .profile > div:first-of-type { flex: 1 1 min(340px, calc(100% - 80px)); }
   .profile > .actions { flex: 0 1 auto; margin-left: 0; }
-  a.sr:focus { position: static; width: auto; height: auto; margin-left: 4px; clip-path: none; }
   /* Panes switched without scripts: the nth radio marks the nth label as chosen and shows the nth pane. */
   .panes { position: relative; }
   .panes > input { position: absolute; opacity: 0; pointer-events: none; }
@@ -303,10 +318,12 @@ const SOURCE = `
   .panes > input:nth-of-type(4):checked ~ .pane:nth-of-type(4), .panes > input:nth-of-type(5):checked ~ .pane:nth-of-type(5) { display: block; }
   .panes > .pane > p:last-child { margin-bottom: 0; }
   /* A year of days. A narrow screen scrolls it sideways, and the last 12 months start at their newest week. */
-  .weeks-scroll { overflow-x: auto; padding: 3px 3px 3px 0; margin: -3px -3px -3px 0; }
+  .weeks-scroll { overflow-x: auto; padding: 5px 5px 5px 0; margin: -5px -5px -5px 0; }
   .weeks-scroll.newest { direction: rtl; }
-  .weeks-fit { width: fit-content; margin-right: auto; direction: ltr; }
-  .weeks { display: grid; grid-auto-flow: column; grid-template-columns: 24px; grid-auto-columns: 14px; grid-template-rows: 16px repeat(7, 14px); gap: 3px; }
+  /* The weeks share the panel's width, and keep days large enough to tap where it is narrow. */
+  .weeks-fit { min-width: 900px; direction: ltr; }
+  .weeks { display: grid; grid-auto-flow: column; grid-template-columns: 26px; grid-auto-columns: minmax(0, 1fr); grid-template-rows: 16px repeat(7, auto); gap: 3px; }
+  .weeks .day { aspect-ratio: 1; }
   .weeks small, .scale small { font-size: 11px; line-height: 14px; color: var(--muted); white-space: nowrap; }
   /* The weekday names stay in view while the weeks scroll under them. */
   .weeks > :nth-child(-n+8) { position: sticky; left: 0; z-index: 1; background: var(--surface); }
@@ -325,6 +342,21 @@ const SOURCE = `
   .mix-bar { display: flex; gap: 2px; height: 8px; margin: 4px 0 8px; }
   .mix-bar span { min-width: 3px; border-radius: 4px; }
   .mix td i { display: inline-block; width: 10px; height: 10px; margin-right: 8px; border-radius: 3px; }
+  /* A period's tokens by provider and by model: a bar for the split, and a table that names each part beside its color. */
+  .breakdowns { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 20px 40px; margin: 20px 0 14px; }
+  .breakdown { min-width: 0; }
+  .breakdown h3 { margin: 0 0 10px; font-size: 13px; color: var(--ink2); }
+  .breakdown .mix-bar { height: 10px; margin: 0 0 8px; }
+  .breakdown .mix-bar span { border-radius: 5px; }
+  .breakdown > .muted { margin: 8px 0 0; }
+  .shares td { padding: 6px 0 6px 16px; font-size: 14px; }
+  /* A name takes the width its figures leave, and a long one is cut short there. */
+  .shares td:first-child { width: 100%; max-width: 0; padding-left: 0; overflow: hidden; text-overflow: ellipsis; color: var(--ink); }
+  .shares td:last-child { min-width: 64px; }
+  .shares td i { display: inline-block; width: 10px; height: 10px; margin-right: 8px; border-radius: 3px; }
+  .shares td.num { color: var(--muted); }
+  .shares td.num strong { font-weight: 600; color: var(--ink); }
+  @media (max-width: 760px) { .breakdowns { grid-template-columns: minmax(0, 1fr); } }
   /* Two tiles to a row once four are too narrow for a date, and one where two are. */
   @media (max-width: 760px) { .figures { grid-template-columns: repeat(auto-fit, minmax(max(140px, calc(50% - 6px)), 1fr)); } }
   @media (max-width: 640px) {

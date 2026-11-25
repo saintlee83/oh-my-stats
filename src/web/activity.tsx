@@ -1,10 +1,13 @@
-import type { CSSProperties, ReactNode } from 'react';
+import type { CSSProperties } from 'react';
 import { commas, compact, percent, providerName } from '../shared/format.ts';
 import { providerMix } from '../shared/insights.ts';
 import type { TokenMetrics } from '../shared/metrics.ts';
-import { tokenMix, usageCalendar, usagePeriods, type CalendarDay, type CalendarView, type UsagePeriod } from '../shared/usage.ts';
+import { seriesOf, type Series } from '../shared/series.ts';
+import { dayData, tokenMix, usagePeriods, type DayData, type Share, type UsagePeriod } from '../shared/usage.ts';
 import type { Part } from '../server/pages.ts';
 import { ProviderLabel } from './common.tsx';
+import { UsageCalendar } from './days.tsx';
+import { TabbedPanel } from './panes.tsx';
 
 /** The panels the public profile and the private dashboard share: usage over time, the token mix, and how to embed a profile. */
 
@@ -66,99 +69,106 @@ export function ProviderActivity({ tokens }: { tokens: TokenMetrics | null }) {
   );
 }
 
-/**
- * Panes switched without scripts: a radio for each, then their labels, then the panes. The
- * stylesheet pairs the nth radio with the nth label and the nth pane, for five at most.
- */
-function TabbedPanel({ name, title, panes, id }: { name: string; title: string; panes: { key: string; label: string; body: ReactNode }[]; id?: string }) {
-  if (panes.length === 1) {
-    return (
-      <section className="panel" id={id}>
-        <h2>{title}</h2>
-        <div>{panes[0].body}</div>
-      </section>
-    );
-  }
-  return (
-    <section className="panel panes" id={id} role="group" aria-label={title}>
-      {panes.map(({ key }, index) => <input key={key} type="radio" name={name} id={`${name}-${key}`} defaultChecked={index === 0} />)}
-      <header className="panel-head">
-        <h2>{title}</h2>
-        <span className="segments">
-          {panes.map(({ key, label }) => <label key={key} htmlFor={`${name}-${key}`} data-label={label}>{label}</label>)}
-        </span>
-      </header>
-      {panes.map(({ key, body }) => <div key={key} className="pane">{body}</div>)}
-    </section>
-  );
-}
-
 const dayCount = (count: number) => `${commas(count)} ${count === 1 ? 'day' : 'days'}`;
 
-const WEEKDAY_LABELS = ['', 'Mon', '', 'Wed', '', 'Fri', '', ''];
+/** A series color. The stylesheet has `--s1` to `--s8`, and `--s0` for names drawn together. */
+const seriesColor = (slot: number): CSSProperties => ({ background: `var(--s${slot})` });
 
-function Scale() {
-  return (
-    <p className="scale" aria-hidden="true">
-      <small>Less</small>
-      {[0, 1, 2, 3, 4].map((level) => <span key={level} className="day" data-level={level || undefined}></span>)}
-      <small>More</small>
-    </p>
-  );
+/** A share so small that its figure would read as nothing says so instead. */
+const shareOf = (share: number) => (share > 0 && share < 0.001 ? '<0.1%' : percent(share));
+
+interface ShareRow {
+  key: string;
+  label: string;
+  slot: number;
+  tokens: number;
+  share: number;
+  /** A provider's ID, for its mark. */
+  icon?: string;
 }
 
-function DayDetails({ date, total, byTool }: CalendarDay) {
-  const tools = Object.entries(byTool).filter(([, count]) => count > 0).sort((a, b) => b[1] - a[1]);
-  return (
-    <section popover="" className="day-details" id={`day-${date}`} aria-label={`AI usage on ${date}`}>
-      <h2>{date}</h2>
-      <p>{`${commas(total)} tokens`}</p>
-      {tools.length ? <ul>{tools.map(([tool, count]) => <li key={tool}>{`${providerName(tool)} · ${commas(count)}`}</li>)}</ul> : null}
-      <button popoverTarget={`day-${date}`} popoverTargetAction="hide">Close</button>
-    </section>
-  );
+/** Each name with a color of its own, most used first, then every other name as one gray row. */
+function shareRows(rows: Share[], series: Series[], kind: 'providers' | 'models'): ShareRow[] {
+  const known = new Map(series.map((item) => [item.key, item]));
+  const named: ShareRow[] = [];
+  const others = { count: 0, tokens: 0, share: 0 };
+  for (const { key, tokens, share } of rows) {
+    const item = known.get(key);
+    if (item?.slot) {
+      named.push({ key, label: item.label, slot: item.slot, tokens, share, icon: kind === 'providers' ? key : undefined });
+    } else {
+      others.count += 1;
+      others.tokens += tokens;
+      others.share += share;
+    }
+  }
+  if (!others.count) return named;
+  return [...named, { key: '', label: `${commas(others.count)} other ${others.count === 1 ? kind.slice(0, -1) : kind}`, slot: 0, tokens: others.tokens, share: others.share }];
 }
 
 /**
- * One view of the calendar, weeks as columns. Only the newest view opens its days: a
- * breakdown for every day of every year would outweigh the rest of the page, so the
- * others say their total in a tooltip.
+ * How a period's tokens split by provider or by model: a thin bar for the split at a glance,
+ * then a table that names each part beside its color and gives its figures, so the colors are
+ * never the only way to tell the parts apart.
  */
-function CalendarPane({ view, opens }: { view: CalendarView; opens: boolean }) {
-  const cell = (day: CalendarDay | null, index: number) => {
-    if (!day) return <span key={index}></span>;
-    const label = `${day.date} · ${commas(day.total)} tokens`;
-    return opens && day.total
-      ? <button key={index} className="day" popoverTarget={`day-${day.date}`} data-level={day.level} aria-label={label} title={label}></button>
-      : <span key={index} className="day" data-level={day.level || undefined} title={label}></span>;
-  };
-  const opened = opens ? view.weeks.flatMap((week) => week.days).filter((day) => day !== null).filter((day) => day.total > 0) : [];
+export function ShareBreakdown({ title, kind, rows, series, note, empty }: {
+  /** Left out where the panel around it has a heading already. */
+  title?: string;
+  kind: 'providers' | 'models';
+  rows: Share[];
+  series: Series[];
+  note?: string | null;
+  empty: string;
+}) {
+  const parts = shareRows(rows, series, kind);
   return (
-    <>
-      <p className="muted">
-        {`${view.start} – ${view.end} · `}
-        {view.total ? `${compact(view.total)} tokens on ${dayCount(view.activeDays)}` : 'No dated usage.'}
-        {/* Each day that opens is a stop for the Tab key, so a keyboard gets a way past them. */}
-        {view.total && opened.length ? <>{' · Select a day for its providers. '}<a className="sr" href="#periods">Skip the calendar</a></> : null}
-      </p>
-      <div className={`weeks-scroll${opens ? ' newest' : ''}`}>
-        <div className="weeks-fit">
-          <div className="weeks">
-            {WEEKDAY_LABELS.map((label, index) => (label ? <small key={index} aria-hidden="true">{label}</small> : <span key={index}></span>))}
-            {view.weeks.map(({ month, days }, week) => [
-              month ? <small key={`m${week}`} aria-hidden="true">{month}</small> : <span key={`m${week}`}></span>,
-              ...days.map((day, index) => cell(day, week * 7 + index)),
-            ])}
+    <div className="breakdown">
+      {title ? <h3>{title}</h3> : null}
+      {parts.length ? (
+        <>
+          <div className="mix-bar" role="img" aria-label={parts.map((part) => `${part.label} ${shareOf(part.share)}`).join(', ')}>
+            {parts.map((part) => (
+              <span key={part.key} style={{ flexGrow: (part.share * 100).toFixed(2), ...seriesColor(part.slot) }} title={`${part.label} · ${shareOf(part.share)} · ${commas(part.tokens)} tokens`}></span>
+            ))}
           </div>
-          <Scale />
-        </div>
-      </div>
-      {opened.map((day) => <DayDetails key={day.date} {...day} />)}
-    </>
+          <table className="shares">
+            <thead className="sr"><tr><th>{kind === 'providers' ? 'Provider' : 'Model'}</th><th>Tokens</th><th>Share</th></tr></thead>
+            <tbody>
+              {parts.map((part) => (
+                <tr key={part.key}>
+                  <td><i style={seriesColor(part.slot)}></i>{part.icon ? <ProviderLabel id={part.icon} /> : part.label}</td>
+                  <td className="num" title={`${commas(part.tokens)} tokens`}>{compact(part.tokens)}</td>
+                  <td className="num"><strong>{shareOf(part.share)}</strong></td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </>
+      ) : (
+        <p className="muted">{empty}</p>
+      )}
+      {note ? <p className="muted">{note}</p> : null}
+    </div>
   );
 }
 
-function PeriodPane({ period, undated }: { period: UsagePeriod; undated: number }) {
+/** Says when the models listed cover less than the period's tokens, and why. */
+export function modelNote({ total, named, models }: Pick<UsagePeriod, 'total' | 'named' | 'models'>): string | null {
+  if (!models.length || named >= total * 0.995) return null;
+  return `Models are named for ${compact(named)} of these ${compact(total)} tokens: only logged responses say which model answered.`;
+}
+
+/** A period's providers and its models, side by side. */
+function Breakdowns({ period, series }: { period: UsagePeriod; series: { providers: Series[]; models: Series[] } }) {
+  return (
+    <div className="breakdowns">
+      <ShareBreakdown title="By provider" kind="providers" rows={period.providers} series={series.providers} empty="No usage in this period." />
+      <ShareBreakdown title="By model" kind="models" rows={period.models} series={series.models} note={modelNote(period)} empty={period.total ? 'No synced log names a model for this period.' : 'No usage in this period.'} />
+    </div>
+  );
+}
+
+function PeriodPane({ period, undated, series }: { period: UsagePeriod; undated: number; series: { providers: Series[]; models: Series[] } }) {
   const figure = (label: string, value: string, detail: string) => (
     <div className="figure" key={label}>
       <span>{label}</span>
@@ -184,6 +194,7 @@ function PeriodPane({ period, undated }: { period: UsagePeriod; undated: number 
         {figure('Most used provider', top ? providerName(top.tool) : '—', top ? `${percent(top.share)} of tokens` : 'No usage')}
         {figure('Busiest day', busiest?.date ?? '—', busiest ? `${compact(busiest.total)} tokens` : 'No dated usage')}
       </div>
+      <Breakdowns period={period} series={series} />
       <p className="muted">{note}</p>
     </>
   );
@@ -229,16 +240,20 @@ function TokenMixPanel({ tokens }: { tokens: TokenMetrics }) {
   );
 }
 
-/** The calendar, the periods, the token mix and each provider's share. `calendars` are the views to show, when the page has chosen them. */
-export function ActivityPanels({ tokens, calendars }: { tokens: TokenMetrics | null; calendars?: CalendarView[] }) {
+/**
+ * The calendar, the periods with their providers and models, the token mix and each provider's
+ * share from month to month. `days` is what the calendar is drawn from, when the page has
+ * worked it out already.
+ */
+export function ActivityPanels({ tokens, days }: { tokens: TokenMetrics | null; days?: DayData }) {
   if (!tokens) return null;
-  const calendar = (calendars ?? usageCalendar(tokens)).map((view, index) => ({ key: view.key, label: view.label, body: <CalendarPane view={view} opens={index === 0} /> }));
-  const periods = usagePeriods(tokens).map((period) => ({ key: period.key, label: period.label, body: <PeriodPane period={period} undated={tokens.undated} /> }));
+  const series = seriesOf(tokens);
+  const periods = usagePeriods(tokens).map((period) => ({ key: period.key, label: period.label, body: <PeriodPane period={period} undated={tokens.undated} series={series} /> }));
   const mix = providerMix(tokens);
   const shareLabel = (value: number | null) => (value === null ? '—' : percent(value));
   return (
     <>
-      <TabbedPanel name="range" title="AI usage calendar" panes={calendar} />
+      <UsageCalendar data={days ?? dayData(tokens)} />
       <TabbedPanel name="period" title="Usage by period" panes={periods} id="periods" />
       <div className="activity-panels">
         <TokenMixPanel tokens={tokens} />

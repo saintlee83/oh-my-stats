@@ -1,6 +1,10 @@
 'use client';
 
-import { useEffect, useRef, useState, type CSSProperties, type MouseEvent, type PointerEvent, type ReactNode } from 'react';
+import { useEffect, useMemo, useRef, useState, useSyncExternalStore, type MouseEvent, type PointerEvent, type ReactNode } from 'react';
+import { commas, compact, niceMax, percent } from '../../shared/format.ts';
+import { lastDays } from '../../shared/time.ts';
+import type { DayData } from '../../shared/usage.ts';
+import { anchorOf, DayTip, indexDays, shortDate, useReady, type Anchor, type DayInfo, type DayPart } from '../days.tsx';
 
 /**
  * The dashboard's moving parts. Without scripts, the page reads the way the server draws it:
@@ -86,67 +90,116 @@ export function WorkspaceSections({ sections }: { sections: WorkspaceSection[] }
   );
 }
 
-export interface TrendDay {
-  /** The day and its total, as the chart's tooltip and its detail line say them. */
-  label: string;
-  /** How far down from the top the day's point is, as a share of the chart's height. */
-  y: number;
-}
+type ColorBy = 'providers' | 'models';
 
-interface TrendCardProps {
-  size: number;
-  total: string;
-  exactTotal: string;
-  range: ReactNode;
-  max: string;
-  half: string;
-  /** The polyline's points, slot centers left to right. */
-  points: string;
-  halfSlot: number;
-  dates: [first: string, middle: string, last: string];
-  days: TrendDay[];
+/** What the daily charts are colored by. The dashboard draws one chart per period, and they share the choice. */
+let colorBy: ColorBy = 'providers';
+const watchers = new Set<() => void>();
+const watch = (watcher: () => void) => {
+  watchers.add(watcher);
+  return () => void watchers.delete(watcher);
+};
+const chooseColorBy = (next: ColorBy) => {
+  colorBy = next;
+  for (const watcher of watchers) watcher();
+};
+
+/** A series color, or a paler gray for tokens that no model is named for. */
+const fill = (slot: number) => (slot < 0 ? 'var(--line)' : `var(--s${slot})`);
+
+/**
+ * A day's bar from the baseline up: the same name always in the same place, so a color can be
+ * followed across the days. Names without a color of their own are one gray part, on top.
+ */
+function segments(day: DayInfo | undefined, by: ColorBy): DayPart[] {
+  if (!day?.total) return [];
+  const parts = by === 'providers' ? day.providers : day.models;
+  // A day only a tool's own figure covers has no model to name.
+  if (!parts.length) return [{ label: 'No model named', slot: -1, place: Infinity, tokens: day.total }];
+  const named = parts.filter((part) => part.slot > 0).sort((a, b) => a.place - b.place);
+  const rest = parts.reduce((sum, part) => sum + (part.slot > 0 ? 0 : part.tokens), 0);
+  return rest ? [...named, { label: by === 'providers' ? 'Other providers' : 'Other models', slot: 0, place: Infinity, tokens: rest }] : named;
 }
 
 /**
- * The daily chart of one period. A native slider over the chart picks a day: it handles
- * dragging, touch, keyboard steps and assistive technology, and a mouse only has to point.
+ * The daily chart of one period: a bar for each day, split by provider or by model. Pointing
+ * at a day shows its details. A native slider over the chart does the pointing: it handles
+ * dragging, touch, keyboard steps and assistive technology, and a mouse only has to move.
  */
-export function TrendCard({ size, total, exactTotal, range, max, half, points, halfSlot, dates, days }: TrendCardProps) {
-  const [ready, setReady] = useState(false);
-  const [day, setDay] = useState(days.length);
+export function ActivityChart({ data, size }: { data: DayData; size: number }) {
+  const ready = useReady();
+  const by = useSyncExternalStore(watch, () => colorBy, () => 'providers' as ColorBy);
+  const lookup = useMemo(() => indexDays(data), [data]);
+  const dates = useMemo(() => lastDays(data.today, size), [data.today, size]);
+  const [day, setDay] = useState(size);
+  const [anchor, setAnchor] = useState<Anchor | null>(null);
   const slider = useRef<HTMLInputElement>(null);
-  useEffect(() => setReady(true), []);
-  const shown = days[day - 1];
+  const slots = useRef<HTMLDivElement>(null);
 
+  const days = dates.map((date) => lookup.get(date));
+  const total = days.reduce((sum, found) => sum + (found?.total ?? 0), 0);
+  const max = niceMax(Math.max(2, ...days.map((found) => found?.total ?? 0)));
+  const priorStart = lastDays(data.today, size * 2)[0];
+  const previous = data.days.reduce((sum, [date, count]) => sum + (date >= priorStart && date < dates[0] ? count : 0), 0);
+  const change = previous ? (total - previous) / previous : null;
+  const label = (index: number) => `${dates[index]} · ${commas(days[index]?.total ?? 0)} tokens`;
+
+  // Every name the period's bars show, in the order they stack.
+  const legend = new Map<string, DayPart>();
+  for (const found of days) for (const part of segments(found, by)) if (!legend.has(part.label)) legend.set(part.label, part);
+  const keys = [...legend.values()].sort((a, b) => a.place - b.place || b.slot - a.slot);
+
+  // The details sit above a day's bar, or above the baseline on a day without one.
+  const show = (index: number) => {
+    setDay(index + 1);
+    const slot = slots.current?.children[index];
+    if (slot) setAnchor(anchorOf(slot.firstElementChild ?? slot));
+  };
   const point = (event: PointerEvent<HTMLInputElement>) => {
     if (event.pointerType !== 'mouse' || event.buttons || !slider.current) return;
     const rect = slider.current.getBoundingClientRect();
-    const index = Math.floor(((event.clientX - rect.left) / rect.width) * days.length);
-    setDay(Math.max(0, Math.min(index, days.length - 1)) + 1);
+    const index = Math.floor(((event.clientX - rect.left) / rect.width) * size);
+    show(Math.max(0, Math.min(index, size - 1)));
   };
+  // A page that scrolls leaves the details behind, so they go.
+  const shown = anchor !== null;
+  useEffect(() => {
+    if (!shown) return;
+    const hide = () => setAnchor(null);
+    window.addEventListener('scroll', hide, { capture: true, passive: true });
+    window.addEventListener('resize', hide);
+    return () => {
+      window.removeEventListener('scroll', hide, { capture: true });
+      window.removeEventListener('resize', hide);
+    };
+  }, [shown]);
 
   return (
     <section className="trend-card" aria-label={`Daily token usage, last ${size} days`}>
       <h2>Token activity</h2>
-      <div className="trend-total" title={exactTotal}>{total} <span>tokens</span></div>
-      <p className="trend-range">{range}</p>
+      <div className="trend-total" title={`${commas(total)} tokens`}>{compact(total)} <span>tokens</span></div>
+      <p className="trend-range">
+        {change !== null
+          ? <><strong>{`${change > 0 ? '+' : ''}${percent(change)}`}</strong>{` vs prior ${size} days`}</>
+          : `${shortDate(dates[0])} – ${shortDate(dates[size - 1])}`}
+      </p>
       <div className="plot-area">
-        <div className="plot-scale" aria-hidden="true"><span>{max}</span><span>{half}</span><span>0</span></div>
+        <div className="plot-scale" aria-hidden="true"><span>{compact(max)}</span><span>{compact(max / 2)}</span><span>0</span></div>
         <div className="plot">
-          <svg className="trend-line" viewBox="0 0 100 100" preserveAspectRatio="none" aria-hidden="true">
-            <defs>
-              <linearGradient id={`fill-${size}`} x2="0" y2="1" gradientUnits="objectBoundingBox">
-                <stop stopColor="currentColor" stopOpacity=".24" />
-                <stop offset="1" stopColor="currentColor" stopOpacity=".025" />
-              </linearGradient>
-            </defs>
-            <polygon points={`${halfSlot},100 ${points} ${100 - halfSlot},100`} fill={`url(#fill-${size})`} />
-            <polyline points={points} fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinejoin="round" vectorEffect="non-scaling-stroke" />
-          </svg>
-          <div className="plot-slots">
-            {days.map(({ label, y }, index) => (
-              <span key={index} className={ready && index === day - 1 ? 'plot-slot selected' : 'plot-slot'} title={label} style={{ '--y': `${y}%` } as CSSProperties}></span>
-            ))}
+          <div className="plot-slots" ref={slots}>
+            {days.map((found, index) => {
+              const stack = segments(found, by);
+              const whole = stack.reduce((sum, part) => sum + part.tokens, 0);
+              return (
+                <span key={index} className={ready && index === day - 1 ? 'plot-slot selected' : 'plot-slot'} title={ready ? undefined : label(index)}>
+                  {stack.length ? (
+                    <i className="plot-bar" style={{ height: `${((100 * (found?.total ?? 0)) / max).toFixed(2)}%` }}>
+                      {stack.map((part, at) => <b key={at} style={{ flexGrow: ((100 * part.tokens) / whole).toFixed(2), background: fill(part.slot) }}></b>)}
+                    </i>
+                  ) : null}
+                </span>
+              );
+            })}
           </div>
           <input
             ref={slider}
@@ -156,14 +209,31 @@ export function TrendCard({ size, total, exactTotal, range, max, half, points, h
             max={size}
             value={day}
             aria-label="Inspect daily token usage"
-            aria-valuetext={ready ? shown.label : undefined}
-            onChange={(event) => setDay(event.currentTarget.valueAsNumber)}
+            aria-valuetext={ready ? label(day - 1) : undefined}
+            onChange={(event) => show(event.currentTarget.valueAsNumber - 1)}
             onPointerMove={point}
+            onPointerLeave={(event) => { if (event.pointerType === 'mouse') setAnchor(null); }}
+            onFocus={(event) => { if (event.currentTarget.matches(':focus-visible')) show(day - 1); }}
+            onBlur={() => setAnchor(null)}
           />
         </div>
       </div>
-      <div className="plot-dates" aria-hidden="true"><span>{dates[0]}</span><span>{dates[1]}</span><span>{dates[2]}</span></div>
-      <p className="plot-detail"><span>{ready ? 'Selected day' : 'Daily total'}</span> <b>{shown.label}</b></p>
+      <div className="plot-dates" aria-hidden="true"><span>{shortDate(dates[0])}</span><span>{shortDate(dates[Math.floor(size / 2)])}</span><span>{shortDate(dates[size - 1])}</span></div>
+      <div className="plot-keys">
+        {ready ? (
+          <span className="switch" role="group" aria-label="Color the bars by">
+            <button type="button" aria-pressed={by === 'providers'} onClick={() => chooseColorBy('providers')}>Providers</button>
+            <button type="button" aria-pressed={by === 'models'} onClick={() => chooseColorBy('models')}>Models</button>
+          </span>
+        ) : null}
+        {keys.length ? (
+          <ul aria-label={by === 'providers' ? 'Providers' : 'Models'}>
+            {keys.map((part) => <li key={part.label}><i style={{ background: fill(part.slot) }}></i>{part.label}</li>)}
+          </ul>
+        ) : null}
+      </div>
+      <p className="plot-detail"><span>{ready ? 'Selected day' : 'Daily total'}</span> <b>{label(day - 1)}</b></p>
+      {anchor ? <DayTip date={dates[day - 1]} day={days[day - 1]} anchor={anchor} /> : null}
     </section>
   );
 }
