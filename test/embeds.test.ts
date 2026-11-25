@@ -1,13 +1,13 @@
 import assert from 'node:assert/strict';
 import { test } from 'node:test';
 import type { Metrics } from '../src/shared/metrics.ts';
-import { BADGE_COLORS, BADGE_METRICS, badgeFor, badgeMetricNamed, renderBadge } from '../src/shared/render/badge.ts';
+import { BADGE_COLORS, BADGE_METRICS, badgeFor, badgeMetricNamed, rankBadgeFor, renderBadge, renderRankBadge } from '../src/shared/render/badge.ts';
 import { renderSmallCard } from '../src/shared/render/small-card.ts';
 import { renderComponent, reviewYear, THEME_NAMES } from '../src/shared/render/svg.ts';
 import { computeTokens } from '../src/shared/tokens.ts';
 import type { MachineUsage } from '../src/shared/types.ts';
 import { githubMetrics } from './fixtures.ts';
-import { api, app, countingDb, fakeCache, MACHINE_A, MACHINE_B, ORIGIN, published, SECRET_NAME, signIn, upload, webLogin, webPost } from './harness.ts';
+import { api, app, countingDb, fakeCache, fakeGitHub, MACHINE_A, MACHINE_B, octo, ORIGIN, published, SECRET_NAME, signIn, upload, webLogin, webPost } from './harness.ts';
 
 const SHARED = 'public, max-age=300';
 
@@ -70,7 +70,7 @@ test('a badge without its figure says so, and is not cached until it has one', a
   const badge = async (metric: string) => {
     const response = await context.call(`/u/octo/badge.svg?metric=${metric}`);
     const svg = await response.text();
-    return [/aria-label="([^"]+)"/.exec(svg)?.[1], response.headers.get('cache-control'), svg.includes(`fill="${BADGE_COLORS.unknown}"`) ? 'gray' : 'blue'];
+    return [/aria-label="([^"]+)"/.exec(svg)?.[1], response.headers.get('cache-control'), svg.includes(`fill="${BADGE_COLORS.unknown}"`) ? 'gray' : 'green'];
   };
   assert.deepEqual(await badge('tokens'), ['AI tokens: n/a', 'no-store', 'gray']);
   assert.deepEqual(await badge('cost'), ['API list price: n/a', 'no-store', 'gray']);
@@ -81,16 +81,16 @@ test('a badge without its figure says so, and is not cached until it has one', a
 
   const days = { '2026-11-08': { 'claude/no-such-price': [1, 2, 3, 4, 5] } };
   await context.call('/v1/usage', api(token, 'PUT', { ...upload(MACHINE_A), days }));
-  assert.deepEqual(await badge('tokens'), ['AI tokens: 10', SHARED, 'blue']);
-  assert.deepEqual(await badge('rank'), ['oh-my-stats rank: #1 of 1', SHARED, 'blue']);
+  assert.deepEqual(await badge('tokens'), ['AI tokens: 10', SHARED, 'green']);
+  assert.deepEqual(await badge('rank'), ['oh-my-stats rank: #1 of 1', SHARED, 'green']);
   assert.deepEqual(await badge('cost'), ['API list price: n/a', 'no-store', 'gray'], 'tokens, but no model with a list price');
 
   await context.call('/v1/usage', api(token, 'PUT', { ...upload(MACHINE_A), days: { '2026-11-07': { 'claude/claude-opus-5-5': [1, 2, 3, 4, 5] } } }));
-  assert.deepEqual(await badge('cost'), ['API list price: ≥$10', SHARED, 'blue'], 'a minimum, as the tokens card words it');
+  assert.deepEqual(await badge('cost'), ['API list price: ≥$10', SHARED, 'green'], 'a minimum, as the tokens card words it');
 
   await context.call('/v1/github', api(token, 'PUT', githubMetrics({ pulse: { ...githubMetrics().pulse, streak: 1 } })));
-  assert.deepEqual(await badge('streak'), ['streak: 1 day', SHARED, 'blue']);
-  assert.deepEqual(await badge('contributions'), ['contributions: 4,671', SHARED, 'blue']);
+  assert.deepEqual(await badge('streak'), ['streak: 1 day', SHARED, 'green']);
+  assert.deepEqual(await badge('contributions'), ['contributions: 4,671', SHARED, 'green']);
 });
 
 test('a metric that does not exist is refused before the profile is read, and a private profile looks like a missing one', async () => {
@@ -145,11 +145,91 @@ test('badge text is readable on its own boxes, on any page', () => {
     return 0.2126 * r + 0.7152 * g + 0.0722 * b;
   };
   const text = luminance(BADGE_COLORS.text);
-  for (const box of ['label', 'value', 'unknown'] as const) {
+  for (const box of ['label', 'value', 'deep', 'unknown'] as const) {
     const ratio = (text + 0.05) / (luminance(BADGE_COLORS[box]) + 0.05);
     assert.ok(ratio >= 4.5, `${box} is ${ratio.toFixed(2)}:1`);
   }
   assert.ok(!renderBadge(badgeFor('tokens', { tokens: null, github: null, position: null })).includes('prefers-color-scheme'), 'the colors do not follow the page');
+  // A figure's box is one of GitHub's greens, like the other images, and not its blue.
+  assert.deepEqual([BADGE_COLORS.value, BADGE_COLORS.deep], ['#1a7f37', '#116329']);
+});
+
+test('the token rank badge shows who a profile is, then its place, then its lifetime tokens', async () => {
+  const png = Uint8Array.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]);
+  const everyone = { 'gh-token': octo, 'web-token': octo, rival: { id: 2, login: 'rival' } };
+  const github = fakeGitHub(everyone);
+  const avatars: string[] = [];
+  const fetch = (async (input: string | URL | Request, init?: RequestInit) => {
+    const url = String(input);
+    if (!url.startsWith('https://avatars.githubusercontent.com/')) return github.impl(input, init);
+    avatars.push(url);
+    return new Response(png, { headers: { 'content-type': 'image/png' } });
+  }) as typeof globalThis.fetch;
+  const cache = fakeCache();
+  const context = app({ fetch, cache }, everyone);
+  const token = await signIn(context);
+  await context.call('/v1/me', api(token, 'PATCH', { public: true }));
+  const badge = async (login = 'octo') => {
+    const response = await context.call(`/u/${login}/rank-badge.svg`);
+    return { response, svg: await response.text() };
+  };
+  const texts = (svg: string) => [...svg.matchAll(/<text [^>]*y="14">([^<]+)<\/text>/g)].map(([, text]) => text);
+  const fills = (svg: string) => [...svg.matchAll(/<path [^>]*fill="(#[0-9a-f]{6})"\/>/g)].map(([, fill]) => fill);
+
+  // Published, with nothing uploaded: it has no place yet, says so, and is not kept.
+  const empty = await badge();
+  assert.deepEqual([empty.response.status, empty.response.headers.get('cache-control')], [200, 'no-store']);
+  assert.deepEqual(texts(empty.svg), ['@octo', 'unranked', 'n/a']);
+  assert.deepEqual(fills(empty.svg), [BADGE_COLORS.label, BADGE_COLORS.unknown, BADGE_COLORS.unknown]);
+  assert.match(empty.svg, /<path d="M\d+ 0h1v20h-1z" fill="#010101" fill-opacity="\.25"\/>/, 'two gray boxes side by side are parted by a line');
+  assert.match(empty.svg, /aria-label="@octo is unranked, with no AI tokens yet\."/);
+
+  // With usage, behind a profile that has more.
+  await context.call('/v1/usage', api(token, 'PUT', upload(MACHINE_A)));
+  const signedIn = await context.call('/v1/auth/token', api(null, 'POST', { githubToken: 'rival', machine: { id: MACHINE_B, name: 'other', platform: 'linux', agentVersion: '0.1.0' } }));
+  const rival = ((await signedIn.json()) as { token: string }).token;
+  await context.call('/v1/usage', api(rival, 'PUT', { ...upload(MACHINE_B, '2026-11-08', [500, 0, 0, 0, 1]) }));
+  await context.call('/v1/me', api(rival, 'PATCH', { public: true }));
+
+  const { response, svg } = await badge();
+  assert.deepEqual([response.status, response.headers.get('cache-control'), response.headers.get('content-type')], [200, SHARED, 'image/svg+xml; charset=utf-8']);
+  assert.deepEqual(texts(svg), ['@octo', '#2 of 2', '10 tokens'], 'the profile, its rank, its lifetime tokens: in that order, left to right');
+  assert.deepEqual(fills(svg), [BADGE_COLORS.label, BADGE_COLORS.value, BADGE_COLORS.deep]);
+  assert.ok(!svg.includes('fill-opacity=".25"'), 'two greens need no line');
+  assert.match(svg, /aria-label="@octo is #2 of 2 published profiles by lifetime AI tokens, with 10 tokens in all\."/);
+  // The avatar sits before the name, small, and is asked for at the size it is drawn at.
+  assert.ok(svg.includes(`<image href="data:image/png;base64,${Buffer.from(png).toString('base64')}" x="6" y="3" width="14" height="14"`));
+  assert.ok(svg.indexOf('<image ') < svg.indexOf('>@octo<'));
+  assert.ok(avatars.every((url) => url === 'https://avatars.githubusercontent.com/u/1?s=56'), String(avatars));
+  assert.deepEqual(texts((await badge('rival')).svg), ['@rival', '#1 of 2', '500 tokens']);
+  assert.ok(!(await badge('rival')).svg.includes('<image'), 'a profile without an avatar is drawn without one');
+
+  // A private profile answers like a missing one, and its copy is gone.
+  await context.call('/v1/me', api(token, 'PATCH', { public: false }));
+  assert.deepEqual([(await badge()).response.status, (await badge('nobody')).response.status], [404, 404]);
+  assert.ok(![...cache.store.keys()].some((key) => key.includes('/u/octo/')), 'nothing of the private profile is kept');
+});
+
+test('the token rank badge holds each part to its measured width, and escapes what it is given', () => {
+  const tokens = metricsOf({ '2026-11-09': { 'claude/claude-opus-5-5': [1_500_000, 0, 0, 0, 1] } }, '2026-11-09T05:00:00Z').tokens;
+  const plain = renderRankBadge(rankBadgeFor({ login: 'octo', avatar: null }, tokens, { rank: 1204, participants: 31000 }));
+  assert.match(plain, /^<svg xmlns="http:\/\/www\.w3\.org\/2000\/svg" viewBox="0 0 (\d+) 20" width="\1" height="20" role="img"/);
+  assert.deepEqual([...plain.matchAll(/y="14">([^<]+)</g)].map(([, text]) => text), ['@octo', '#1,204 of 31,000', '1.5M tokens']);
+  // Each part is as wide as its text measured in Verdana plus six on each side, and the parts meet edge to edge.
+  const [who, rank, count] = [...plain.matchAll(/textLength="(\d+)" y="14"/g)].map(([, length]) => Number(length));
+  const edges = [...plain.matchAll(/<path d="M(\d+) 0/g)].map(([, x]) => Number(x));
+  assert.deepEqual(edges, [who + 12, who + 12, who + 12 + rank + 12]);
+  assert.ok(plain.includes(`viewBox="0 0 ${who + rank + count + 36} 20"`));
+
+  // An avatar takes fourteen pixels and a gap of four before the name.
+  const faced = renderRankBadge(rankBadgeFor({ login: 'octo', avatar: 'data:image/png;base64,AAAA' }, tokens, { rank: 1, participants: 1 }));
+  assert.ok(faced.includes('<clipPath id="oms-face"><circle cx="13" cy="10" r="7"/></clipPath><image href="data:image/png;base64,AAAA" x="6" y="3" width="14" height="14" clip-path="url(#oms-face)"'));
+  assert.equal(Number(/<path d="M(\d+) 0/.exec(faced)?.[1]), who + 12 + 18);
+
+  const odd = renderRankBadge(rankBadgeFor({ login: '<b>"&', avatar: 'data:image/png;base64,"><script>' }, null, null));
+  assert.ok(!odd.includes('<script>') && !odd.includes('<b>'), 'nothing it is given becomes markup');
+  assert.ok(odd.includes('aria-label="@&lt;b&gt;&quot;&amp; is unranked, with no AI tokens yet."'));
+  assert.ok(!odd.includes('prefers-color-scheme'), 'its colors do not follow the page, like any badge');
 });
 
 test('the rank badge reads only the ranking, and the other badges never rank anyone', async () => {
@@ -488,6 +568,7 @@ test('a year in review without dated usage says so, and is neither cached nor of
   let page = await (await context.call('/u/octo')).text();
   assert.ok(page.includes('/u/octo/components/tokens.svg') && !page.includes('/components/year.svg'));
   assert.ok(page.includes(`${ORIGIN}/u/octo/card.svg`) && page.includes(`${ORIGIN}/u/octo/badge.svg`), 'the card and the badge are offered beside the parts');
+  assert.ok(page.includes(`![Token rank](${ORIGIN}/u/octo/rank-badge.svg)`), 'and the rank badge');
 
   await context.call('/v1/usage', api(token, 'PUT', upload(MACHINE_A)));
   cache.store.clear();
@@ -504,6 +585,7 @@ test('each image has one cached copy per choice it offers, however its address i
   const groups = [
     ['/u/octo/badge.svg', '/u/OCTO/badge.svg?metric=tokens', '/u/octo/badge.svg?metric=TOKENS&v=2', '/u/octo/badge.svg?metric=', '/u/octo/badge.svg?theme=tokyo-night&label=hi&color=red'],
     ['/u/octo/badge.svg?metric=rank', '/u/octo/badge.svg?x=1&metric=Rank', '/u/octo/badge.svg?metric=rank&metric=cost'],
+    ['/u/octo/rank-badge.svg', '/u/OCTO/rank-badge.svg?theme=tokyo-night', '/u/octo/rank-badge.svg?metric=cost&graph=1&year=2025'],
     ['/u/octo/card.svg', '/u/octo/card.svg?graph=0', '/u/octo/card.svg?graph=true', '/u/Octo/card.svg?theme=github&junk=1', '/u/octo/card.svg?year=2025&metric=rank'],
     ['/u/octo/card.svg?graph=1'],
     ['/u/octo/card.svg?graph=1&theme=tokyo-night', '/u/octo/card.svg?theme=TokyoNight&x=y&graph=1'],
@@ -523,7 +605,7 @@ test('each image has one cached copy per choice it offers, however its address i
   }
   assert.deepEqual([...cache.store.keys()].sort(), [
     'badge.svg', 'badge.svg?metric=rank', 'card.svg', 'card.svg?graph=1', 'card.svg?graph=1&theme=tokyo-night',
-    'components/year.svg', 'components/year.svg?theme=tokyo-night',
+    'components/year.svg', 'components/year.svg?theme=tokyo-night', 'rank-badge.svg',
   ].map((image) => `${ORIGIN}/u/octo/${image}`));
 });
 
@@ -532,6 +614,7 @@ test('making a profile private removes every copy of the badge, the card and the
   const { context, token } = await publishedWithGitHub({ cache });
   const paths = [
     ...BADGE_METRICS.map((metric) => `/u/octo/badge.svg?metric=${metric}`),
+    '/u/octo/rank-badge.svg',
     ...THEME_NAMES.flatMap((theme) => [`/u/octo/card.svg?theme=${theme}`, `/u/octo/card.svg?theme=${theme}&graph=1`]),
     ...THEME_NAMES.map((theme) => `/u/octo/components/year.svg?theme=${theme}`),
   ];
@@ -560,7 +643,7 @@ test('going private takes few enough cache calls for the smallest plan, and stil
   };
   const { context, token } = await publishedWithGitHub({ cache: counted });
   const everything = async () => {
-    const paths = ['/u/octo', '/u/octo/dashboard.svg', '/u/octo/og.png', '/u/octo/badge.svg', '/u/octo/badge.svg?metric=rank', '/u/octo/card.svg?graph=1&theme=tokyo-night',
+    const paths = ['/u/octo', '/u/octo/dashboard.svg', '/u/octo/og.png', '/u/octo/badge.svg', '/u/octo/badge.svg?metric=rank', '/u/octo/rank-badge.svg', '/u/octo/card.svg?graph=1&theme=tokyo-night',
       '/u/octo/ranking.svg', '/u/octo/ranking.svg?theme=tokyo-night', '/u/octo/components/tokens.svg', '/u/octo/components/year.svg', '/sitemap.xml', '/'];
     for (const path of paths) assert.equal((await context.call(path)).status, 200, path);
     assert.equal((await context.call('/u/octo/cards/tokens.txt')).headers.get('cache-control'), 'no-store', 'a text card is not kept, so it needs no removing');
