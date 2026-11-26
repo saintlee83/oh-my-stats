@@ -1,5 +1,4 @@
 import assert from 'node:assert/strict';
-import { readFileSync } from 'node:fs';
 import { test } from 'node:test';
 import { createElement } from 'react';
 import { renderToStaticMarkup } from 'react-dom/server';
@@ -76,9 +75,14 @@ test('the private overview charts dated tokens and provider shares for the same 
   assert.match(windows[1][2], /title="2026-11-09 · 50 tokens"><i class="plot-bar" style="height:25\.00%"><b style="flex-grow:100\.00;background:var\(--s2\)"><\/b><\/i>/);
   assert.match(windows[1][2], /<ul aria-label="Providers"><li><i style="background:var\(--s2\)"><\/i>Claude Code<\/li><li><i style="background:var\(--s3\)"><\/i>Codex<\/li><\/ul>/);
   assert.match(windows[1][2], /title="2026-11-08 · 0 tokens"><\/span>/, 'a day without usage has no bar');
-  assert.doesNotMatch(dashboard, /aria-pressed/, 'the switch to models is offered once the scripts that work it run');
+  assert.doesNotMatch(dashboard, / aria-pressed=/, 'the switch to models is offered once the scripts that work it run');
   assert.ok(dashboard.includes('title="1,750"'), 'undated usage still counts in lifetime');
   assert.doesNotMatch(profile, /dashboard\.js|me\/report\.svg|usage-window/);
+  // The public profile draws the same daily chart, once, for the longest window.
+  const chart = panel(profile, '<section class="trend-card" aria-label="Daily token usage, last 60 days">');
+  assert.equal(count(chart, /class="plot-slot"/g), 60);
+  assert.match(chart, /title="2026-11-09 · 50 tokens"/);
+  assert.equal(count(profile, /class="trend-card"/g), 1);
   await context.call('/me/visibility', webPost(cookie, 'public=0'));
   assert.equal((await context.call('/me/report.svg')).headers.get('location'), '/login');
   const report = await context.call('/me/report.svg', { headers: { cookie } });
@@ -285,12 +289,11 @@ test('a screen reader hears everything a day’s details show, as one sentence',
 });
 
 test('the gaps inside a day’s bar shrink with the bar, so a small day keeps its colors', () => {
-  const css = readFileSync(new URL('../public/dashboard.css', import.meta.url), 'utf8');
-  const bar = css.match(/^\.plot-bar \{([^}]*)\}/m)?.[1] ?? '';
+  const bar = STYLE.match(/\.plot-bar\{([^}]*)\}/)?.[1] ?? '';
   // A fixed gap between two parts is all of a bar two pixels tall, and would leave it empty.
   assert.doesNotMatch(bar, /\bgap:/, 'no fixed gap');
-  assert.match(bar, /container-type: size/, 'the bar is what its parts measure against');
-  assert.match(css, /^\.plot-bar b \+ b \{ margin-bottom: 0; margin-bottom: min\(2px, 4cqh\); \}/m, 'a gap is at most a twenty-fifth of the bar, and none where that can’t be measured');
+  assert.match(bar, /container-type:size/, 'the bar is what its parts measure against');
+  assert.ok(STYLE.includes('.plot-bar b + b{margin-bottom:0;margin-bottom:min(2px,4cqh);}'), 'a gap is at most a twenty-fifth of the bar, and none where that can’t be measured');
 });
 
 test('a day’s bar by model keeps each color’s own tokens, and leaves pale what no model is named for', () => {
@@ -477,10 +480,9 @@ test('a period whose logs name more tokens than it counted says why', () => {
 });
 
 test('a long name wraps in the chart’s key, and a day scrolled to stays clear of the weekday labels', () => {
-  const css = readFileSync(new URL('../public/dashboard.css', import.meta.url), 'utf8');
   // A model’s name can be 120 characters with nowhere to break, wider than a phone.
-  assert.match(css, /^\.plot-keys li \{ min-width: 0; overflow-wrap: anywhere; \}/m);
-  assert.match(css, /^\.plot-keys ul \{[^}]*min-width: 0;/m);
+  assert.ok(STYLE.includes('.plot-keys li{min-width:0;overflow-wrap:anywhere;}'));
+  assert.match(STYLE, /\.plot-keys ul\{[^}]*min-width:0;/);
   // The weekday labels stay put over the days, 26 pixels wide. A day brought into view stops short of them.
   assert.ok(STYLE.includes('.weeks-scroll{overflow-x:auto;padding:6px;margin:-6px;scroll-padding-left:38px;}'));
   assert.match(STYLE, /\.weeks\{[^}]*grid-template-columns:26px;/);
