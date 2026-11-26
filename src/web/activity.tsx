@@ -1,4 +1,4 @@
-import type { CSSProperties } from 'react';
+import type { CSSProperties, ReactNode } from 'react';
 import { commas, compact, percent, providerName } from '../shared/format.ts';
 import { providerMix } from '../shared/insights.ts';
 import type { TokenMetrics } from '../shared/metrics.ts';
@@ -244,9 +244,9 @@ function TokenMixPanel({ tokens }: { tokens: TokenMetrics }) {
 /**
  * The calendar, the periods with their providers and models, the token mix and each provider's
  * share from month to month. `days` is what the calendar is drawn from, when the page has
- * worked it out already.
+ * worked it out already. `children` go under the calendar.
  */
-export function ActivityPanels({ tokens, days }: { tokens: TokenMetrics | null; days?: DayData }) {
+export function ActivityPanels({ tokens, days, children }: { tokens: TokenMetrics | null; days?: DayData; children?: ReactNode }) {
   if (!tokens) return null;
   const series = seriesOf(tokens);
   const periods = usagePeriods(tokens).map((period) => ({ key: period.key, label: period.label, body: <PeriodPane period={period} undated={tokens.undated} series={series} /> }));
@@ -255,6 +255,7 @@ export function ActivityPanels({ tokens, days }: { tokens: TokenMetrics | null; 
   return (
     <>
       <UsageCalendar data={days ?? dayData(tokens)} />
+      {children}
       <TabbedPanel name="period" title="Usage by period" panes={periods} id="periods" />
       <div className="activity-panels">
         <TokenMixPanel tokens={tokens} />

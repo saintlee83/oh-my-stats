@@ -365,6 +365,47 @@ const SOURCE = `
     .figure strong { font-size: 19px; }
   }
 
+  /* The daily chart: a bar for each day, split by provider or by model. The dashboard places it in its own grid. */
+  .trend-card { min-width: 0; margin: 16px 0; padding: 22px 24px; border: 1px solid var(--line); border-radius: 12px; background: var(--surface); box-shadow: var(--shadow); }
+  .trend-total { margin-top: 14px; color: var(--ink); font-size: clamp(30px, 3vw, 40px); font-weight: 600; line-height: 1.05; letter-spacing: -.045em; }
+  .trend-total span { font-size: 14px; font-weight: 450; color: var(--muted); letter-spacing: 0; }
+  .trend-range { margin: 4px 0 20px; font-size: 12px; color: var(--muted); }
+  .trend-range strong { color: var(--ink2); font-weight: 650; }
+  .plot-area { display: grid; grid-template-columns: 38px minmax(0, 1fr); }
+  .plot-scale, .plot-dates, .plot-detail { font: 11px/1.4 ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; color: var(--muted); }
+  .plot-scale { display: flex; flex-direction: column; justify-content: space-between; }
+  .plot { position: relative; height: 168px; border-top: 1px solid var(--line-soft); border-bottom: 1px solid var(--line); background: linear-gradient(to bottom, transparent calc(50% - .5px), var(--line-soft) calc(50% - .5px) calc(50% + .5px), transparent calc(50% + .5px)); }
+  .plot-slots, .plot input { position: absolute; inset: 0; width: 100%; height: 100%; }
+  .plot-slots { display: flex; }
+  /* A day's room. Its bar is thinner than the room, and never wider than 24px. */
+  .plot-slot { flex: 1 1 0; min-width: 0; display: flex; align-items: flex-end; justify-content: center; padding: 0 1px; border-radius: 3px 3px 0 0; }
+  .plot-slot.selected { background: var(--line-soft); }
+  /* One day, split from the baseline up. The gaps are the surface showing through, which keeps neighbours apart. */
+  .plot-bar { display: flex; flex-direction: column-reverse; container-type: size; width: 100%; max-width: 24px; min-height: 2px; border-radius: 3px 3px 0 0; overflow: hidden; }
+  .plot-bar b { flex: 1 1 0; min-height: 0; }
+  /* The surface shows between two parts, but for at most a twenty-fifth of the bar's height each
+     time, so a day too small for gaps keeps its colors. Without container units there is no gap. */
+  .plot-bar b + b { margin-bottom: 0; margin-bottom: min(2px, 4cqh); }
+  .plot input { margin: 0; opacity: 0; cursor: crosshair; }
+  .plot:has(input:focus-visible) { outline: 2px solid var(--focus); outline-offset: 3px; }
+  .plot-dates { display: flex; justify-content: space-between; margin: 7px 0 0 38px; }
+  .plot-keys { display: flex; flex-wrap: wrap; align-items: center; gap: 8px 18px; min-height: 27px; margin: 14px 0 0 38px; }
+  .plot-keys ul { display: flex; flex-wrap: wrap; gap: 4px 16px; min-width: 0; margin: 0; padding: 0; list-style: none; font-size: 12px; color: var(--ink2); }
+  .plot-keys li { min-width: 0; overflow-wrap: anywhere; }
+  .plot-keys li i { display: inline-block; width: 10px; height: 10px; margin-right: 6px; border-radius: 3px; }
+  .switch { display: inline-flex; padding: 2px; border: 1px solid var(--line-soft); border-radius: 7px; background: var(--raised); }
+  .switch button { min-height: 0; padding: 3px 9px; border: 0; border-radius: 4px; background: none; color: var(--muted); font-size: 12px; font-weight: 550; line-height: 19px; }
+  .switch button:hover { color: var(--ink); background: none; }
+  .switch button[aria-pressed="true"] { background: var(--ink); color: var(--surface); }
+  .plot-detail { display: flex; flex-wrap: wrap; justify-content: space-between; gap: 4px 12px; margin: 14px 0 0; padding-top: 10px; border-top: 1px solid var(--line-soft); }
+  .plot-detail span { font: 12px/1.4 system-ui, sans-serif; }
+  .plot-detail b { color: var(--ink2); font-weight: 500; }
+  @media (max-width: 760px) { .plot-keys { margin-left: 0; } }
+  @media (max-width: 600px) {
+    .trend-card { padding: 17px 16px; }
+    .plot { height: 132px; }
+  }
+
   /* Groups */
   .group-crumb { margin: 0 0 4px; font-size: 13px; font-weight: 600; }
   .group-crumb a { color: var(--muted); text-decoration: none; }

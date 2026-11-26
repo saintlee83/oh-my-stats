@@ -2,6 +2,7 @@ import type { TokenMetrics } from '../../shared/metrics.ts';
 import { buildCards } from '../../shared/render/cards.ts';
 import { PREVIEW_HEIGHT, PREVIEW_WIDTH } from '../../shared/render/preview.ts';
 import { availableComponents, renderDashboard } from '../../shared/render/svg.ts';
+import { dayData } from '../../shared/usage.ts';
 import { buildMetrics, hasData, PREVIEW_IMAGE, profilePageKey, PUBLIC_CACHE, publicProfile, withAvatar } from '../../server/app.ts';
 import type { UserRow } from '../../server/db.ts';
 import { profileCount, SITE, type PageOptions, type Part } from '../../server/pages.ts';
@@ -11,6 +12,7 @@ import { Avatar, GitHubMark } from '../common.tsx';
 import { Layout } from '../layout.tsx';
 import { PageLink } from '../link.tsx';
 import type { PageModule } from '../page.ts';
+import { ActivityChart } from './workspace.tsx';
 
 /** A public profile: its header, its dashboard, its activity, and how to embed it. */
 
@@ -58,6 +60,8 @@ function ProfileView({ user, svg, tokens, cards, parts, position, origin, viewer
   const url = `${origin}/u/${encodeURIComponent(user.login)}`;
   const login = encodeURIComponent(user.login);
   const mine = viewer?.id === user.id;
+  // Worked out once: the calendar and the daily chart are drawn from the same days.
+  const days = tokens ? dayData(tokens) : undefined;
   const since = new Date(user.created_at);
   const joined = Number.isNaN(since.getTime()) ? '' : `Joined ${since.toLocaleDateString('en-US', { month: 'short', year: 'numeric', timeZone: 'UTC' })}`;
   const about = [user.name ?? '', joined].filter(Boolean).join(' · ');
@@ -88,7 +92,10 @@ function ProfileView({ user, svg, tokens, cards, parts, position, origin, viewer
           <a className="button" href={share} rel="noopener" title="Share on X">Share</a>
         </div>
       </div>
-      <ActivityPanels tokens={tokens} />
+      <ActivityPanels tokens={tokens} days={days}>
+        {/* A profile with no dated usage has no days to chart. */}
+        {days?.days.length ? <ActivityChart data={days} size={60} /> : null}
+      </ActivityPanels>
       <ProviderActivity tokens={tokens} />
       <div className="dash" dangerouslySetInnerHTML={{ __html: svg }} />
       <div className="panel" id="embed">
